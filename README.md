@@ -190,7 +190,7 @@ Add servers to `config.json`:
 ```json
 "mcpServers": {
   "git": { "command": "uvx", "args": ["mcp-server-git", "--repository", "C:/repo"] },
-  "fs":  { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/Users/Eli"] },
+  "fs":  { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/Users/username"] },
   "brave-search": {
     "command": "npx",
     "args": ["-y", "@modelcontextprotocol/server-brave-search"]
@@ -199,7 +199,7 @@ Add servers to `config.json`:
 ```
 
 Their tools are merged with the native ones and exposed to the model together,
-with a tool-calling loop of up to 8 steps per assistant turn.
+with an execution loop of up to 25 steps per assistant turn.
 
 ### Environment variables for MCP servers
 
