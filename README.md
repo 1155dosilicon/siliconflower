@@ -172,6 +172,7 @@ The agent can read and modify the local file system without MCP:
 | `file_info`      | Size, mtime, ctime, type.                                               |
 | `search_files`   | Glob search (`**/*.ts`, `*.{ts,tsx}`). Supports `includeHidden=true`.  |
 | `delete_path`    | Destructive. Requires `confirm=true` for ALL file/directory deletions. |
+| `execute_command`| Run shell commands (PowerShell on Windows / Bash on Linux).             |
 
 > All tools feature a 60-second execution timeout to prevent hung processes and are protected against sensitive path traversal (`C:\Windows\System32`, `.ssh`, `.aws`, etc.).
 

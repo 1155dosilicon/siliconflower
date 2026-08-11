@@ -15,8 +15,13 @@ function globToRegex(pattern: string): RegExp {
   while (i < expanded.length) {
     const ch = expanded[i];
     if (ch === "*" && i + 1 < expanded.length && expanded[i + 1] === "*") {
-      re += ".*";
-      i += 2;
+      if (i + 2 < expanded.length && expanded[i + 2] === "/") {
+        re += "(?:.*/)?";
+        i += 3;
+      } else {
+        re += ".*";
+        i += 2;
+      }
     } else if (ch === "*") {
       re += "[^/]*";
       i++;

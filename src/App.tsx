@@ -90,6 +90,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
   }, []);
 
   const cycleReasoning = useCallback(() => {
+    setInput((prev) => prev.replace(/[\x00-\x1F\x7F]/g, "").replace(/e$/i, ""));
     setReasoning((r) => {
       const idx = REASONING_LEVELS.indexOf(r);
       const next = REASONING_LEVELS[(idx + 1) % REASONING_LEVELS.length];
@@ -100,6 +101,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
   }, []);
 
   const cycleMode = useCallback(() => {
+    setInput((prev) => prev.replace(/[\x00-\x1F\x7F]/g, "").replace(/o$/i, ""));
     setMode((m) => {
       const n = nextMode(m);
       setStatus(`modo: ${n}`);
@@ -150,11 +152,18 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
     []
   );
 
+  const handleInputChange = useCallback((val: string) => {
+    // Strip control characters (including \x05, \x0f)
+    const clean = val.replace(/[\x00-\x1F\x7F]/g, "");
+    setInput(clean);
+  }, []);
+
   const send = useCallback(
     async (text: string) => {
-      if (!text.trim() || streaming) return;
+      const cleanText = text.replace(/[\x00-\x1F\x7F]/g, "").trim();
+      if (!cleanText || streaming) return;
       setError(null);
-      setMessages((m) => [...m, { role: "user", content: text.trim() }]);
+      setMessages((m) => [...m, { role: "user", content: cleanText }]);
       setInput("");
       setStreaming(true);
       setLiveText("");
@@ -163,7 +172,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
       const recentMessages = messages.slice(-30);
       const history: ChatMessage[] = [
         ...recentMessages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
-        { role: "user" as const, content: text.trim() },
+        { role: "user" as const, content: cleanText },
       ];
 
       const systemPrompt = buildSystemPrompt(modeRef.current, config.system, skillsRef.current);
@@ -173,6 +182,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
       let accText = "";
       let accThinking = "";
       let hadError = false;
+      let assistantMsgAdded = false;
 
       try {
         const gen = streamChat({
@@ -203,12 +213,17 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
               hadError = true;
               setError(ev.message);
               await log("error", `Stream error: ${ev.message}`);
+              if (!assistantMsgAdded) {
+                assistantMsgAdded = true;
+                setMessages((m) => [...m, { role: "assistant", content: `[Erro: ${ev.message}]` }]);
+              }
               break;
             case "done":
               {
                 const final = ev.content?.trim() || accText.trim();
                 const finalThinking = ev.reasoning?.trim() || accThinking.trim();
                 if (final) {
+                  assistantMsgAdded = true;
                   setMessages((m) => [...m, { role: "assistant", content: final, reasoning: finalThinking || undefined }]);
                 }
               }
@@ -222,8 +237,16 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
         setError(errMsg);
         await log("error", `Stream failed: ${errMsg}`);
         setStatus("erro");
-        if (accText || accThinking) {
-          setMessages((m) => [...m, { role: "assistant", content: accText || "[stream interrompido]", reasoning: accThinking || undefined }]);
+        if (!assistantMsgAdded) {
+          assistantMsgAdded = true;
+          setMessages((m) => [
+            ...m,
+            {
+              role: "assistant",
+              content: accText || `[Erro: ${errMsg}]`,
+              reasoning: accThinking || undefined,
+            },
+          ]);
         }
       } finally {
         setStreaming(false);
@@ -281,7 +304,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
         {!streaming ? (
           <TextInput
             value={input}
-            onChange={setInput}
+            onChange={handleInputChange}
             onSubmit={() => { if (input.trim()) send(input); }}
             placeholder="digite para a LLM..."
           />

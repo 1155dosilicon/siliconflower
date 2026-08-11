@@ -13,7 +13,7 @@ describe("glob-util", () => {
   });
 
   test("matches files with ** pattern at root level", async () => {
-    const matches = await search(srcDir, "glob-util.ts");
+    const matches = await search(srcDir, "**/*.ts");
     expect(matches.length).toBeGreaterThan(0);
     expect(matches.some((m) => m.endsWith("glob-util.ts"))).toBe(true);
   });

@@ -21,7 +21,7 @@ function validateUrl(url: string): boolean {
 
 export async function runSetup(existing: AppConfig | null): Promise<AppConfig> {
   console.clear();
-  console.log("\n\x1b[35m SILICONFLOWER \x1b[0m - setup wizard\n");
+  console.log("\n\x1b[35m✦ Setup Wizard\x1b[0m\n");
 
   const provider = (await select<Provider>({
     message: "API variant (openai / anthropic):",
@@ -71,12 +71,16 @@ export async function runSetup(existing: AppConfig | null): Promise<AppConfig> {
     message: "Define an optional custom system prompt?",
     default: Boolean(existing?.system),
   });
-  let system: string | undefined = existing?.system;
+  let system: string | undefined = undefined;
   if (useSystem) {
     try {
       if (existing?.system) {
         const reuse = await confirm({ message: "Reuse the existing system prompt?", default: true });
-        if (!reuse) system = await editor({ message: "System prompt:", default: existing.system });
+        if (reuse) {
+          system = existing.system;
+        } else {
+          system = await editor({ message: "System prompt:", default: existing.system });
+        }
       } else {
         system = await editor({ message: "System prompt:" });
       }

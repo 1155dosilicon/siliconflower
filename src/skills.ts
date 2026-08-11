@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { readdir, readFile, mkdir, writeFile, stat } from "node:fs/promises";
 
 export interface Skill {
@@ -140,8 +140,8 @@ function extractTitle(content: string): string | null {
 }
 
 export async function readSkillContent(name: string): Promise<string> {
-  const safe = name.replace(/\.md$/i, "") + ".md";
-  const path = join(USER_SKILLS_DIR, safe);
+  const baseName = basename(name).replace(/\.md$/i, "") + ".md";
+  const path = join(USER_SKILLS_DIR, baseName);
   return readFile(path, "utf8");
 }
 

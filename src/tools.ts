@@ -1,8 +1,12 @@
 import { readFile, writeFile, readdir, mkdir, stat, rename, rm, access } from "node:fs/promises";
 import { resolve, isAbsolute, dirname } from "node:path";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import { search } from "./glob-util.js";
 import type { McpTool } from "./types.js";
 import { log } from "./logger.js";
+
+const execAsync = promisify(exec);
 
 export interface BuiltinTool {
   name: string;
@@ -103,14 +107,18 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       if (isPathBlocked(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
       try {
         const original = await readFile(path, "utf8");
+        const oldTextStr = String(a.oldText);
+        if (!original.includes(oldTextStr)) {
+          return { result: `oldText não encontrado em ${path}`, isError: true };
+        }
+        const newTextStr = String(a.newText);
         const all = Boolean(a.replaceAll);
         let updated: string;
         if (all) {
-          updated = original.split(String(a.oldText)).join(String(a.newText));
+          updated = original.split(oldTextStr).join(newTextStr);
         } else {
-          const idx = original.indexOf(String(a.oldText));
-          if (idx === -1) return { result: `oldText não encontrado em ${path}`, isError: true };
-          updated = original.slice(0, idx) + String(a.newText) + original.slice(idx + String(a.oldText).length);
+          const idx = original.indexOf(oldTextStr);
+          updated = original.slice(0, idx) + newTextStr + original.slice(idx + oldTextStr.length);
         }
         if (updated === original) return { result: `Nenhuma alteração em ${path}`, isError: false };
         await writeFile(path, updated, "utf8");
@@ -271,6 +279,49 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
         return { result: `Excluído: ${path}`, isError: false };
       } catch (e) {
         return { result: `Erro ao excluir ${path}: ${String(e)}`, isError: true };
+      }
+    },
+  },
+  {
+    name: "execute_command",
+    description:
+      "Executa um comando de sistema no terminal (PowerShell no Windows / Bash no Linux/macOS). Retorna a saída padrão (stdout) e erros (stderr). Use para consultar estado do sistema (espaço em disco, processos, etc.) ou rodar ferramentas CLI.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Comando PowerShell/Bash a ser executado" },
+        cwd: { type: "string", description: "Diretório de execução (padrão: diretório atual)" },
+        timeout: { type: "number", description: "Tempo limite em ms (padrão: 30000ms)" },
+      },
+      required: ["command"],
+    },
+    run: async (a) => {
+      const cmd = String(a.command ?? "").trim();
+      if (!cmd) return { result: "Nenhum comando fornecido.", isError: true };
+      const workDir = a.cwd ? toAbs(String(a.cwd)) : process.cwd();
+      const timeout = typeof a.timeout === "number" && a.timeout > 0 ? Math.min(a.timeout, 120000) : 30000;
+      const isWin = process.platform === "win32";
+      const execOptions = {
+        cwd: workDir,
+        timeout,
+        maxBuffer: 10 * 1024 * 1024,
+        shell: isWin ? "powershell.exe" : "/bin/bash",
+      };
+      try {
+        await log("info", `execute_command: ${cmd} (cwd=${workDir})`);
+        const { stdout, stderr } = await execAsync(cmd, execOptions);
+        let output = "";
+        if (stdout.trim()) output += stdout.trim();
+        if (stderr.trim()) output += (output ? "\n--- STDERR ---\n" : "") + stderr.trim();
+        if (!output) output = "(comando executado com sucesso sem saída de texto)";
+        return { result: truncate(output), isError: false };
+      } catch (e: any) {
+        const stdout = e.stdout ? String(e.stdout).trim() : "";
+        const stderr = e.stderr ? String(e.stderr).trim() : "";
+        let errMsg = `Erro ao executar comando (${e.code ?? e.signal ?? "erro"}): ${e.message || String(e)}`;
+        if (stdout) errMsg += `\n--- STDOUT ---\n${stdout}`;
+        if (stderr) errMsg += `\n--- STDERR ---\n${stderr}`;
+        return { result: truncate(errMsg), isError: true };
       }
     },
   },

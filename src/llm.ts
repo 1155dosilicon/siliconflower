@@ -77,11 +77,35 @@ function buildOpenAITools(tools: McpTool[]): OpenAI.Chat.Completions.ChatComplet
   }));
 }
 
+const STREAM_CONNECT_TIMEOUT_MS = 90_000;
+
+async function withConnectTimeout<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Sem resposta da API após ${STREAM_CONNECT_TIMEOUT_MS / 1000}s (timeout de conexão)`));
+    }, STREAM_CONNECT_TIMEOUT_MS);
+    if (signal?.aborted) {
+      clearTimeout(timer);
+      reject(new DOMException("Abortado", "AbortError"));
+      return;
+    }
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer);
+      reject(new DOMException("Abortado", "AbortError"));
+    }, { once: true });
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); }
+    );
+  });
+}
+
 async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   const { config, messages, tools, reasoning, executeTool, signal } = opts;
   const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey });
   const apiTools = buildOpenAITools(tools);
   const effort = reasoning !== "none" ? reasoning : undefined;
+  let supportsEffort = true;
 
   let working = buildOpenAIMessages(config, messages);
   let finalContent = "";
@@ -113,18 +137,25 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
 
     let stream: Awaited<ReturnType<typeof client.chat.completions.create>>;
     try {
-      stream = await makeRequest(true);
+      void log("info", `LLM step ${step}: conectando (timeout=${STREAM_CONNECT_TIMEOUT_MS / 1000}s)`);
+      stream = await withConnectTimeout(makeRequest(supportsEffort), signal);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (effort && /reasoning/i.test(msg)) {
-        stream = await makeRequest(false); // retry without reasoning_effort
+      if (supportsEffort && effort && /reasoning/i.test(msg)) {
+        supportsEffort = false;
+        stream = await withConnectTimeout(makeRequest(false), signal); // retry without reasoning_effort
       } else {
         throw err;
       }
     }
+    void log("info", `LLM step ${step}: stream conectado`);
 
+    let finishReason: string | null = null;
     for await (const chunk of stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>) {
-      const delta = chunk.choices?.[0]?.delta as
+      const choice = chunk.choices?.[0];
+      if (!choice) continue;
+      if (choice.finish_reason) finishReason = choice.finish_reason;
+      const delta = choice.delta as
         | (OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta & {
             reasoning_content?: string;
             reasoning?: string;
@@ -143,6 +174,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
         yield { type: "text", text: delta.content };
       }
       if (delta.tool_calls) {
+        void log("info", `LLM step ${step}: tool_call chunk recebido (${delta.tool_calls.length} parciais)`);
         for (const tc of delta.tool_calls) {
           const idx = tc.index ?? 0;
           const buf = argBuffers.get(idx) ?? { args: "" };
@@ -154,15 +186,23 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       }
     }
 
+    void log("info", `LLM step ${step}: finish_reason=${finishReason}, argBuffers=${argBuffers.size}`);
+
     for (const [, buf] of argBuffers) {
       if (buf.name) pendingCalls.push({ id: buf.id ?? `call_${Math.random().toString(36).slice(2)}`, name: buf.name, args: buf.args });
     }
 
-    finalContent = content;
-    finalThinking = thinking;
+    finalContent += content;
+    finalThinking += thinking;
+
+    void log("info", `LLM step ${step}: pendingCalls=${pendingCalls.length}, content=${content.length}chars`);
 
     if (pendingCalls.length === 0) {
-      yield { type: "done", content, reasoning: thinking };
+      if (finishReason === "tool_calls") {
+        // O modelo sinalizou tool_calls mas nenhum foi parseado — log para diagnóstico
+        void log("warn", `LLM step ${step}: finish_reason=tool_calls mas 0 calls parseados. argBuffers raw: ${JSON.stringify(Object.fromEntries(argBuffers))}`);
+      }
+      yield { type: "done", content: finalContent, reasoning: finalThinking };
       return;
     }
 
@@ -177,7 +217,10 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       })),
     } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam);
 
+    void log("info", `LLM step ${step}: executando ${pendingCalls.length} tool(s): ${pendingCalls.map(c => c.name).join(", ")}`);
+
     for (const call of pendingCalls) {
+      void log("info", `LLM step ${step}: -> ${call.name}(${call.args.slice(0, 200)})`);
       yield { type: "tool_call", id: call.id, name: call.name, args: call.args };
       let parsed: Record<string, unknown> = {};
       try {
@@ -195,6 +238,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
         result = String(err);
         isError = true;
       }
+      void log(isError ? "warn" : "info", `LLM step ${step}: <- ${call.name} isError=${isError} result=${result.slice(0, 200)}`);
       yield { type: "tool_result", id: call.id, name: call.name, result, isError };
       working.push({
         role: "tool",
@@ -202,6 +246,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
         content: result,
       } as OpenAI.Chat.Completions.ChatCompletionToolMessageParam);
     }
+    void log("info", `LLM step ${step}: working messages agora: ${working.length}`);
     // loop continues: model sees tool results and may respond or call again.
   }
 
@@ -216,9 +261,25 @@ function buildAnthropicMessages(
 ): Anthropic.MessageParam[] {
   const out: Anthropic.MessageParam[] = [];
   for (const m of messages) {
-    if (m.role === "user") out.push({ role: "user", content: m.content });
-    else if (m.role === "assistant") out.push({ role: "assistant", content: m.content });
-    else if (m.role === "tool") {
+    if (m.role === "user") {
+      const last = out[out.length - 1];
+      if (last && last.role === "user") {
+        if (typeof last.content === "string") {
+          last.content += "\n\n" + m.content;
+        }
+      } else {
+        out.push({ role: "user", content: m.content });
+      }
+    } else if (m.role === "assistant") {
+      const last = out[out.length - 1];
+      if (last && last.role === "assistant") {
+        if (typeof last.content === "string") {
+          last.content += "\n\n" + m.content;
+        }
+      } else {
+        out.push({ role: "assistant", content: m.content });
+      }
+    } else if (m.role === "tool") {
       out.push({
         role: "user",
         content: [
@@ -265,6 +326,7 @@ async function* streamAnthropic(opts: ChatOptions): AsyncGenerator<StreamEvent> 
     let thinking = "";
     const pending: { id: string; name: string; input: Record<string, unknown> }[] = [];
 
+    void log("info", `LLM step ${step}: conectando Anthropic (timeout=${STREAM_CONNECT_TIMEOUT_MS / 1000}s)`);
     const stream = client.messages.stream(
       {
         model: config.model,
@@ -276,6 +338,28 @@ async function* streamAnthropic(opts: ChatOptions): AsyncGenerator<StreamEvent> 
       },
       { signal }
     );
+    // Wait for first connection event with timeout
+    const connectPromise = new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        stream.off("streamEvent", onEvent);
+        stream.off("error", onError);
+      };
+      const onEvent = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = (err: unknown) => {
+        cleanup();
+        reject(err);
+      };
+      stream.on("streamEvent", onEvent);
+      stream.on("error", onError);
+    });
+    await withConnectTimeout(connectPromise, signal).catch((err) => {
+      stream.abort();
+      throw err;
+    });
+    void log("info", `LLM step ${step}: stream Anthropic conectado`);
 
     for await (const event of stream) {
       switch (event.type) {
@@ -304,11 +388,11 @@ async function* streamAnthropic(opts: ChatOptions): AsyncGenerator<StreamEvent> 
 
     await stream.finalMessage();
 
-    finalContent = content;
-    finalThinking = thinking;
+    finalContent += content;
+    finalThinking += thinking;
 
     if (pending.length === 0) {
-      yield { type: "done", content, reasoning: thinking };
+      yield { type: "done", content: finalContent, reasoning: finalThinking };
       return;
     }
 

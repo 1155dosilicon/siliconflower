@@ -5,6 +5,7 @@ describe("tools", () => {
   test("isBuiltin recognizes builtin tools", () => {
     expect(isBuiltin("read_file")).toBe(true);
     expect(isBuiltin("write_file")).toBe(true);
+    expect(isBuiltin("execute_command")).toBe(true);
     expect(isBuiltin("unknown_tool")).toBe(false);
   });
 
@@ -24,5 +25,12 @@ describe("tools", () => {
     const res = await runBuiltin("read_file", { path: "C:\\Windows\\System32\\config\\SAM" });
     expect(res.isError).toBe(true);
     expect(res.result).toContain("bloqueado");
+  });
+
+  test("execute_command runs shell commands and returns output", async () => {
+    const cmd = process.platform === "win32" ? "Write-Output 'hello siliconflower'" : "echo 'hello siliconflower'";
+    const res = await runBuiltin("execute_command", { command: cmd });
+    expect(res.isError).toBe(false);
+    expect(res.result).toContain("hello siliconflower");
   });
 });

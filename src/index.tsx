@@ -3,7 +3,7 @@ import { Command } from "commander";
 import { configExists, loadConfig, configFile, configDir } from "./config.js";
 import { ensureConfig, runSetup } from "./wizard.js";
 import { startApp } from "./App.js";
-import type { Mode, ReasoningLevel } from "./types.js";
+import type { AppConfig, Mode, ReasoningLevel } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
 import { MODES } from "./modes.js";
 import { skillsDir, loadSkills, syncSkills } from "./skills.js";
@@ -24,22 +24,22 @@ program
   .option("--api-key <key>", "override the API key")
   .action(async (opts) => {
     const exists = await configExists();
+    let config: AppConfig | null = null;
     if (!exists) {
-      const cfg = await runSetup(null);
-      startApp(cfg, { model: opts.model, reasoning: normalizeReasoning(opts.reasoning), mode: normalizeMode(opts.mode) });
-      return;
+      config = await runSetup(null);
+    } else {
+      config = await loadConfig();
+      if (!config) config = await runSetup(null);
     }
-    let config = await loadConfig();
-    if (!config) config = await runSetup(null);
     const overrides: { model?: string; reasoning?: ReasoningLevel; mode?: Mode } = {};
     if (opts.model) overrides.model = opts.model;
     if (opts.reasoning) overrides.reasoning = normalizeReasoning(opts.reasoning);
     if (opts.mode) overrides.mode = normalizeMode(opts.mode);
-    if (opts.provider) config!.provider = opts.provider === "anthropic" ? "anthropic" : "openai";
-    if (opts.baseUrl) config!.baseURL = opts.baseUrl;
-    if (opts.apiKey) config!.apiKey = opts.apiKey;
+    if (opts.provider) config.provider = opts.provider === "anthropic" ? "anthropic" : "openai";
+    if (opts.baseUrl) config.baseURL = opts.baseUrl;
+    if (opts.apiKey) config.apiKey = opts.apiKey;
     await log("info", "=== siliconflower iniciado por CLI ===");
-    startApp(config!, overrides);
+    startApp(config, overrides);
   });
 
 program
