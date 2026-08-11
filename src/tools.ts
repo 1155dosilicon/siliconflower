@@ -7,6 +7,7 @@ import { searchContent } from "./grep.js";
 import { setTodos } from "./todo.js";
 import { runSubagentTask } from "./task.js";
 import { processToolOutput } from "./context.js";
+import { tailLogs } from "./logger.js";
 import type { AppConfig, McpTool, TodoItem } from "./types.js";
 import { log } from "./logger.js";
 
@@ -300,6 +301,27 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       const opts = Array.isArray(a.options) ? a.options.map(String) : undefined;
       const optsStr = opts && opts.length ? ` [Opções: ${opts.join(" | ")}]` : "";
       return { result: `[PERGUNTA AO USUÁRIO]: ${q}${optsStr}`, isError: false };
+    },
+  },
+  {
+    name: "read_logs",
+    description:
+      "Lê as últimas linhas do log do agente. Permite filtrar por nível de log ('error', 'warn', 'info', 'tool') ou termo de busca para diagnosticar problemas rapidamente.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        lines: { type: "number", description: "Número de linhas a retornar (padrão: 50, máx: 200)" },
+        level: { type: "string", description: "Filtro de nível: error | warn | info | tool" },
+        search: { type: "string", description: "Termo de busca/filtro nos logs" },
+      },
+    },
+    run: async (a) => {
+      const lines = typeof a.lines === "number" && a.lines > 0 ? Math.min(Math.floor(a.lines), 200) : 50;
+      const level = a.level ? String(a.level) : undefined;
+      const search = a.search ? String(a.search) : undefined;
+
+      const logs = await tailLogs({ lines, level, search });
+      return { result: logs, isError: false };
     },
   },
   {

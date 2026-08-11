@@ -7,7 +7,7 @@ import type { AppConfig, Mode, ReasoningLevel } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
 import { MODES } from "./modes.js";
 import { skillsDir, loadSkills, syncSkills } from "./skills.js";
-import { logFile, tailLogs } from "./logger.js";
+import { logFile, tailLogs, clearLogs } from "./logger.js";
 import { log } from "./logger.js";
 
 const program = new Command();
@@ -127,10 +127,18 @@ program
   .command("logs")
   .description("Show the last lines of the log")
   .option("-n, --lines <n>", "number of lines", "50")
+  .option("-l, --level <level>", "filter by log level: error | warn | info | tool")
+  .option("-s, --search <text>", "filter lines containing text")
+  .option("--clear", "clear the log file")
   .action(async (opts) => {
+    if (opts.clear) {
+      await clearLogs();
+      console.log("Log file cleared:", logFile());
+      return;
+    }
     console.log("Log file:", logFile());
     const n = parseInt(opts.lines, 10) || 50;
-    const tail = await tailLogs(n);
+    const tail = await tailLogs({ lines: n, level: opts.level, search: opts.search });
     console.log(tail);
   });
 
