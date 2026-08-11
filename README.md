@@ -163,9 +163,14 @@ The agent can read and modify the local file system without MCP:
 
 | Tool             | Notes                                                                  |
 |------------------|------------------------------------------------------------------------|
-| `read_file`      | Read a text file; supports absolute or cwd-relative paths.             |
+| `read_file`      | Read a text file; supports `offset` & `limit` with line numbers (`1: content`). |
+| `grep_content`   | Search file contents using regex/string recursively (`file:line: content`). |
 | `write_file`     | Create or overwrite. Creates parent directories.                       |
-| `edit_file`      | Replace first occurrence (use `replaceAll=true` for all).              |
+| `edit_file`      | Replace occurrence of `oldText` with `newText` (use `replaceAll=true`). |
+| `apply_patch`    | Apply atomic multi-block text replacement patches.                      |
+| `todowrite`      | Create and update session task list (`[✓]`, `[▶]`, `[ ]`).             |
+| `run_task`       | Launch an isolated subagent task to research/explore without cluttering main context. |
+| `ask_question`   | Ask the user a direct question with options or open response.          |
 | `list_directory` | List files/folders.                                                    |
 | `create_directory` | Create dir (recursive).                                              |
 | `move_path`      | Rename or move.                                                        |
@@ -174,7 +179,7 @@ The agent can read and modify the local file system without MCP:
 | `delete_path`    | Destructive. Requires `confirm=true` for ALL file/directory deletions. |
 | `execute_command`| Run shell commands (PowerShell on Windows / Bash on Linux).             |
 
-> All tools feature a 60-second execution timeout to prevent hung processes and are protected against sensitive path traversal (`C:\Windows\System32`, `.ssh`, `.aws`, etc.).
+> All tools feature a 60-second execution timeout to prevent hung processes and are protected against sensitive path traversal (`C:\Windows\System32`, `.ssh`, `.aws`, etc.). Large tool outputs are automatically saved to `~/.siliconflower/outputs/` to preserve context.
 
 ---
 
@@ -270,11 +275,11 @@ Recommended skill layout:
 
 | Mode          | Focus                                                                  |
 |---------------|------------------------------------------------------------------------|
-| `programacao` | Read, write, review, refactor code. Follow project conventions.        |
-| `sistema`     | Windows admin: PowerShell, batch, backup, privacy, registry. Always    |
-|               | warns about destructive / registry impact before acting.              |
+| `programação` | Read, write, review, refactor code. Follow project conventions.        |
+| `sistema`     | Windows admin: PowerShell, batch, backup, privacy, registry.           |
+| `plano`       | Read-only exploration & planning. Modifying tools are blocked until user approves. |
 
-Switch at runtime with `Ctrl+O`, or override the default with `--mode sistema`.
+Switch at runtime with `Ctrl+O`, or override the default with `--mode plano`.
 
 ---
 

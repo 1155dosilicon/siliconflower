@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
 import { log } from "./logger.js";
+import { compressHistory } from "./context.js";
 import type { AppConfig, ChatMessage, McpTool, ReasoningLevel, StreamEvent } from "./types.js";
 
 export interface ChatOptions {
@@ -107,13 +108,14 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   const effort = reasoning !== "none" ? reasoning : undefined;
   let supportsEffort = true;
 
-  let working = buildOpenAIMessages(config, messages);
+  const compressed = compressHistory(messages);
+  let working = buildOpenAIMessages(config, compressed);
   let finalContent = "";
   let finalThinking = "";
 
   void log("info", `LLM request: model=${config.model}, tools=${apiTools.length}, reasoning=${reasoning}`);
 
-  for (let step = 0; step < 8; step++) {
+  for (let step = 0; step < 25; step++) {
     let content = "";
     let thinking = "";
     const pendingCalls: {
@@ -317,11 +319,12 @@ async function* streamAnthropic(opts: ChatOptions): AsyncGenerator<StreamEvent> 
   };
   const effort = reasoning !== "none" ? ANTHROPIC_REASONING_BUDGET[reasoning] : undefined;
 
-  let working = buildAnthropicMessages(messages);
+  const compressed = compressHistory(messages);
+  let working = buildAnthropicMessages(compressed);
   let finalContent = "";
   let finalThinking = "";
 
-  for (let step = 0; step < 8; step++) {
+  for (let step = 0; step < 25; step++) {
     let content = "";
     let thinking = "";
     const pending: { id: string; name: string; input: Record<string, unknown> }[] = [];

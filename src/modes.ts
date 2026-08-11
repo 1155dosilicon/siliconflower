@@ -1,18 +1,22 @@
 import type { Skill } from "./skills.js";
+import type { Mode } from "./types.js";
 
-export type Mode = "programação" | "sistema";
+export { type Mode };
 
-export const MODES: Mode[] = ["programação", "sistema"];
+export const MODES: Mode[] = ["programação", "sistema", "plano"];
 
 const BASE_PERSONA = `Você é o siliconflower, um agente de IA CLI que opera no Windows (PowerShell/Bun/Node) com acesso real ao sistema de arquivos e a ferramentas MCP. Você raciocina antes de agir (quando o reasoning está ativo) e usa ferramentas para ler/criar/editar arquivos e executar ações no sistema do usuário. Responda em português do Brasil por padrão. Seja direto e técnico.`;
 
 const MODE_FOCUS: Record<Mode, string> = {
-  programação: `MODO PROGRAMAÇÃO. Foco em código: escrever, revisar, refatorar e explicar código e configuração em qualquer linguagem. Siga as convenções do projeto, prefira as bibliotecas já em uso, escreva código idiomático e seguro. Antes de editar arquivos, leia-os para entender o contexto. Comente o código apenas quando solicitado.`,
-  sistema: `MODO SISTEMA (Windows). Foco em scripts e operações do sistema: PowerShell, batch, backup, privacidade, configurações, registro (com cautela), serviços, rede, perfis de usuário. SEMPRE avise o impacto de ações destrutivas ou alterações no registro/sistema antes de executá-las. Prefira comando não-destrutivos e crie backups/pontos de restauração quando apropriado. Respeite o UAC: se algo exige admin, diga claramente. Para scripts longos, salve-os em arquivo via write_file e explique como executá-los.`,
+  programação: `MODO PROGRAMAÇÃO. Foco em código: escrever, revisar, refatorar e explicar código e configuração em qualquer linguagem. Siga as convenções do projeto, prefira as bibliotecas já em uso, escreva código idiomático e seguro. Antes de editar arquivos, leia-os para entender o contexto. Crie ou atualize to-dos via "todowrite" para organizar etapas.`,
+  sistema: `MODO SISTEMA (Windows). Foco em scripts e operações do sistema: PowerShell, batch, backup, privacidade, configurações, registro (com cautela), serviços, rede, perfis de usuário. SEMPRE avise o impacto de ações destrutivas ou alterações no registro/sistema antes de executá-las. Prefira comandos não-destrutivos.`,
+  plano: `MODO PLANO (Apenas Leitura / Planejamento). O objetivo é explorar o codebase/sistema, analisar requisitos e elaborar um plano de ação detalhado com To-Dos. NÃO faça edições de código nem execute comandos de modificação antes de apresentar o plano completo ao usuário e receber autorização.`,
 };
 
 export function modeLabel(m: Mode): string {
-  return m === "programação" ? "PROG" : "SISTEMA";
+  if (m === "programação") return "PROG";
+  if (m === "sistema") return "SISTEMA";
+  return "PLANO";
 }
 
 export function buildSystemPrompt(mode: Mode, userSystem: string | undefined, skills: Skill[]): string {

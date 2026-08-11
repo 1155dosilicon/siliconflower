@@ -5,11 +5,13 @@ describe("modes", () => {
   test("modeLabel returns shorthand mode names", () => {
     expect(modeLabel("programação")).toBe("PROG");
     expect(modeLabel("sistema")).toBe("SISTEMA");
+    expect(modeLabel("plano")).toBe("PLANO");
   });
 
   test("nextMode cycles modes properly", () => {
     expect(nextMode("programação")).toBe("sistema");
-    expect(nextMode("sistema")).toBe("programação");
+    expect(nextMode("sistema")).toBe("plano");
+    expect(nextMode("plano")).toBe("programação");
   });
 
   test("buildSystemPrompt builds detailed prompt with mode and cwd", () => {

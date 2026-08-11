@@ -7,8 +7,10 @@ import { McpManager } from "./mcp.js";
 import { builtinToolsAsMcp, isBuiltin, runBuiltin } from "./tools.js";
 import { loadSkills, readSkillContent, SKILL_TOOL, type Skill } from "./skills.js";
 import { buildSystemPrompt, modeLabel, nextMode, type Mode } from "./modes.js";
+import { onTodosChange } from "./todo.js";
+import { MarkdownText } from "./MarkdownText.js";
 import { log, logFile } from "./logger.js";
-import type { AppConfig, ChatMessage, McpTool, ReasoningLevel, StreamEvent } from "./types.js";
+import type { AppConfig, ChatMessage, McpTool, ReasoningLevel, StreamEvent, TodoItem } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
 
 const REASONING_LABEL: Record<ReasoningLevel, string> = {
@@ -43,13 +45,19 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
   const [status, setStatus] = useState("pronto");
   const [mcpCount, setMcpCount] = useState(0);
   const [skills, setSkills] = useState<Skill[]>([]);
+  const [todos, setTodosState] = useState<TodoItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [cols, setCols] = useState(stdout?.columns ?? 100);
   const mcpRef = useRef<McpManager | null>(null);
   const skillsRef = useRef<Skill[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  const lastCtrlRef = useRef<number>(0);
   const modeRef = useRef(mode);
   modeRef.current = mode;
+
+  useEffect(() => {
+    return onTodosChange((updated) => setTodosState([...updated]));
+  }, []);
 
   const { art, color } = renderLogo();
 
@@ -90,6 +98,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
   }, []);
 
   const cycleReasoning = useCallback(() => {
+    lastCtrlRef.current = Date.now();
     setInput((prev) => prev.replace(/[\x00-\x1F\x7F]/g, "").replace(/e$/i, ""));
     setReasoning((r) => {
       const idx = REASONING_LEVELS.indexOf(r);
@@ -101,6 +110,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
   }, []);
 
   const cycleMode = useCallback(() => {
+    lastCtrlRef.current = Date.now();
     setInput((prev) => prev.replace(/[\x00-\x1F\x7F]/g, "").replace(/o$/i, ""));
     setMode((m) => {
       const n = nextMode(m);
@@ -129,6 +139,15 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
 
   const executeTool = useCallback(
     async (name: string, args: Record<string, unknown>): Promise<{ result: string; isError: boolean }> => {
+      // Plan mode guard for modifying tools
+      const MODIFYING_TOOLS = ["write_file", "edit_file", "apply_patch", "delete_path", "execute_command"];
+      if (modeRef.current === "plano" && MODIFYING_TOOLS.includes(name)) {
+        return {
+          result: `[MODO PLANO ATIVO] Execução de ${name} bloqueada. Apresente o plano ao usuário e peça para alternar para o modo 'programação' (Ctrl+O) para aplicar as alterações.`,
+          isError: true,
+        };
+      }
+
       if (name === SKILL_TOOL.name) {
         try {
           const content = await readSkillContent(String(args.name ?? ""));
@@ -137,7 +156,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
           return { result: String(e), isError: true };
         }
       }
-      if (isBuiltin(name)) return runBuiltin(name, args);
+      if (isBuiltin(name)) return runBuiltin(name, args, { config });
       const mcp = mcpRef.current;
       if (mcp) {
         try {
@@ -149,12 +168,14 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
       }
       return { result: `tool not found: ${name}`, isError: true };
     },
-    []
+    [config]
   );
 
   const handleInputChange = useCallback((val: string) => {
-    // Strip control characters (including \x05, \x0f)
-    const clean = val.replace(/[\x00-\x1F\x7F]/g, "");
+    let clean = val.replace(/[\x00-\x1F\x7F]/g, "");
+    if (Date.now() - lastCtrlRef.current < 250) {
+      clean = clean.replace(/[oOeEcC]$/i, "");
+    }
     setInput(clean);
   }, []);
 
@@ -258,6 +279,9 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
   );
 
   useInput((input, key) => {
+    if (key.ctrl) {
+      lastCtrlRef.current = Date.now();
+    }
     if (streaming) {
       if (key.ctrl && (input.toLowerCase() === "c" || input === "\x03")) handleCancel();
       return;
@@ -285,7 +309,11 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
           <Text bold color={m.role === "user" ? "cyan" : "green"}>
             {m.role === "user" ? "voce>" : "ia>"}
           </Text>
-          <Text>{m.content}</Text>
+          {m.role === "assistant" ? (
+            <MarkdownText>{m.content}</MarkdownText>
+          ) : (
+            <Text>{m.content}</Text>
+          )}
           {m.reasoning && (
             <Text dimColor italic>{"  thinking: " + m.reasoning.slice(0, 200) + (m.reasoning.length > 200 ? "..." : "")}</Text>
           )}
@@ -294,7 +322,24 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
       {streaming && liveText && (
         <Box flexDirection="column" marginBottom={1}>
           <Text bold color="green">{"ia>"}</Text>
-          <Text>{liveText}</Text>
+          <MarkdownText>{liveText}</MarkdownText>
+        </Box>
+      )}
+
+      {todos.length > 0 && (
+        <Box flexDirection="column" marginY={1} borderStyle="round" borderColor="yellow" paddingX={1}>
+          <Text bold color="yellow">Tarefas (To-Do):</Text>
+          {todos.map((t) => {
+            const symbol =
+              t.status === "completed" ? "✓" : t.status === "in_progress" ? "▶" : t.status === "cancelled" ? "✗" : " ";
+            const color =
+              t.status === "completed" ? "green" : t.status === "in_progress" ? "cyan" : t.status === "cancelled" ? "gray" : "white";
+            return (
+              <Text key={t.id} color={color}>
+                [{symbol}] {t.content}
+              </Text>
+            );
+          })}
         </Box>
       )}
 

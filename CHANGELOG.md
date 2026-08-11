@@ -4,28 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Fixed
-- Input handler: fixed `useInput` parameter names and shortcut keys (`Ctrl+C`, `Ctrl+E`, `Ctrl+O`) in `App.tsx`
-- Skills: `loadSkills` now automatically syncs embedded skills if `~/.siliconflower/skills` is empty
-- Config: added environment variable fallbacks (`SILICONFLOWER_API_KEY`, `SILICONFLOWER_BASE_URL`, `SILICONFLOWER_MODEL`)
-- Tools: added 60-second execution timeout per tool in `runBuiltin` to prevent hung commands
-- Tools: exposed `includeHidden` parameter in `search_files` schema
-- Wizard: added fallback prompt if external text editor fails on Windows
-- CI: added `bun test` step to CI pipeline
-- Removed unrelated `demo/` folder from repository
+## [0.2.0] - 2026-08-11
 
 ### Added
-- `.env.example` template file
-- Top-level `sync` command alias (`siliconflower sync`)
-- Extended unit test suite in `tests/`
-- llm: request info logging (model, tool count, reasoning level)
-- README: MCP environment variable docs, recommended models table, troubleshooting section
+- **Context & Token Management (`src/context.ts`):** Added token estimation (`estimateTokens`), message context compression (`compressHistory`), and large output persistence (`processToolOutput`), automatically writing large command/file outputs to `~/.siliconflower/outputs/` to protect LLM context windows.
+- **Content Search Tool (`grep_content`):** Native recursive text and regex file content search tool with line numbers (`file:line: content`).
+- **Read File Line Ranges (`read_file`):** Added `offset` (start line) and `limit` parameters to `read_file`, formatting lines with numbers (`1: content`).
+- **Atomic Patch Applicator (`apply_patch`):** Added support for multi-block text replacement patches.
+- **Subagent Task Runner (`run_task` & `src/task.ts`):** Allows delegating sub-tasks to an isolated sub-agent with its own prompt and context, returning a concise summary.
+- **To-Do List Tracking (`todowrite` & `src/todo.ts`):** Native tool and interactive TUI panel displaying session task progress (`[✓]`, `[▶]`, `[ ]`).
+- **Plan Mode (`plano`):** Added `plano` mode (cycling via `Ctrl+O`: `PROG` -> `SISTEMA` -> `PLANO`), blocking modifying tools until a plan is presented to the user.
+- **User Question Tool (`ask_question`):** Tool for requesting decisions or clarifications directly from the user.
+- **Markdown & Code Rendering (`src/MarkdownText.tsx`):** Clean Windows-compatible Markdown renderer for headers, code blocks, bold/italic, and bullet lists in the TUI.
 
-### Changed
-- `engines.bun` updated to `>=1.3.0` (required for `--compile` features)
-- `package.json`: filled in author and repository URLs
+### Fixed
+- **Shortcut Input Handler:** Fixed `Ctrl+O` and `Ctrl+E` keyboard event handling in Windows Terminal / PowerShell to prevent trailing shortcut characters (`'o'`, `'e'`) from polluting the input field.
+- **Tool Call Loop Limit:** Expanded step limit from 8 to 25 tool calls per user turn with infinite loop guard protection.
 
 ## [0.1.0] - 2026-07-15
 
