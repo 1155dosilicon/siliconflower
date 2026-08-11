@@ -7,6 +7,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.2.0] - 2026-08-11
 
 ### Added
+- **Live Token Counter (`Tokens:` in TUI):** Real-time session token counter in the TUI status bar and execution status (`🧠 pensando...`, `🔨 tool_name...`), combining live local token estimation with official API stream usage metadata (`stream_options: { include_usage: true }`).
 - **Context & Token Management (`src/context.ts`):** Added token estimation (`estimateTokens`), message context compression (`compressHistory`), and large output persistence (`processToolOutput`), automatically writing large command/file outputs to `~/.siliconflower/outputs/` to protect LLM context windows.
 - **Content Search Tool (`grep_content`):** Native recursive text and regex file content search tool with line numbers (`file:line: content`).
 - **Read File Line Ranges (`read_file`):** Added `offset` (start line) and `limit` parameters to `read_file`, formatting lines with numbers (`1: content`).

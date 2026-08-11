@@ -8,6 +8,7 @@ import { builtinToolsAsMcp, isBuiltin, runBuiltin } from "./tools.js";
 import { loadSkills, readSkillContent, SKILL_TOOL, type Skill } from "./skills.js";
 import { buildSystemPrompt, modeLabel, nextMode, type Mode } from "./modes.js";
 import { onTodosChange } from "./todo.js";
+import { estimateTokens, formatTokenCount } from "./context.js";
 import { MarkdownText } from "./MarkdownText.js";
 import { log, logFile } from "./logger.js";
 import type { AppConfig, ChatMessage, McpTool, ReasoningLevel, StreamEvent, TodoItem } from "./types.js";
@@ -48,6 +49,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
   const [todos, setTodosState] = useState<TodoItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [cols, setCols] = useState(stdout?.columns ?? 100);
+  const [apiTokens, setApiTokens] = useState(0);
   const mcpRef = useRef<McpManager | null>(null);
   const skillsRef = useRef<Skill[]>([]);
   const abortRef = useRef<AbortController | null>(null);
@@ -103,7 +105,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
     setReasoning((r) => {
       const idx = REASONING_LEVELS.indexOf(r);
       const next = REASONING_LEVELS[(idx + 1) % REASONING_LEVELS.length];
-      setStatus(`reasoning: ${next}`);
+      setStatus(`pensamento: ${next}`);
       setTimeout(() => setStatus("pronto"), 1200);
       return next;
     });
@@ -114,7 +116,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
     setInput((prev) => prev.replace(/[\x00-\x1F\x7F]/g, "").replace(/o$/i, ""));
     setMode((m) => {
       const n = nextMode(m);
-      setStatus(`modo: ${n}`);
+      setStatus(`mode: ${n}`);
       setTimeout(() => setStatus("pronto"), 1200);
       return n;
     });
@@ -219,16 +221,20 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
           switch (ev.type) {
             case "thinking":
               accThinking += ev.text;
+              setStatus("🧠 pensando...");
               break;
             case "text":
               accText += ev.text;
               setLiveText(accText);
               break;
             case "tool_call":
-              setStatus(`${ev.name}...`);
+              setStatus(`🔨 ${ev.name}...`);
               break;
             case "tool_result":
-              setStatus("...");
+              setStatus("processando...");
+              break;
+            case "usage":
+              if (ev.totalTokens) setApiTokens(ev.totalTokens);
               break;
             case "error":
               hadError = true;
@@ -292,6 +298,12 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
   });
 
   const totalTools = builtinToolsAsMcp().length + 1 + mcpCount;
+  const systemTokens = estimateTokens(buildSystemPrompt(mode, config.system, skills));
+  const historyTokens = messages.reduce((acc, m) => acc + estimateTokens(m.content) + estimateTokens(m.reasoning ?? ""), 0);
+  const liveTokens = estimateTokens(input) + estimateTokens(liveText);
+  const estimatedTotal = systemTokens + historyTokens + liveTokens;
+  const totalTokens = Math.max(estimatedTotal, apiTokens);
+
   const sep = "-".repeat(Math.min(cols - 2, 80));
   const maxHistory = 50;
   const visibleMessages = messages.slice(-maxHistory);
@@ -302,7 +314,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
       <Text dimColor>{sep}</Text>
 
       {visibleMessages.length === 0 && (
-        <Text dimColor>Envie uma mensagem (Enter enviar | Ctrl+E reasoning | Ctrl+O modo | Ctrl+C sair)</Text>
+        <Text dimColor>Envie uma mensagem (Enter enviar | Ctrl+E pensamento | Ctrl+O modo | Ctrl+C sair)</Text>
       )}
       {visibleMessages.map((m, i) => (
         <Box key={i} flexDirection="column" marginBottom={1}>
@@ -362,11 +374,12 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
       <Box flexWrap="wrap">
         <Text><Text color="green" bold>Model:</Text> {model} </Text>
         <Text><Text color="magenta" bold>Reasoning:</Text> {REASONING_LABEL[reasoning]} </Text>
-        <Text><Text color="blue" bold>Modo:</Text> {modeLabel(mode)} </Text>
+        <Text><Text color="blue" bold>Mode:</Text> {modeLabel(mode)} </Text>
         <Text><Text color="yellow" bold>Tools:</Text> {totalTools} </Text>
-        <Text><Text color="cyan" bold>Skills:</Text> {skills.length}</Text>
+        <Text><Text color="cyan" bold>Skills:</Text> {skills.length} </Text>
+        <Text><Text color="red" bold>Tokens:</Text> {formatTokenCount(totalTokens)}</Text>
       </Box>
-      <Text dimColor italic>{status}</Text>
+      <Text dimColor italic>{status} {totalTokens > 0 && `(${formatTokenCount(totalTokens)} tokens)`}</Text>
       {error && <Text color="red">[ERRO] {error}</Text>}
       <Text dimColor>log: {logFile().replace(/\\/g, "/")}</Text>
     </Box>

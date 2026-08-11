@@ -7,6 +7,15 @@ import { log } from "./logger.js";
 const OUTPUT_DIR = join(homedir(), ".siliconflower", "outputs");
 
 /**
+ * Formats a token count nicely (e.g. 850 -> "850", 1250 -> "1.3K", 35200 -> "35.2K").
+ */
+export function formatTokenCount(count: number): string {
+  if (count < 1000) return `${count}`;
+  if (count < 1000000) return `${(count / 1000).toFixed(1)}K`;
+  return `${(count / 1000000).toFixed(2)}M`;
+}
+
+/**
  * Estimates token count for text (~3.8 chars per token for code/Portuguese text mix).
  */
 export function estimateTokens(text: string): number {

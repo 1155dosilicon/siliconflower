@@ -501,6 +501,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
         timeout,
         maxBuffer: 10 * 1024 * 1024,
         shell: isWin ? "powershell.exe" : "/bin/bash",
+        windowsHide: true,
       };
       try {
         await log("info", `execute_command: ${cmd} (cwd=${workDir})`);

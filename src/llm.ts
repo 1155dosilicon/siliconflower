@@ -131,6 +131,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
           model: config.model,
           messages: working,
           stream: true,
+          stream_options: { include_usage: true },
           ...(withEffort && effort ? { reasoning_effort: effort } : {}),
           ...(apiTools.length ? { tools: apiTools, tool_choice: "auto" } : {}),
         },
@@ -154,6 +155,14 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
 
     let finishReason: string | null = null;
     for await (const chunk of stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>) {
+      if (chunk.usage) {
+        yield {
+          type: "usage",
+          totalTokens: chunk.usage.total_tokens,
+          promptTokens: chunk.usage.prompt_tokens,
+          completionTokens: chunk.usage.completion_tokens,
+        };
+      }
       const choice = chunk.choices?.[0];
       if (!choice) continue;
       if (choice.finish_reason) finishReason = choice.finish_reason;
@@ -366,6 +375,28 @@ async function* streamAnthropic(opts: ChatOptions): AsyncGenerator<StreamEvent> 
 
     for await (const event of stream) {
       switch (event.type) {
+        case "message_start": {
+          const msg = (event as { message?: { usage?: { input_tokens?: number; output_tokens?: number } } }).message;
+          if (msg?.usage) {
+            yield {
+              type: "usage",
+              promptTokens: msg.usage.input_tokens,
+              completionTokens: msg.usage.output_tokens,
+              totalTokens: (msg.usage.input_tokens ?? 0) + (msg.usage.output_tokens ?? 0),
+            };
+          }
+          break;
+        }
+        case "message_delta": {
+          const usage = (event as { usage?: { output_tokens?: number } }).usage;
+          if (usage?.output_tokens) {
+            yield {
+              type: "usage",
+              completionTokens: usage.output_tokens,
+            };
+          }
+          break;
+        }
         case "content_block_start": {
           const block = event.content_block;
           if (block.type === "tool_use") {

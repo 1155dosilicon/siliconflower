@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { estimateTokens, compressHistory, processToolOutput } from "../src/context.js";
+import { estimateTokens, compressHistory, processToolOutput, formatTokenCount } from "../src/context.js";
 import type { ChatMessage } from "../src/types.js";
 
 describe("context & token management", () => {
+  test("formatTokenCount formats numbers accurately", () => {
+    expect(formatTokenCount(850)).toBe("850");
+    expect(formatTokenCount(1200)).toBe("1.2K");
+    expect(formatTokenCount(35400)).toBe("35.4K");
+    expect(formatTokenCount(1500000)).toBe("1.50M");
+  });
   test("estimateTokens calculates approximate token count", () => {
     const text = "Hello world from Siliconflower CLI agent";
     const tokens = estimateTokens(text);

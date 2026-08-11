@@ -18,12 +18,12 @@ const PRESETS: Record<Provider, { label: string; baseURL: string; example: strin
   openai: {
     label: "OpenAI-compatible (SiliconFlow, OpenRouter, OpenAI, ...)",
     baseURL: "https://api.siliconflow.com/v1",
-    example: "deepseek-ai/DeepSeek-V3 or openai/gpt-4o-mini",
+    example: "deepseek-ai/DeepSeek-V4-Pro or gpt-5.5",
   },
   anthropic: {
     label: "Anthropic-compatible (Anthropic, proxies)",
     baseURL: "https://api.anthropic.com",
-    example: "claude-3-5-sonnet-20241022",
+    example: "claude-5-sonnet or claude-opus-4.8",
   },
 };
 

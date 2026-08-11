@@ -1,353 +1,321 @@
-# SILICONFLOWER
+# 🌸 SILICONFLOWER
 
-CLI/TUI AI agent for Windows with MCP, controllable reasoning, file-system
-skills (.md), two operating modes (programacao / sistema), and pluggable
-OpenAI- or Anthropic-compatible backends (SiliconFlow, OpenRouter, OpenAI,
-Anthropic, proxies).
+![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20PowerShell-0078D6.svg)
+![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black.svg)
+![Node](https://img.shields.io/badge/Node.js-%3E%3D20-green.svg)
 
-```
+Agente CLI/TUI de Inteligência Artificial para Windows com suporte nativo a **MCP** (Model Context Protocol), **Raciocínio Controlável (Reasoning)**, **Contador de Tokens em Tempo Real**, **Tratamento de Tarefas (To-Do)**, **Habilidades (.md)**, **3 Modos de Operação** e compatibilidade com APIs do **SiliconFlow, OpenRouter, OpenAI e Anthropic**.
+
+```text
   S I L I C O N F L O W E R
-----------------------------------------------------------
-  voce  > oi, crie um backup de C:\Docs em D:\Backups
-  tool   > robocopy "C:\Docs" "D:\Backups\Docs_2026-07-15" /MIR
-  ia     > backup iniciado. acompanhando em D:\Backups\Docs_2026-07-15.
-----------------------------------------------------------
+--------------------------------------------------------------------------------
+  voce  > crie um backup da pasta src em backups/ e organize as tarefas
+  ia    > análise concluída. criando diretório e copiando arquivos...
+--------------------------------------------------------------------------------
+  Tarefas (To-Do):
+  [✓] Analisar estrutura da pasta src
+  [▶] Executar cópia de segurança em backups/
+--------------------------------------------------------------------------------
   > digite para a LLM...
-----------------------------------------------------------
-  Model: deepseek-ai/DeepSeek-V3  Reason: high  Mode: PROG
-  Tools: 11  Skills: 3  status: pronto
+--------------------------------------------------------------------------------
+  Model: deepseek-ai/DeepSeek-V4-Pro  Reasoning: high  Mode: PROG
+  Tools: 17  Skills: 3  Tokens: 3.2K
+  pronto (3.2K tokens)
 ```
 
-> The interface is intentionally minimal: ASCII-only, no Nerd Fonts required,
-> works in Windows Terminal, PowerShell, cmd, ConEmu, VS Code terminal.
+> 💡 **Interface Limpa e Leve:** Projetada para Windows Terminal, PowerShell, CMD e VS Code Terminal. Sem necessidade de Nerd Fonts ou caracteres especiais.
 
 ---
 
-## Table of Contents
+## 📋 Sumário
 
-- [Features](#features)
-- [Install](#install)
-- [Configuration](#configuration)
-- [Recommended Models](#recommended-models)
-- [Keyboard Shortcuts](#keyboard-shortcuts)
-- [Skills](#skills)
-- [MCP (Model Context Protocol)](#mcp-model-context-protocol)
-- [Modes](#modes)
-- [Building standalone binary](#building-standalone-binary)
-- [Troubleshooting](#troubleshooting)
-
----
-
-## Features
-
-| Area            | What it does                                                                  |
-|-----------------|-------------------------------------------------------------------------------|
-| Backends        | OpenAI-compatible (`/v1/chat/completions`) and Anthropic (`/v1/messages`).    |
-| Reasoning       | `none` / `low` / `medium` / `high`. OpenAI-compat sends `reasoning_effort`;  |
-|                 | Anthropic sends `thinking` with `budget_tokens`. Cycle at runtime with `Ctrl+E`. |
-| Native tools    | Read / write / edit / list / move / search / create-directory / info /        |
-|                 | destructive `delete_path` with `confirm=true` guard.                           |
-| MCP             | Spawn stdio MCP servers, merge their tools with the native ones.              |
-| Skills (.md)    | `~/.siliconflower/skills/*.md`, discoverable, read by model via `read_skill`. |
-| Modes           | `programacao` (code) and `sistema` (Windows ops). Cycle with `Ctrl+O`.        |
-| Logging         | Everything is logged to `~/.siliconflower/logs/siliconflower.log` (1 MB ring). |
-| Standalone .exe | `bun build --compile` produces a single Windows binary with no Node required. |
+- [✨ Funcionalidades](#-funcionalidades)
+- [🚀 Instalação e Início Rápido](#-instalação-e-início-rápido)
+- [⚙️ Configuração Inicial](#️-configuração-inicial)
+- [⚡ Modelos Recomendados (2026)](#-modelos-recomendados-2026)
+- [⌨️ Atalhos de Teclado (TUI)](#️-atalhos-de-teclado-tui)
+- [🛠️ Ferramentas Nativas](#️-ferramentas-nativas)
+- [🧩 Servidores MCP](#-servidores-mcp)
+- [🧠 Modos de Operação & Raciocínio](#-modos-de-operação--raciocínio)
+- [🎯 Habilidades (Skills .md)](#-habilidades-skills-md)
+- [📦 Compilando Executável Standalone (.exe)](#-compilando-executável-standalone-exe)
+- [📁 Estrutura do Projeto](#-estrutura-do-projeto)
+- [📜 Licença](#-licença)
 
 ---
 
-## Install
+## ✨ Funcionalidades
 
-### Prerequisites
+| Área | Descrição |
+| :--- | :--- |
+| **Provedores LLM** | Suporte a APIs compatíveis com OpenAI (`/v1/chat/completions`) e Anthropic (`/v1/messages`). |
+| **Contador de Tokens** | Contador de tokens em tempo real na TUI com estimativa local instantânea + metadados das APIs. |
+| **Raciocínio (Reasoning)** | Níveis `none` / `low` / `medium` / `high`. Envia `reasoning_effort` (OpenAI/DeepSeek) ou `thinking` com `budget_tokens` (Anthropic). Alternável com `Ctrl+E`. |
+| **Modos de Operação** | `programação` (código), `sistema` (administração Windows) e `plano` (apenas leitura e planejamento). Alternável com `Ctrl+O`. |
+| **Ferramentas Nativas** | Leitura/escrita, busca recursiva (`grep_content`), edição atômica (`apply_patch`), execução silenciosa no PowerShell, subagentes isolados (`run_task`) e painel de tarefas (`todowrite`). |
+| **Protocolo MCP** | Integração total com servidores MCP via `stdio` (ex: Git, Filesystem, Brave Search), mesclando ferramentas automaticamente. |
+| **Habilidades (.md)** | Carregamento dinâmico de guias e habilidades personalizadas em `~/.siliconflower/skills/*.md`. |
+| **Executável Único (.exe)** | Compilado via `bun build --compile` gerando um executável standalone no Windows sem dependência prévia do Node.js. |
 
-- Bun >= 1.1 (recommended, runs TypeScript natively): https://bun.sh
-- Alternatively: Node.js >= 20 + the bundled `tsx` devDependency.
+---
 
-### Quick start
+## 🚀 Instalação e Início Rápido
+
+### Pré-requisitos
+
+* **Bun >= 1.1** (Recomendado): https://bun.sh
+* **ou Node.js >= 20** + `tsx` (pré-instalado nas dependências).
+
+### Clonar e Executar
 
 ```powershell
 git clone https://github.com/siliconflower/siliconflower.git
 cd siliconflower
 bun install
-bun run start          # TUI; first run opens the setup wizard
+bun run start          # Inicia a TUI; na 1ª vez abre o assistente de configuração
 ```
 
-Other entry points:
+Outras formas de execução:
 
 ```powershell
-bun run start -- -m deepseek-ai/DeepSeek-V3 -r high
-node bin\siliconflower.js            # auto-detects bun -> tsx -> npx tsx
-bun run build                        # produces dist\siliconflower.exe
-npm run install:bin                  # install the .exe to your PATH (no admin)
+# Iniciar com parâmetros específicos
+bun run start -- -m deepseek-ai/DeepSeek-V4-Pro -r high --mode programacao
+
+# Executar via Node.js
+node bin\siliconflower.js
+
+# Compilar e instalar no PATH do Windows (sem necessidade de admin)
+bun run build
+npm run install:bin
 ```
 
 ---
 
-## First-time setup
+## ⚙️ Configuração Inicial
 
-The wizard asks for:
+Na primeira execução, o assistente (*wizard*) solicita:
 
-1. Provider variant: `openai` or `anthropic`.
-2. Base URL (default `https://api.siliconflow.com/v1`).
-3. Model id (e.g. `deepseek-ai/DeepSeek-V3`, `claude-3-5-sonnet-20241022`).
-4. API key (input is masked).
-5. Default reasoning level.
-6. Optional system prompt.
-7. Optional MCP server entries.
+1. **Variante do Provedor:** `openai` ou `anthropic`.
+2. **Base URL:** ex: `https://api.siliconflow.com/v1`, `https://openrouter.ai/api/v1` ou `https://api.anthropic.com`.
+3. **Model ID:** ex: `deepseek-ai/DeepSeek-V4-Pro`, `claude-5`, `gpt-5.5`.
+4. **Chave de API (API Key):** Entrada mascarada com asteriscos.
+5. **Nível Padrão de Raciocínio (Reasoning):** `none`, `low`, `medium` ou `high`.
+6. **Prompt de Sistema e Servidores MCP (Opcionais).**
 
-Result is stored at `~/.siliconflower/config.json`:
+As configurações são salvas em `~/.siliconflower/config.json`:
 
 ```json
 {
   "provider": "openai",
   "baseURL": "https://api.siliconflow.com/v1",
   "apiKey": "sk-...",
-  "model": "deepseek-ai/DeepSeek-V3",
+  "model": "deepseek-ai/DeepSeek-V4-Pro",
   "reasoning": "high",
   "mode": "programacao",
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/"]
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/Users/username"]
     }
   }
 }
 ```
 
-> Important: SiliconFlow speaks the OpenAI wire format. Pick
-> `provider=openai` and a base URL ending in `/v1`. Selecting `anthropic`
-> against a SiliconFlow endpoint yields HTTP 404.
-
-Reconfigure any time:
+### Comandos de Gerenciamento da Configuração
 
 ```powershell
-bun run start -- config   # re-runs the wizard
-bun run start -- show     # prints the config (key masked)
-bun run start -- ensure   # create config if missing, then exit
+bun run start -- config   # Re-executa o assistente de configuração
+bun run start -- show     # Exibe as configurações atuais (chave mascarada)
+bun run start -- ensure   # Cria o arquivo de configuração caso não exista e sai
 ```
 
-### Environment Variables Fallback
+### Variáveis de Ambiente (Fallback)
 
-You can also configure credentials via environment variables (see `.env.example`):
+Você também pode configurar suas credenciais via arquivo `.env` ou variáveis do sistema:
 
-- `SILICONFLOWER_API_KEY` - API key.
-- `SILICONFLOWER_BASE_URL` - Base URL for OpenAI/Anthropic endpoint.
-- `SILICONFLOWER_MODEL` - Default model ID.
+* `SILICONFLOWER_API_KEY` - Chave de API.
+* `SILICONFLOWER_BASE_URL` - URL base da API.
+* `SILICONFLOWER_MODEL` - Modelo padrão.
 
 ---
 
-## Keybindings (TUI)
+## ⚡ Modelos Recomendados (2026)
 
-| Key      | Action                                       |
-|----------|----------------------------------------------|
-| Enter    | Send the message                             |
-| Ctrl+E   | Cycle reasoning: none -> low -> medium -> high |
-| Ctrl+O   | Cycle mode: programacao <-> sistema          |
-| Ctrl+C   | Cancel current stream; press twice to exit   |
+### Pesos Abertos (Open-Weights) & Provedores Compatíveis (SiliconFlow, OpenRouter, etc.)
 
-Command-line flags:
+| Modelo | Parâmetros / Ativos | Janela de Contexto | Suporte a Tools | Raciocínio (Reasoning) | Foco Principal |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| `deepseek-ai/DeepSeek-V4-Pro` | **284B–1.6T** (MoE) | 1M tokens | ✅ Sim | ✅ Nativo | Programação avançada, raciocínio lógico e baixo custo |
+| `Qwen/Qwen-3.7-Max` | Até **1.1T** (MoE) | 1M tokens | ✅ Sim | ✅ Nativo | Código de alto nível, matemática e multilíngue |
+| `meta-llama/Llama-4-Scout` | Dezenas a 100s B | **Até 10M tokens** | ✅ Sim | ❌ Não | Processamento de contextos massivos e privacidade |
+| `z-ai/GLM-5.2` | **753B** (40B ativos) | 1M tokens | ✅ Sim | ✅ Nativo | Automação de tarefas, uso de terminal e agentes |
+| `moonshot/Kimi-K3` | **~1T** (MoE) | 1M+ tokens | ✅ Sim | ✅ Nativo | Raciocínio avançado em código e matemática |
+| `google/Gemma-4-31B` | **31B** | 256k tokens | ✅ Sim | ❌ Não | Execução local eficiente e SLM de alta inteligência |
 
-```
-  -m, --model <id>        override the model
-  -r, --reasoning <level> none | low | medium | high
-      --mode <mode>       programacao | sistema
-      --provider <type>   openai | anthropic
-      --base-url <url>    override the API base URL
-      --api-key <key>     override the API key
+### Modelos Proprietários (Código Fechado)
+
+| Modelo | Desenvolvedor | Janela de Contexto | Suporte a Tools | Raciocínio | Foco Principal |
+| :--- | :--- | :---: | :---: | :---: | :--- |
+| `gpt-5.5` / `gpt-5.6` | OpenAI | 400k – 1M tokens | ✅ Sim | ✅ Nativo | Raciocínio avançado, fluxos autônomos e agentes |
+| `claude-opus-4.8` / `claude-5` | Anthropic | 1M+ tokens | ✅ Sim | ✅ Nativo | Engenharia de software profunda e revisão de código |
+| `gemini-3.5-pro` | Google | 1M – 2M tokens | ✅ Sim | ✅ Nativo | Multimodalidade nativa e contexto ultra longo |
+| `grok-4.3` | xAI | 1M tokens | ✅ Sim | ✅ Nativo | Pesquisa em tempo real e raciocínio técnico |
+
+---
+
+## ⌨️ Atalhos de Teclado (TUI)
+
+| Atalho | Ação |
+| :--- | :--- |
+| `Enter` | Envia a mensagem digitada |
+| `Ctrl+E` | Alterna o nível de raciocínio (`none` ➔ `low` ➔ `medium` ➔ `high`) |
+| `Ctrl+O` | Alterna o modo de operação (`programação` ➔ `sistema` ➔ `plano`) |
+| `Ctrl+C` | Cancela a geração em andamento; pressione 2x para sair |
+
+### Parâmetros de Linha de Comando (CLI)
+
+```powershell
+  -m, --model <id>        Sobrescreve o modelo selecionado
+  -r, --reasoning <level> Define o nível: none | low | medium | high
+      --mode <mode>       Define o modo: programacao | sistema | plano
+      --provider <type>   Define o provedor: openai | anthropic
+      --base-url <url>    Sobrescreve a URL base da API
+      --api-key <key>     Sobrescreve a chave de API
 ```
 
 ---
 
-## Native tools
+## 🛠️ Ferramentas Nativas
 
-The agent can read and modify the local file system without MCP:
+O agente possui ferramentas nativas para interagir com o sistema de arquivos e executar ações sem depender de MCP externos:
 
-| Tool             | Notes                                                                  |
-|------------------|------------------------------------------------------------------------|
-| `read_file`      | Read a text file; supports `offset` & `limit` with line numbers (`1: content`). |
-| `grep_content`   | Search file contents using regex/string recursively (`file:line: content`). |
-| `write_file`     | Create or overwrite. Creates parent directories.                       |
-| `edit_file`      | Replace occurrence of `oldText` with `newText` (use `replaceAll=true`). |
-| `apply_patch`    | Apply atomic multi-block text replacement patches.                      |
-| `todowrite`      | Create and update session task list (`[✓]`, `[▶]`, `[ ]`).             |
-| `run_task`       | Launch an isolated subagent task to research/explore without cluttering main context. |
-| `ask_question`   | Ask the user a direct question with options or open response.          |
-| `list_directory` | List files/folders.                                                    |
-| `create_directory` | Create dir (recursive).                                              |
-| `move_path`      | Rename or move.                                                        |
-| `file_info`      | Size, mtime, ctime, type.                                               |
-| `search_files`   | Glob search (`**/*.ts`, `*.{ts,tsx}`). Supports `includeHidden=true`.  |
-| `delete_path`    | Destructive. Requires `confirm=true` for ALL file/directory deletions. |
-| `execute_command`| Run shell commands (PowerShell on Windows / Bash on Linux).             |
+| Ferramenta | Descrição |
+| :--- | :--- |
+| `read_file` | Lê arquivos de texto com suporte a `offset` e `limit` (linhas numeradas `1: conteúdo`). |
+| `grep_content` | Busca textual e regex recursiva em arquivos (`arquivo:linha: conteúdo`). |
+| `write_file` | Cria ou sobrescreve arquivos (cria diretórios pai automaticamente). |
+| `edit_file` | Substitui ocorrências de texto específico (`oldText` por `newText`). |
+| `apply_patch` | Aplica edições multi-bloco de forma atômica. |
+| `todowrite` | Gerencia a lista de tarefas da sessão e exibe o painel interativo (`[✓]`, `[▶]`, `[ ]`). |
+| `run_task` | Executa subagentes isolados para exploração e pesquisas complexas sem poluir o contexto principal. |
+| `ask_question` | Faz perguntas diretas ao usuário com opções interativas. |
+| `read_logs` | Consulta e filtra logs de execução do agente (`lines`, `level`, `search`). |
+| `list_directory` | Lista arquivos e subpastas de um diretório. |
+| `create_directory` | Cria diretórios recursivamente. |
+| `move_path` | Move ou renomeia arquivos e pastas. |
+| `file_info` | Consulta tamanho, datas de criação/modificação e tipo de arquivo. |
+| `search_files` | Busca arquivos usando padrões glob (`**/*.ts`, `*.{ts,tsx}`). |
+| `delete_path` | Exclui arquivos/pastas. Requer confirmação explícita (`confirm=true`). |
+| `execute_command` | Executa comandos no PowerShell (Windows) ou Bash de forma silenciosa e transparente. |
 
-> All tools feature a 60-second execution timeout to prevent hung processes and are protected against sensitive path traversal (`C:\Windows\System32`, `.ssh`, `.aws`, etc.). Large tool outputs are automatically saved to `~/.siliconflower/outputs/` to preserve context.
+> 🛡️ **Segurança e Proteção:** Todas as ferramentas possuem tempo limite de execução (timeout) de 60 segundos, executam com janelas ocultas e impedem acesso a diretórios sensíveis do sistema (`C:\Windows\System32`, `.ssh`, `.aws`, etc.). Saídas extensas são truncadas e salvas em `~/.siliconflower/outputs/`.
 
 ---
 
-## MCP
+## 🧩 Servidores MCP
 
-Add servers to `config.json`:
+Adicione servidores no seu `config.json`:
 
 ```json
 "mcpServers": {
-  "git": { "command": "uvx", "args": ["mcp-server-git", "--repository", "C:/repo"] },
-  "fs":  { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/Users/username"] },
+  "git": { 
+    "command": "uvx", 
+    "args": ["mcp-server-git", "--repository", "C:/meu-repositorio"] 
+  },
+  "filesystem": { 
+    "command": "npx", 
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/Users/username"] 
+  },
   "brave-search": {
     "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-brave-search"]
+    "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+    "env": { "BRAVE_API_KEY": "sua-chave-aqui" }
   }
 }
 ```
 
-Their tools are merged with the native ones and exposed to the model together,
-with an execution loop of up to 25 steps per assistant turn.
+---
 
-### Environment variables for MCP servers
+## 🧠 Modos de Operação & Raciocínio
 
-MCP servers inherit the parent process environment automatically. If you need
-to override a variable, use the `env` field:
-
-```json
-"brave-search": {
-  "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-  "env": { "BRAVE_API_KEY": "your-key-here" }
-}
-```
-
-> Do **not** use shell-style `${VAR}` syntax — the value is passed literally.
-> Either set the variable in your system environment (it will be inherited),
-> or put the actual value in the `env` field.
-
-### Recommended models (NVIDIA API)
-
-| Model | Function calling | Reasoning | Speed |
-|-------|:---:|:---:|:---:|
-| `nvidia/nemotron-3-ultra-550b-a55b` | yes | yes | medium |
-| `meta/llama-3.1-70b-instruct` | yes | no | slow |
-| `meta/llama-3.1-8b-instruct` | yes | no | fast |
-| `z-ai/glm-5.2` | yes | no | unstable |
-
-> `nvidia/nemotron-3-ultra-550b-a55b` is the best choice for tool-calling
-> with reasoning on the NVIDIA API.
-
-### Troubleshooting MCP
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `MCP conectado: 0 servidores` | Server failed to start | Check that `npx`/`uvx` is in your PATH |
-| Tools available but model ignores them | Model doesn't support function calling | Switch to a model from the table above |
-| `BRAVE_API_KEY environment variable is required` | Env var not inherited | Set it in your system env, or use `env` in config |
-| Model hangs "thinking" | API timeout or model offline | Try a different model; check NVIDIA API status |
+| Modo | Foco |
+| :--- | :--- |
+| `programação` | Leitura, escrita, revisão e refatoração de código seguindo as convenções do projeto. |
+| `sistema` | Administração Windows: scripts PowerShell, backups, serviços, rede e configurações. |
+| `plano` | MODO APENAS LEITURA. Ferramentas de escrita e execução são bloqueadas até que você aprove o plano. |
 
 ---
 
-## Skills (.md)
+## 🎯 Habilidades (Skills .md)
 
-Drop Markdown files in `~/.siliconflower/skills/`. Each `.md` becomes a skill
-discoverable by the model; the full body is fetched on demand via `read_skill`.
-Bundled skills are automatically synced on first launch if your skills directory is empty.
+Adicione arquivos Markdown em `~/.siliconflower/skills/`. Cada arquivo `.md` é descoberto automaticamente e lido sob demanda pela IA via `read_skill`.
 
-Bootstrap or manage skills:
+Comandos de habilidades:
 
 ```powershell
-bun run start -- skills            # list discovered skills (or `siliconflower skills`)
-bun run start -- sync              # copy bundled *.md into ~/.siliconflower/skills (alias for `skills sync`)
-```
-
-Recommended skill layout:
-
-```markdown
-# Skill name
-
-## When to apply
-...
-
-## Guidelines
-...
-
-## Response format
-...
+bun run start -- skills   # Lista as habilidades descobertas
+bun run start -- sync     # Sincroniza habilidades padrão do pacote
 ```
 
 ---
 
-## Modes
+## 📦 Compilando Executável Standalone (.exe)
 
-| Mode          | Focus                                                                  |
-|---------------|------------------------------------------------------------------------|
-| `programação` | Read, write, review, refactor code. Follow project conventions.        |
-| `sistema`     | Windows admin: PowerShell, batch, backup, privacy, registry.           |
-| `plano`       | Read-only exploration & planning. Modifying tools are blocked until user approves. |
-
-Switch at runtime with `Ctrl+O`, or override the default with `--mode plano`.
-
----
-
-## Logs
+Você pode gerar um arquivo `.exe` 100% independente para Windows:
 
 ```powershell
-bun run start -- logs          # last 50 lines
-bun run start -- logs -n 200   # last 200 lines
+bun run build
 ```
 
-Levels: `INFO`, `OK`, `TOOL`, `WARN`, `ERROR`. Automatic rotation at 200 KB.
+O binário será gerado em `dist/siliconflower.exe`. Para instalá-lo no seu `%PATH%` de usuário:
+
+```powershell
+npm run install:bin
+```
 
 ---
 
-## Project layout
+## 📁 Estrutura do Projeto
 
-```
+```text
 siliconflower/
-|-- bin/
-|   `-- siliconflower.js     # launcher: bun -> tsx -> npx tsx
-|-- src/
-|   |-- index.tsx            # commander CLI + entry
-|   |-- App.tsx              # ink/React TUI (with shortcut fix & history windowing)
-|   |-- MarkdownText.tsx     # clean Windows-compatible Markdown & code renderer
-|   |-- llm.ts               # OpenAI + Anthropic streaming, reasoning, tools
-|   |-- context.ts           # token estimation, history compression & output persistence
-|   |-- grep.ts              # native recursive file content search engine
-|   |-- task.ts              # subagent runner for isolated sub-tasks
-|   |-- todo.ts              # session To-Do list state manager
-|   |-- mcp.ts               # MCP stdio client manager
-|   |-- tools.ts             # native file-system tools (with 60s timeout & path protection)
-|   |-- glob-util.ts         # glob -> regex search with brace expansion & character classes
-|   |-- skills.ts            # skill loader with auto-sync + read_skill tool
-|   |-- modes.ts             # modes (programação / sistema / plano) + system prompts
-|   |-- logger.ts            # append-only log with rotation (200 KB) & filters
-|   |-- config.ts            # ~/.siliconflower/config.json persistence & env fallbacks
-|   |-- wizard.ts            # first-run configuration wizard (with editor fallback)
-|   |-- ascii.ts             # ASCII logo (terminal-safe)
-|   `-- types.ts             # shared types and enums
-|-- tests/                   # unit test suite (bun test)
-|-- scripts/
-|   `-- install.ps1          # install the standalone .exe to PATH
-|-- build.ts                 # bun build --compile pipeline
-|-- .env.example             # environment variables template
-|-- LLMS.md                  # LLM architecture & context guide for future AI agents
-|-- CHANGELOG.md             # version history and release notes
-|-- package.json
-|-- tsconfig.json
-|-- LICENSE
-`-- README.md
+├── bin/
+│   └── siliconflower.js     # Inicializador híbrido (Bun -> tsx -> npx tsx)
+├── src/
+│   ├── index.tsx            # Ponto de entrada CLI (Commander)
+│   ├── App.tsx              # TUI Ink/React, barra de status e atalhos
+│   ├── MarkdownText.tsx     # Renderizador de Markdown e código no terminal
+│   ├── llm.ts               # Adaptador de streaming OpenAI/Anthropic & Reasoning
+│   ├── context.ts           # Gestão de tokens, compressão de histórico e outputs
+│   ├── grep.ts              # Mecanismo nativo de busca por texto/regex
+│   ├── task.ts              # Executor de subagentes autônomos
+│   ├── todo.ts              # Gerenciador do painel de tarefas (To-Do)
+│   ├── mcp.ts               # Cliente gerenciador de servidores MCP stdio
+│   ├── tools.ts             # Ferramentas nativas de sistema de arquivos
+│   ├── glob-util.ts         # Motor de busca glob com suporte a classes de caracteres
+│   ├── skills.ts            # Gerenciador e sincronizador de habilidades (.md)
+│   ├── modes.ts             # Definições de persona (programação / sistema / plano)
+│   ├── logger.ts            # Rotação e filtragem de logs (200 KB)
+│   ├── config.ts            # Gerenciador de configurações e variáveis de ambiente
+│   ├── wizard.ts            # Assistente de configuração inicial
+│   ├── ascii.ts             # Logo e arte ASCII
+│   └── types.ts             # Tipos e interfaces compartilhadas
+├── tests/                   # Suíte de testes unitários (bun test)
+├── scripts/
+│   └── install.ps1          # Script de instalação do .exe no PATH do Windows
+├── build.ts                 # Pipeline de compilação standalone via Bun
+├── LLMS.md                  # Guia de arquitetura e contexto para agentes de IA
+├── CHANGELOG.md             # Histórico de alterações do projeto
+├── package.json
+├── tsconfig.json
+├── LICENSE
+└── README.md
 ```
 
 ---
 
-## Development
+## 📜 Licença
 
-```powershell
-bun install
-bun run typecheck            # tsc --noEmit
-bun run dev                  # run with hot reload via Bun
-bun run build                # produce dist\siliconflower.exe
-```
-
-Stack: TypeScript - Bun - React (ink) - OpenAI SDK - Anthropic SDK -
-MCP SDK - commander - inquirer. No figlet, no Nerd Fonts, no Unicode glyphs.
-
----
-
-## License
-
-MIT. See `LICENSE`.
+Distribuído sob a licença **MIT**. Veja `LICENSE` para mais detalhes.

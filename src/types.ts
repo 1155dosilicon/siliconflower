@@ -39,6 +39,7 @@ export type StreamEvent =
   | { type: "text"; text: string }
   | { type: "tool_call"; id: string; name: string; args: string }
   | { type: "tool_result"; id: string; name: string; result: string; isError: boolean }
+  | { type: "usage"; totalTokens?: number; promptTokens?: number; completionTokens?: number }
   | { type: "error"; message: string }
   | { type: "done"; content: string; reasoning: string }
   | { type: "todo_update"; todos: TodoItem[] }
