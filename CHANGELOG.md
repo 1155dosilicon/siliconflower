@@ -16,6 +16,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Plan Mode (`plano`):** Added `plano` mode (cycling via `Ctrl+O`: `PROG` -> `SISTEMA` -> `PLANO`), blocking modifying tools until a plan is presented to the user.
 - **User Question Tool (`ask_question`):** Tool for requesting decisions or clarifications directly from the user.
 - **Markdown & Code Rendering (`src/MarkdownText.tsx`):** Clean Windows-compatible Markdown renderer for headers, code blocks, bold/italic, and bullet lists in the TUI.
+- **Log Management & Inspection (`read_logs` & `src/logger.ts`):** Auto-rotation at 200 KB, CLI filtering (`siliconflower logs --level error --search keyword --clear`), and native `read_logs` tool for focused LLM error diagnostics.
+- **LLM Agent Guide (`LLMS.md`):** Added a dedicated project architecture and context guide for future LLM agents, detailing what files to read and what directories to ignore.
 
 ### Fixed
 - **Shortcut Input Handler:** Fixed `Ctrl+O` and `Ctrl+E` keyboard event handling in Windows Terminal / PowerShell to prevent trailing shortcut characters (`'o'`, `'e'`) from polluting the input field.

@@ -290,7 +290,7 @@ bun run start -- logs          # last 50 lines
 bun run start -- logs -n 200   # last 200 lines
 ```
 
-Levels: `INFO`, `OK`, `TOOL`, `WARN`, `ERROR`. Automatic rotation at 1 MB.
+Levels: `INFO`, `OK`, `TOOL`, `WARN`, `ERROR`. Automatic rotation at 200 KB.
 
 ---
 
@@ -303,13 +303,18 @@ siliconflower/
 |-- src/
 |   |-- index.tsx            # commander CLI + entry
 |   |-- App.tsx              # ink/React TUI (with shortcut fix & history windowing)
+|   |-- MarkdownText.tsx     # clean Windows-compatible Markdown & code renderer
 |   |-- llm.ts               # OpenAI + Anthropic streaming, reasoning, tools
+|   |-- context.ts           # token estimation, history compression & output persistence
+|   |-- grep.ts              # native recursive file content search engine
+|   |-- task.ts              # subagent runner for isolated sub-tasks
+|   |-- todo.ts              # session To-Do list state manager
 |   |-- mcp.ts               # MCP stdio client manager
 |   |-- tools.ts             # native file-system tools (with 60s timeout & path protection)
 |   |-- glob-util.ts         # glob -> regex search with brace expansion & character classes
 |   |-- skills.ts            # skill loader with auto-sync + read_skill tool
-|   |-- modes.ts             # modes + system prompts
-|   |-- logger.ts            # append-only log with rotation
+|   |-- modes.ts             # modes (programação / sistema / plano) + system prompts
+|   |-- logger.ts            # append-only log with rotation (200 KB) & filters
 |   |-- config.ts            # ~/.siliconflower/config.json persistence & env fallbacks
 |   |-- wizard.ts            # first-run configuration wizard (with editor fallback)
 |   |-- ascii.ts             # ASCII logo (terminal-safe)
@@ -319,6 +324,8 @@ siliconflower/
 |   `-- install.ps1          # install the standalone .exe to PATH
 |-- build.ts                 # bun build --compile pipeline
 |-- .env.example             # environment variables template
+|-- LLMS.md                  # LLM architecture & context guide for future AI agents
+|-- CHANGELOG.md             # version history and release notes
 |-- package.json
 |-- tsconfig.json
 |-- LICENSE
