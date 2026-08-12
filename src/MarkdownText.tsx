@@ -76,6 +76,13 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({ children }) => {
           {renderInline(line.slice(2))}
         </Text>
       );
+    } else if (line.trim().startsWith("|")) {
+      // Markdown table row
+      elements.push(
+        <Text key={idx} color="cyan">
+          {renderInline(line)}
+        </Text>
+      );
     } else {
       // Standard paragraph
       elements.push(

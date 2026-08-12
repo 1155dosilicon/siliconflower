@@ -175,6 +175,9 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
     void log("info", `LLM step ${step}: stream conectado`);
 
     let finishReason: string | null = null;
+    let stepHasText = false;
+    let stepHasThinking = false;
+
     for await (const chunk of stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>) {
       if (chunk.usage) {
         yield {
@@ -195,13 +198,32 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
         | undefined;
       if (!delta) continue;
       if (delta.reasoning_content) {
+        if (!stepHasThinking && finalThinking && !finalThinking.endsWith("\n") && !delta.reasoning_content.startsWith("\n")) {
+          const sep = "\n\n";
+          finalThinking += sep;
+          yield { type: "thinking", text: sep };
+        }
+        stepHasThinking = true;
         thinking += delta.reasoning_content;
         yield { type: "thinking", text: delta.reasoning_content };
       } else if ((delta as { reasoning?: string }).reasoning) {
-        thinking += (delta as { reasoning?: string }).reasoning!;
-        yield { type: "thinking", text: (delta as { reasoning?: string }).reasoning! };
+        const r = (delta as { reasoning?: string }).reasoning!;
+        if (!stepHasThinking && finalThinking && !finalThinking.endsWith("\n") && !r.startsWith("\n")) {
+          const sep = "\n\n";
+          finalThinking += sep;
+          yield { type: "thinking", text: sep };
+        }
+        stepHasThinking = true;
+        thinking += r;
+        yield { type: "thinking", text: r };
       }
       if (delta.content) {
+        if (!stepHasText && finalContent && !finalContent.endsWith("\n") && !delta.content.startsWith("\n")) {
+          const sep = "\n\n";
+          finalContent += sep;
+          yield { type: "text", text: sep };
+        }
+        stepHasText = true;
         content += delta.content;
         yield { type: "text", text: delta.content };
       }
@@ -418,6 +440,9 @@ async function* streamAnthropic(opts: ChatOptions): AsyncGenerator<StreamEvent> 
     });
     void log("info", `LLM step ${step}: stream Anthropic conectado`);
 
+    let stepHasText = false;
+    let stepHasThinking = false;
+
     for await (const event of stream) {
       switch (event.type) {
         case "message_start": {
@@ -452,9 +477,21 @@ async function* streamAnthropic(opts: ChatOptions): AsyncGenerator<StreamEvent> 
         case "content_block_delta": {
           const d = event.delta as Anthropic.RawContentBlockDeltaEvent["delta"];
           if (d.type === "text_delta" && "text" in d) {
+            if (!stepHasText && finalContent && !finalContent.endsWith("\n") && !d.text.startsWith("\n")) {
+              const sep = "\n\n";
+              finalContent += sep;
+              yield { type: "text", text: sep };
+            }
+            stepHasText = true;
             content += d.text;
             yield { type: "text", text: d.text };
           } else if (d.type === "thinking_delta" && "thinking" in d) {
+            if (!stepHasThinking && finalThinking && !finalThinking.endsWith("\n") && !d.thinking.startsWith("\n")) {
+              const sep = "\n\n";
+              finalThinking += sep;
+              yield { type: "thinking", text: sep };
+            }
+            stepHasThinking = true;
             thinking += d.thinking;
             yield { type: "thinking", text: d.thinking };
           }
