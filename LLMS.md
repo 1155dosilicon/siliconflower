@@ -59,7 +59,31 @@ Quando precisar alterar ou adicionar uma funcionalidade, consulte apenas o arqui
 
 ---
 
-## 5. Comandos de Verificação e Validação
+## 5. Regras Obrigatórias para Atualização de Versões e Arquivos Dependentes
+
+**Sempre que realizar correções, refatorações ou adicionar funcionalidades, siga RIGOROSAMENTE estas etapas:**
+
+1. **Sincronização da Versão (3 Arquivos Obrigatórios):**
+   Ao incrementar a versão (ex: de `0.2.0` para `0.2.1`), atualize a versão em TODOS os três arquivos simultaneamente:
+   - `package.json` (`"version": "X.Y.Z"`)
+   - `src/index.tsx` (`.version("X.Y.Z")`)
+   - `README.md` (`![Version](https://img.shields.io/badge/version-X.Y.Z-blue.svg)`)
+
+2. **Registro Detalhado no `CHANGELOG.md`:**
+   NUNCA ignore o `CHANGELOG.md`. Crie uma seção para a nova versão (ex: `## [0.2.1] - YYYY-MM-DD`) e liste detalhadamente sob `### Added` ou `### Fixed`:
+   - Nome do arquivo/módulo alterado.
+   - Causa raiz e descrição precisa do bug ou funcionalidade.
+   - O que foi feito para corrigir/melhorar.
+
+3. **Recompilação e Reinstalação do Binário:**
+   Após qualquer alteração no código `src/`:
+   - Execute `bun run build` para regerar `dist/siliconflower.exe`.
+   - Execute `bun run install:bin` caso precise testar a instalação no sistema.
+   - Caso o usuário solicite pacote/zip de distribuição (ex: para o GitHub), recrie o arquivo `.zip` com os arquivos atualizados.
+
+---
+
+## 6. Comandos de Verificação e Validação
 
 Após realizar alterações, SEMPRE valide o projeto com estes comandos:
 

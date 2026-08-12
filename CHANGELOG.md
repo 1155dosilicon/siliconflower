@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-08-12
+
+### Fixed
+- **OpenAI Tool Call History (`src/llm.ts`):** Preserved `toolCalls` metadata on assistant messages during OpenAI API payload conversion, fixing HTTP 400 `tool_call_id` mismatch errors in multi-turn history.
+- **Anthropic Message Role Alternation (`src/llm.ts`):** Fixed message role sequence builder for Anthropic API by merging consecutive tool results into the preceding user message to satisfy role alternation requirements.
+- **Grep Regex Syntax Error Fallback (`src/grep.ts`):** Added `SyntaxError` fallback to literal string matching when unescaped regex special characters are supplied to `grep_content`.
+- **Config Enum Normalization (`src/config.ts`):** Added strict validation against `REASONING_LEVELS` and `MODES` in config normalization.
+- **Anthropic Stream Connection Resolution (`src/llm.ts`):** Enhanced connection promise event listeners to prevent hanging on rapid stream completion or early aborts.
+- **Event Listener Cleanup (`src/llm.ts`):** Fixed memory leak in `withConnectTimeout` by detaching `abort` signal listeners on Promise completion.
+- **Tool Parameter Coercion (`src/tools.ts`):** Coerced stringified numeric arguments for `read_file`, `read_logs`, and `execute_command`.
+- **Tool Timeout Alignment (`src/tools.ts`):** Dynamically scaled `runBuiltin` timeout when custom command timeouts are specified for `execute_command`.
+- **Empty `oldText` Prevention (`src/tools.ts`):** Guarded `edit_file` and `apply_patch` against empty string replacements.
+- **To-Do Status Normalization (`src/tools.ts`):** Added automatic mapping for LLM status/priority synonyms (`done`, `in-progress`, etc.) in `todowrite`.
+- **Subagent Context Propagation (`src/task.ts`):** Passed `ToolContext` with app configuration to subagent tool executions.
+- **Cross-Platform OS Prompts (`src/modes.ts`):** Dynamically generated system prompts matching the current host operating system (`process.platform`).
+- **Log Rotation Concurrency Lock (`src/logger.ts`):** Added rotation lock to prevent file truncation race conditions.
+- **MCP Env Type Safety (`src/mcp.ts`):** Sanitized environment variables passed to stdio transport processes.
+
 ## [0.2.0] - 2026-08-11
 
 ### Added

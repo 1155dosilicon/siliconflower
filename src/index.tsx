@@ -15,7 +15,7 @@ const program = new Command();
 program
   .name("siliconflower")
   .description("CLI/TUI AI agent with MCP, reasoning, skills, modes, and OpenAI/Anthropic-compatible backends.")
-  .version("0.2.0")
+  .version("0.2.1")
   .option("-m, --model <id>", "override the model")
   .option("-r, --reasoning <level>", `reasoning level: ${REASONING_LEVELS.join(", ")}`)
   .option("--mode <mode>", `mode: ${MODES.join(", ")}`)
