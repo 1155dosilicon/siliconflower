@@ -96,6 +96,7 @@ export const MarkdownText: React.FC<MarkdownTextProps> = ({ children }) => {
         paddingX={1}
         marginY={1}
       >
+        {codeLang ? <Text color="yellow" bold>{codeLang}</Text> : null}
         <Text color="green">{codeBuffer.join("\n")}</Text>
       </Box>
     );

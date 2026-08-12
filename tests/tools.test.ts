@@ -33,4 +33,27 @@ describe("tools", () => {
     expect(res.isError).toBe(false);
     expect(res.result).toContain("hello siliconflower");
   });
+
+  test("edit_file rejects empty oldText", async () => {
+    const res = await runBuiltin("edit_file", { path: "package.json", oldText: "", newText: "foo" });
+    expect(res.isError).toBe(true);
+    expect(res.result).toContain("oldText não pode ser vazio");
+  });
+
+  test("apply_patch rejects empty oldText in changes", async () => {
+    const res = await runBuiltin("apply_patch", { path: "package.json", changes: [{ oldText: "", newText: "foo" }] });
+    expect(res.isError).toBe(true);
+    expect(res.result).toContain("oldText não pode ser vazio");
+  });
+
+  test("todowrite normalizes status and priority synonyms", async () => {
+    const res = await runBuiltin("todowrite", {
+      todos: [
+        { content: "Task 1", status: "done", priority: "HIGH" },
+        { content: "Task 2", status: "in-progress", priority: "LOW" },
+      ],
+    });
+    expect(res.isError).toBe(false);
+    expect(res.result).toContain("2 itens");
+  });
 });

@@ -28,10 +28,17 @@ export class McpManager {
   }
 
   private async connect(name: string, cfg: McpServerConfig): Promise<void> {
+    const rawEnv = { ...process.env, ...(cfg.env ?? {}) };
+    const cleanEnv: Record<string, string> = {};
+    for (const [k, v] of Object.entries(rawEnv)) {
+      if (v !== undefined && v !== null) {
+        cleanEnv[k] = String(v);
+      }
+    }
     const transport = new StdioClientTransport({
       command: cfg.command,
       args: cfg.args ?? [],
-      env: { ...process.env, ...(cfg.env ?? {}) } as Record<string, string>,
+      env: cleanEnv,
     });
     const client = new Client(
       { name: "siliconflower", version: "0.1.0" },

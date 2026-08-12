@@ -32,7 +32,7 @@ Instrução: execute o trabalho usando as ferramentas disponíveis e responda co
       reasoning: "none",
       executeTool: async (name, args) => {
         if (isBuiltin(name)) {
-          return runBuiltin(name, args);
+          return runBuiltin(name, args, { config: opts.config });
         }
         return { result: `Ferramenta ${name} não disponível no subagente`, isError: true };
       },

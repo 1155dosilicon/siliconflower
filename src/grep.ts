@@ -34,7 +34,13 @@ function matchesGlob(filename: string, pattern?: string): boolean {
 
 export async function searchContent(opts: GrepOptions): Promise<GrepMatch[]> {
   const { basePath, pattern, includePattern, maxMatches = 200 } = opts;
-  const regex = new RegExp(pattern, "i");
+  let regex: RegExp;
+  try {
+    regex = new RegExp(pattern, "i");
+  } catch {
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    regex = new RegExp(escaped, "i");
+  }
   const matches: GrepMatch[] = [];
 
   async function walk(dir: string) {

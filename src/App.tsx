@@ -260,17 +260,22 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
         setStatus(hadError ? "erro" : "pronto");
       } catch (e) {
         hadError = true;
-        const errMsg = e instanceof Error ? e.message : String(e);
-        setError(errMsg);
-        await log("error", `Stream failed: ${errMsg}`);
-        setStatus("erro");
+        const isAbort = (e instanceof Error && e.name === "AbortError") || /abort/i.test(String(e));
+        const errMsg = isAbort ? "Operação cancelada pelo usuário" : (e instanceof Error ? e.message : String(e));
+        if (!isAbort) {
+          setError(errMsg);
+          await log("error", `Stream failed: ${errMsg}`);
+          setStatus("erro");
+        } else {
+          setStatus("cancelado");
+        }
         if (!assistantMsgAdded) {
           assistantMsgAdded = true;
           setMessages((m) => [
             ...m,
             {
               role: "assistant",
-              content: accText || `[Erro: ${errMsg}]`,
+              content: accText || `[${errMsg}]`,
               reasoning: accThinking || undefined,
             },
           ]);

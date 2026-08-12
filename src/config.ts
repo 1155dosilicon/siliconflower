@@ -1,7 +1,9 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir, readFile, writeFile, access } from "node:fs/promises";
-import type { AppConfig, McpServerConfig, Mode, Provider, ReasoningLevel } from "./types.js";
+import type { AppConfig, McpServerConfig, Provider } from "./types.js";
+import { REASONING_LEVELS } from "./types.js";
+import { MODES } from "./modes.js";
 
 const CONFIG_DIR = join(homedir(), ".siliconflower");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
@@ -60,13 +62,15 @@ function normalize(data: Partial<AppConfig>): AppConfig {
   const apiKey = (process.env.SILICONFLOWER_API_KEY || data.apiKey || "").trim();
   const baseURL = (process.env.SILICONFLOWER_BASE_URL || data.baseURL || "").trim();
   const model = (process.env.SILICONFLOWER_MODEL || data.model || "").trim();
+  const reasoning = data.reasoning && REASONING_LEVELS.includes(data.reasoning) ? data.reasoning : "high";
+  const mode = data.mode && (MODES as readonly string[]).includes(data.mode) ? data.mode : "programação";
   return {
     provider,
     baseURL,
     apiKey,
     model,
-    reasoning: (data.reasoning as ReasoningLevel) ?? "high",
-    mode: (data.mode as Mode) ?? "programação",
+    reasoning,
+    mode,
     system: data.system?.trim() || undefined,
     mcpServers: (data.mcpServers ?? {}) as Record<string, McpServerConfig>,
   };

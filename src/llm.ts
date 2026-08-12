@@ -54,9 +54,19 @@ function buildOpenAIMessages(
   const out: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
   if (config.system) out.push({ role: "system", content: config.system });
   for (const m of messages) {
-    if (m.role === "user") out.push({ role: "user", content: m.content });
-    else if (m.role === "assistant") out.push({ role: "assistant", content: m.content });
-    else if (m.role === "tool") {
+    if (m.role === "user") {
+      out.push({ role: "user", content: m.content });
+    } else if (m.role === "assistant") {
+      if (m.toolCalls && m.toolCalls.length > 0) {
+        out.push({
+          role: "assistant",
+          content: m.content || "",
+          tool_calls: m.toolCalls,
+        });
+      } else {
+        out.push({ role: "assistant", content: m.content });
+      }
+    } else if (m.role === "tool") {
       out.push({
         role: "tool",
         content: m.content,
@@ -83,20 +93,31 @@ const STREAM_CONNECT_TIMEOUT_MS = 90_000;
 async function withConnectTimeout<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
+      cleanup();
       reject(new Error(`Sem resposta da API após ${STREAM_CONNECT_TIMEOUT_MS / 1000}s (timeout de conexão)`));
     }, STREAM_CONNECT_TIMEOUT_MS);
-    if (signal?.aborted) {
+
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException("Abortado", "AbortError"));
+    };
+
+    const cleanup = () => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    };
+
+    if (signal?.aborted) {
+      cleanup();
       reject(new DOMException("Abortado", "AbortError"));
       return;
     }
-    signal?.addEventListener("abort", () => {
-      clearTimeout(timer);
-      reject(new DOMException("Abortado", "AbortError"));
-    }, { once: true });
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+
     promise.then(
-      (v) => { clearTimeout(timer); resolve(v); },
-      (e) => { clearTimeout(timer); reject(e); }
+      (v) => { cleanup(); resolve(v); },
+      (e) => { cleanup(); reject(e); }
     );
   });
 }
@@ -277,6 +298,8 @@ function buildAnthropicMessages(
       if (last && last.role === "user") {
         if (typeof last.content === "string") {
           last.content += "\n\n" + m.content;
+        } else if (Array.isArray(last.content)) {
+          last.content.push({ type: "text", text: m.content });
         }
       } else {
         out.push({ role: "user", content: m.content });
@@ -291,16 +314,27 @@ function buildAnthropicMessages(
         out.push({ role: "assistant", content: m.content });
       }
     } else if (m.role === "tool") {
-      out.push({
-        role: "user",
-        content: [
-          {
-            type: "tool_result",
-            tool_use_id: m.toolName ?? "call",
-            content: m.content,
-          },
-        ] as Anthropic.ToolResultBlockParam[],
-      });
+      const toolBlock: Anthropic.ToolResultBlockParam = {
+        type: "tool_result",
+        tool_use_id: m.toolName ?? "call",
+        content: m.content,
+      };
+      const last = out[out.length - 1];
+      if (last && last.role === "user") {
+        if (Array.isArray(last.content)) {
+          (last.content as Anthropic.ContentBlock[]).push(toolBlock as unknown as Anthropic.ContentBlock);
+        } else if (typeof last.content === "string") {
+          last.content = [
+            ...(last.content ? [{ type: "text" as const, text: last.content }] : []),
+            toolBlock as unknown as Anthropic.ContentBlock,
+          ];
+        }
+      } else {
+        out.push({
+          role: "user",
+          content: [toolBlock as unknown as Anthropic.ContentBlock],
+        });
+      }
     }
   }
   return out;
@@ -352,11 +386,18 @@ async function* streamAnthropic(opts: ChatOptions): AsyncGenerator<StreamEvent> 
     );
     // Wait for first connection event with timeout
     const connectPromise = new Promise<void>((resolve, reject) => {
+      let done = false;
       const cleanup = () => {
-        stream.off("streamEvent", onEvent);
+        if (done) return;
+        done = true;
+        stream.off("streamEvent", onDone);
+        stream.off("connect", onDone);
+        stream.off("message", onDone);
+        stream.off("end", onDone);
         stream.off("error", onError);
+        stream.off("abort", onError);
       };
-      const onEvent = () => {
+      const onDone = () => {
         cleanup();
         resolve();
       };
@@ -364,8 +405,12 @@ async function* streamAnthropic(opts: ChatOptions): AsyncGenerator<StreamEvent> 
         cleanup();
         reject(err);
       };
-      stream.on("streamEvent", onEvent);
+      stream.on("streamEvent", onDone);
+      stream.on("connect", onDone);
+      stream.on("message", onDone);
+      stream.on("end", onDone);
       stream.on("error", onError);
+      stream.on("abort", onError);
     });
     await withConnectTimeout(connectPromise, signal).catch((err) => {
       stream.abort();

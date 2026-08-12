@@ -67,8 +67,10 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       try {
         const raw = await readFile(path, "utf8");
         const lines = raw.split(/\r?\n/);
-        const offset = typeof a.offset === "number" && a.offset > 0 ? Math.floor(a.offset) : 1;
-        const limit = typeof a.limit === "number" && a.limit > 0 ? Math.floor(a.limit) : 2000;
+        const rawOffset = Number(a.offset);
+        const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 1;
+        const rawLimit = Number(a.limit);
+        const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 2000;
 
         const slice = lines.slice(offset - 1, offset - 1 + limit);
         const formatted = slice.map((line, idx) => `${offset + idx}: ${line}`).join("\n");
@@ -154,11 +156,14 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       if (isPathBlocked(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
       try {
         const original = await readFile(path, "utf8");
-        const oldTextStr = String(a.oldText);
+        const oldTextStr = String(a.oldText ?? "");
+        if (!oldTextStr) {
+          return { result: "oldText não pode ser vazio", isError: true };
+        }
         if (!original.includes(oldTextStr)) {
           return { result: `oldText não encontrado em ${path}`, isError: true };
         }
-        const newTextStr = String(a.newText);
+        const newTextStr = String(a.newText ?? "");
         const all = Boolean(a.replaceAll);
         let updated: string;
         if (all) {
@@ -210,11 +215,16 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
         let content = await readFile(path, "utf8");
         for (let i = 0; i < changes.length; i++) {
           const { oldText, newText } = changes[i];
-          if (!content.includes(oldText)) {
+          const oldTextStr = String(oldText ?? "");
+          if (!oldTextStr) {
+            return { result: `Erro no bloco ${i + 1}: oldText não pode ser vazio`, isError: true };
+          }
+          if (!content.includes(oldTextStr)) {
             return { result: `Erro no bloco ${i + 1}: oldText não encontrado em ${path}`, isError: true };
           }
-          const idx = content.indexOf(oldText);
-          content = content.slice(0, idx) + newText + content.slice(idx + oldText.length);
+          const idx = content.indexOf(oldTextStr);
+          const newTextStr = String(newText ?? "");
+          content = content.slice(0, idx) + newTextStr + content.slice(idx + oldTextStr.length);
         }
         await writeFile(path, content, "utf8");
         await log("info", `apply_patch: ${path} (${changes.length} alterações)`);
@@ -248,12 +258,25 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     },
     run: async (a) => {
       const rawTodos = (a.todos as { content: string; status: any; priority: any }[]) ?? [];
-      const formatted: TodoItem[] = rawTodos.map((t, i) => ({
-        id: `todo_${i + 1}`,
-        content: String(t.content),
-        status: t.status ?? "pending",
-        priority: t.priority ?? "medium",
-      }));
+      const formatted: TodoItem[] = rawTodos.map((t, i) => {
+        let status: TodoItem["status"] = "pending";
+        const st = String(t.status ?? "").toLowerCase();
+        if (["completed", "done", "finished"].includes(st)) status = "completed";
+        else if (["in_progress", "in-progress", "doing"].includes(st)) status = "in_progress";
+        else if (["cancelled", "canceled"].includes(st)) status = "cancelled";
+        else if (st === "pending" || st === "todo") status = "pending";
+
+        let priority: TodoItem["priority"] = "medium";
+        const pr = String(t.priority ?? "").toLowerCase();
+        if (["high", "medium", "low"].includes(pr)) priority = pr as TodoItem["priority"];
+
+        return {
+          id: `todo_${i + 1}`,
+          content: String(t.content ?? ""),
+          status,
+          priority,
+        };
+      });
       setTodos(formatted);
       return { result: `Lista de To-Dos atualizada (${formatted.length} itens).`, isError: false };
     },
@@ -316,7 +339,8 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       },
     },
     run: async (a) => {
-      const lines = typeof a.lines === "number" && a.lines > 0 ? Math.min(Math.floor(a.lines), 200) : 50;
+      const rawLines = Number(a.lines);
+      const lines = Number.isFinite(rawLines) && rawLines > 0 ? Math.min(Math.floor(rawLines), 200) : 50;
       const level = a.level ? String(a.level) : undefined;
       const search = a.search ? String(a.search) : undefined;
 
@@ -494,13 +518,14 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       const cmd = String(a.command ?? "").trim();
       if (!cmd) return { result: "Nenhum comando fornecido.", isError: true };
       const workDir = a.cwd ? toAbs(String(a.cwd)) : process.cwd();
-      const timeout = typeof a.timeout === "number" && a.timeout > 0 ? Math.min(a.timeout, 120000) : 30000;
+      const rawTimeout = Number(a.timeout);
+      const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.min(rawTimeout, 120000) : 30000;
       const isWin = process.platform === "win32";
       const execOptions = {
         cwd: workDir,
         timeout,
         maxBuffer: 10 * 1024 * 1024,
-        shell: isWin ? "powershell.exe" : "/bin/bash",
+        shell: isWin ? "powershell.exe" : (process.env.SHELL || "/bin/bash"),
         windowsHide: true,
       };
       try {
@@ -545,7 +570,9 @@ export async function runBuiltin(
 ): Promise<{ result: string; isError: boolean }> {
   const tool = BUILTIN_TOOLS.find((t) => t.name === name);
   if (!tool) return { result: `ferramenta nativa desconhecida: ${name}`, isError: true };
-  const TOOL_TIMEOUT_MS = 60000;
+  const rawTimeout = Number(args?.timeout);
+  const toolTimeoutArg = Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout + 5000 : 60000;
+  const TOOL_TIMEOUT_MS = Math.max(60000, toolTimeoutArg);
   let timer: ReturnType<typeof setTimeout>;
   const timeoutPromise = new Promise<{ result: string; isError: boolean }>((resolve) => {
     timer = setTimeout(

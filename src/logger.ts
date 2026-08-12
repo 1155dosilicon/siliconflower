@@ -9,6 +9,7 @@ const MAX_BYTES = 200 * 1024; // 200 KB (~1,500 lines max)
 export type LogLevel = "info" | "tool" | "warn" | "error" | "ok";
 
 let ensured = false;
+let isRotating = false;
 
 async function ensure() {
   if (ensured) return;
@@ -21,6 +22,8 @@ async function ensure() {
 }
 
 async function rotateIfNeeded() {
+  if (isRotating) return;
+  isRotating = true;
   try {
     const st = await stat(LOG_FILE).catch(() => null);
     if (st && st.size > MAX_BYTES) {
@@ -32,6 +35,8 @@ async function rotateIfNeeded() {
     }
   } catch {
     /* rotation best-effort */
+  } finally {
+    isRotating = false;
   }
 }
 
