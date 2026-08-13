@@ -22,8 +22,9 @@ export function modeLabel(m: Mode): string {
   return "PLANO";
 }
 
-export function buildSystemPrompt(mode: Mode, userSystem: string | undefined, skills: Skill[]): string {
+export function buildSystemPrompt(mode: Mode, userSystem: string | undefined, skills: Skill[], memoryPrompt?: string): string {
   const parts = [BASE_PERSONA, MODE_FOCUS[mode]];
+  if (memoryPrompt?.trim()) parts.push(memoryPrompt.trim());
   if (userSystem?.trim()) parts.push(`Preferências adicionais do usuário:\n${userSystem.trim()}`);
   if (skills.length) {
     const list = skills.map((s) => `- ${s.name}${s.title ? `: ${s.title}` : ""}`).join("\n");

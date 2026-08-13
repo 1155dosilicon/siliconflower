@@ -7,6 +7,7 @@ import { McpManager } from "./mcp.js";
 import { builtinToolsAsMcp, isBuiltin, runBuiltin } from "./tools.js";
 import { loadSkills, readSkillContent, SKILL_TOOL, type Skill } from "./skills.js";
 import { buildSystemPrompt, modeLabel, nextMode, type Mode } from "./modes.js";
+import { buildMemorySystemPrompt } from "./services/memory.js";
 import { onTodosChange } from "./todo.js";
 import { estimateTokens, formatTokenCount } from "./context.js";
 import { MarkdownText } from "./MarkdownText.js";
@@ -198,7 +199,8 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
         { role: "user" as const, content: cleanText },
       ];
 
-      const systemPrompt = buildSystemPrompt(modeRef.current, config.system, skillsRef.current);
+      const memoryPrompt = await buildMemorySystemPrompt(process.cwd());
+      const systemPrompt = buildSystemPrompt(modeRef.current, config.system, skillsRef.current, memoryPrompt);
       const controller = new AbortController();
       abortRef.current = controller;
 

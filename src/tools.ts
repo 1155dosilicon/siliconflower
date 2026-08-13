@@ -5,7 +5,12 @@ import { promisify } from "node:util";
 import { search } from "./glob-util.js";
 import { searchContent } from "./grep.js";
 import { setTodos } from "./todo.js";
-import { runSubagentTask } from "./task.js";
+import { runSubagentTask, listBackgroundTasks } from "./services/subagent.js";
+import { smartEditFile } from "./services/smart-edit.js";
+import { generateRepoMap, findSymbolInRepo } from "./services/repomap.js";
+import { saveMemory, recallMemories, forgetMemory } from "./services/memory.js";
+import { enterWorktree, exitWorktree, listWorktrees } from "./services/worktree.js";
+import { runHook } from "./core/hooks.js";
 import { processToolOutput } from "./context.js";
 import { tailLogs } from "./logger.js";
 import type { AppConfig, McpTool, TodoItem } from "./types.js";
@@ -154,31 +159,13 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     run: async (a) => {
       const path = toAbs(String(a.path));
       if (isPathBlocked(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
-      try {
-        const original = await readFile(path, "utf8");
-        const oldTextStr = String(a.oldText ?? "");
-        if (!oldTextStr) {
-          return { result: "oldText não pode ser vazio", isError: true };
-        }
-        if (!original.includes(oldTextStr)) {
-          return { result: `oldText não encontrado em ${path}`, isError: true };
-        }
-        const newTextStr = String(a.newText ?? "");
-        const all = Boolean(a.replaceAll);
-        let updated: string;
-        if (all) {
-          updated = original.split(oldTextStr).join(newTextStr);
-        } else {
-          const idx = original.indexOf(oldTextStr);
-          updated = original.slice(0, idx) + newTextStr + original.slice(idx + oldTextStr.length);
-        }
-        if (updated === original) return { result: `Nenhuma alteração em ${path}`, isError: false };
-        await writeFile(path, updated, "utf8");
-        await log("info", `edit_file: ${path}`);
-        return { result: `Editado: ${path}`, isError: false };
-      } catch (e) {
-        return { result: `Erro ao editar ${path}: ${String(e)}`, isError: true };
-      }
+      const res = await smartEditFile({
+        path,
+        oldText: String(a.oldText ?? ""),
+        newText: String(a.newText ?? ""),
+        replaceAll: Boolean(a.replaceAll),
+      });
+      return { result: res.result, isError: res.isError };
     },
   },
   {
@@ -284,12 +271,18 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     name: "run_task",
     description:
-      "Executa um subagente autônomo para realizar uma sub-tarefa de pesquisa ou processamento sem poluir o histórico principal.",
+      "Lança um subagente autônomo para executar tarefas complexas, pesquisas ou verificações em paralelo ou em background.",
     inputSchema: {
       type: "object",
       properties: {
-        description: { type: "string", description: "Descrição curta (3-5 palavras) da sub-tarefa" },
-        prompt: { type: "string", description: "Instrução detalhada para o subagente" },
+        description: { type: "string", description: "Resumo curto (3-5 palavras) da tarefa" },
+        prompt: { type: "string", description: "Instruções completas para o subagente" },
+        role: {
+          type: "string",
+          enum: ["general", "research", "verification", "plan"],
+          description: "Especialidade do subagente: general | research | verification | plan",
+        },
+        runInBackground: { type: "boolean", description: "Executar em background sem bloquear o agente principal" },
       },
       required: ["description", "prompt"],
     },
@@ -299,8 +292,180 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       }
       const desc = String(a.description);
       const prompt = String(a.prompt);
-      const result = await runSubagentTask({ config: ctx.config, description: desc, prompt });
+      const role = (a.role as any) || "general";
+      const runInBackground = Boolean(a.runInBackground);
+      const result = await runSubagentTask({
+        config: ctx.config,
+        description: desc,
+        prompt,
+        role,
+        runInBackground,
+      });
       return { result, isError: false };
+    },
+  },
+  {
+    name: "list_background_tasks",
+    description: "Lista todas as tarefas de subagentes executando ou concluídas em background.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+    run: async () => {
+      const tasks = listBackgroundTasks();
+      if (tasks.length === 0) return { result: "Nenhuma tarefa em background.", isError: false };
+      return { result: JSON.stringify(tasks, null, 2), isError: false };
+    },
+  },
+  {
+    name: "repo_map",
+    description:
+      "Gera um mapa estrutural do repositório exibindo arquivos relevantes e suas assinaturas de funções, classes e tipos.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        focusPath: { type: "string", description: "Subdiretório para focar a geração do mapa" },
+        maxFiles: { type: "number", description: "Limite máximo de arquivos no mapa (padrão: 50)" },
+      },
+    },
+    run: async (a) => {
+      const focusPath = a.focusPath ? String(a.focusPath) : undefined;
+      const maxFiles = a.maxFiles ? Number(a.maxFiles) : 50;
+      const res = await generateRepoMap(process.cwd(), { focusPath, maxFiles });
+      return { result: res.mapText, isError: false };
+    },
+  },
+  {
+    name: "find_symbol",
+    description: "Busca um símbolo (função, classe, interface ou variável) através de todo o código do repositório.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        symbolName: { type: "string", description: "Nome do símbolo a buscar" },
+      },
+      required: ["symbolName"],
+    },
+    run: async (a) => {
+      const name = String(a.symbolName);
+      const matches = await findSymbolInRepo(name, process.cwd());
+      if (matches.length === 0) {
+        return { result: `Nenhum símbolo encontrado para '${name}'.`, isError: false };
+      }
+      return { result: JSON.stringify(matches, null, 2), isError: false };
+    },
+  },
+  {
+    name: "save_memory",
+    description:
+      "Salva uma memória persistente (regra de projeto, preferência do usuário ou instrução) que será lembrada em sessões futuras.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Identificador curto da memória" },
+        type: {
+          type: "string",
+          enum: ["user", "feedback", "project", "reference"],
+          description: "Tipo de memória",
+        },
+        description: { type: "string", description: "Descrição em uma linha do objetivo da memória" },
+        content: { type: "string", description: "Conteúdo detalhado da regra ou aprendizado" },
+        scope: {
+          type: "string",
+          enum: ["project", "global"],
+          default: "project",
+          description: "Escopo: 'project' (apenas neste repositório) ou 'global' (para todos os projetos)",
+        },
+      },
+      required: ["name", "type", "description", "content"],
+    },
+    run: async (a) => {
+      const res = await saveMemory({
+        name: String(a.name),
+        type: a.type as any,
+        description: String(a.description),
+        content: String(a.content),
+        scope: (a.scope as any) || "project",
+      });
+      return { result: res.message, isError: false };
+    },
+  },
+  {
+    name: "recall_memory",
+    description: "Consulta memórias persistentes salvas sobre o usuário ou sobre o projeto.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Termo de busca opcional para filtrar memórias" },
+      },
+    },
+    run: async (a) => {
+      const query = a.query ? String(a.query) : undefined;
+      const mems = await recallMemories(query, process.cwd());
+      if (mems.length === 0) {
+        return { result: "Nenhuma memória encontrada.", isError: false };
+      }
+      return { result: JSON.stringify(mems, null, 2), isError: false };
+    },
+  },
+  {
+    name: "forget_memory",
+    description: "Remove uma memória persistente antiga ou desatualizada.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Nome da memória a remover" },
+      },
+      required: ["name"],
+    },
+    run: async (a) => {
+      const res = await forgetMemory(String(a.name), process.cwd());
+      return { result: res.message, isError: res.isError };
+    },
+  },
+  {
+    name: "enter_worktree",
+    description: "Cria e ativa um Git Worktree temporário e isolado para alterações e testes seguros.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        branchName: { type: "string", description: "Nome da nova branch de trabalho isolado" },
+      },
+      required: ["branchName"],
+    },
+    run: async (a) => {
+      const res = await enterWorktree(String(a.branchName), process.cwd());
+      return { result: res.result, isError: res.isError };
+    },
+  },
+  {
+    name: "exit_worktree",
+    description: "Remove um Git Worktree temporário.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        worktreePath: { type: "string", description: "Caminho do worktree a remover" },
+        force: { type: "boolean", description: "Forçar remoção mesmo se houver alterações não salvas" },
+      },
+      required: ["worktreePath"],
+    },
+    run: async (a) => {
+      const res = await exitWorktree(String(a.worktreePath), Boolean(a.force), process.cwd());
+      return { result: res.result, isError: res.isError };
+    },
+  },
+  {
+    name: "list_worktrees",
+    description: "Lista todos os Git Worktrees ativos no repositório.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+    run: async () => {
+      const trees = await listWorktrees(process.cwd());
+      if (trees.length === 0) {
+        return { result: "Nenhum worktree ativo encontrado.", isError: false };
+      }
+      return { result: JSON.stringify(trees, null, 2), isError: false };
     },
   },
   {
@@ -570,6 +735,12 @@ export async function runBuiltin(
 ): Promise<{ result: string; isError: boolean }> {
   const tool = BUILTIN_TOOLS.find((t) => t.name === name);
   if (!tool) return { result: `ferramenta nativa desconhecida: ${name}`, isError: true };
+
+  // Pre-tool hook
+  if (ctx?.config?.hooks) {
+    await runHook("preTool", ctx.config.hooks);
+  }
+
   const rawTimeout = Number(args?.timeout);
   const toolTimeoutArg = Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout + 5000 : 60000;
   const TOOL_TIMEOUT_MS = Math.max(60000, toolTimeoutArg);
@@ -581,7 +752,17 @@ export async function runBuiltin(
     );
   });
   try {
-    return await Promise.race([tool.run(args, ctx), timeoutPromise]);
+    const res = await Promise.race([tool.run(args, ctx), timeoutPromise]);
+
+    // On-edit and Post-tool hooks
+    if (ctx?.config?.hooks) {
+      if (name === "edit_file" || name === "write_file") {
+        await runHook("onEdit", ctx.config.hooks);
+      }
+      await runHook("postTool", ctx.config.hooks);
+    }
+
+    return res;
   } finally {
     clearTimeout(timer!);
   }

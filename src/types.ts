@@ -17,6 +17,12 @@ export interface AppConfig {
   mode?: Mode;
   system?: string;
   mcpServers?: Record<string, McpServerConfig>;
+  hooks?: {
+    preTool?: string;
+    postTool?: string;
+    onEdit?: string;
+    onCommand?: string;
+  };
 }
 
 export interface ChatMessage {
