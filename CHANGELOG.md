@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-08-14
+
+### Fixed
+- **Artifact Type and Metadata Resolution (`src/services/artifact.ts`):** Fixed a bug in `listArtifacts` where non-markdown artifacts (like `.html`, `.json`, `.txt`) were incorrectly categorized as `"markdown"` because they lacked frontmatter headers. Resolved by dynamically inferring the correct type based on the file extension and parsing `updatedAt` from frontmatter metadata when present.
+
+### Added
+- **Artifact Type Verification Tests (`tests/artifact.test.ts`):** Added a new suite of integration tests to verify successful creation, type resolution, and list integration of HTML and JSON artifacts.
+- **Git Worktree Testing (`tests/worktree.test.ts`):** Added a new test suite to cover the `listWorktrees` service in any active git repository environment, raising overall test coverage and reliability.
+
 ## [0.2.1] - 2026-08-12
 
 ### Fixed

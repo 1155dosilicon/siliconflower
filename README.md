@@ -1,6 +1,6 @@
 # 🌸 SILICONFLOWER
 
-![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)
+![Version](https://img.shields.io/badge/version-0.2.2-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20PowerShell-0078D6.svg)
 ![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black.svg)
@@ -209,6 +209,12 @@ O agente possui ferramentas nativas para interagir com o sistema de arquivos e e
 | `search_files` | Busca arquivos usando padrões glob (`**/*.ts`, `*.{ts,tsx}`). |
 | `delete_path` | Exclui arquivos/pastas. Requer confirmação explícita (`confirm=true`). |
 | `execute_command` | Executa comandos no PowerShell (Windows) ou Bash de forma silenciosa e transparente. |
+| `create_artifact` / `read_artifact` / `list_artifacts` / `delete_artifact` | Cria, lê, lista e remove artefatos persistentes estruturados (.html, .json, .md, .txt) no diretório `.siliconflower/artifacts/`. |
+| `save_memory` / `recall_memory` / `forget_memory` | Armazena, consulta e gerencia memórias e regras persistentes entre sessões em escopo de projeto ou global do usuário. |
+| `enter_worktree` / `exit_worktree` / `list_worktrees` | Cria, remove e lista Git Worktrees temporários para desenvolvimento e testes isolados e seguros. |
+| `repo_map` / `find_symbol` | Gera mapa estrutural completo do repositório com assinaturas ou busca símbolos específicos (funções, classes) pelo código. |
+| `read_skill` | Carrega e lê o conteúdo detalhado de instruções de habilidades (.md) do usuário. |
+| `manage_hooks` | Exibe e gerencia a configuração de ganchos (hooks) de execução automatizados do agente. |
 
 > 🛡️ **Segurança e Proteção:** Todas as ferramentas possuem tempo limite de execução (timeout) de 60 segundos, executam com janelas ocultas e impedem acesso a diretórios sensíveis do sistema (`C:\Windows\System32`, `.ssh`, `.aws`, etc.). Saídas extensas são truncadas e salvas em `~/.siliconflower/outputs/`.
 

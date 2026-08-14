@@ -85,16 +85,24 @@ export async function listArtifacts(cwd: string = process.cwd()): Promise<Artifa
             const matchTitle = /^title:\s*"([^"]+)"/m.exec(raw);
             const matchType = /^type:\s*"([^"]+)"/m.exec(raw);
             const matchSummary = /^summary:\s*"([^"]+)"/m.exec(raw);
+            const matchUpdatedAt = /^updatedAt:\s*"([^"]+)"/m.exec(raw);
+
+            const ext = f.split(".").pop()?.toLowerCase();
+            let resolvedType: ArtifactType = "markdown";
+            if (ext === "json") resolvedType = "json";
+            else if (ext === "html") resolvedType = "html";
+            else if (ext === "txt") resolvedType = "code";
+            else if (matchType) resolvedType = matchType[1] as ArtifactType;
 
             const safeId = f.replace(/\.[^/.]+$/, "");
             results.push({
               id: safeId,
               title: matchTitle ? matchTitle[1] : safeId,
-              type: (matchType ? matchType[1] : "markdown") as ArtifactType,
+              type: resolvedType,
               summary: matchSummary ? matchSummary[1] : "Artefato do Siliconflower",
               path: filePath,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
+              createdAt: matchUpdatedAt ? matchUpdatedAt[1] : new Date().toISOString(),
+              updatedAt: matchUpdatedAt ? matchUpdatedAt[1] : new Date().toISOString(),
             });
           } catch {
             // Ignore unreadable artifact files
