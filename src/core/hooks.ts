@@ -1,16 +1,21 @@
-import { exec } from "child_process";
-import { promisify } from "util";
-import { log } from "../logger";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { readFile, access } from "node:fs/promises";
+import { log } from "../logger.js";
 
 const execAsync = promisify(exec);
 
-export type HookEvent = "preTool" | "postTool" | "onEdit" | "onCommand";
+export type HookEvent = "preTool" | "postTool" | "onEdit" | "onCommand" | "onSessionStart" | "onSessionEnd";
 
 export interface HookConfig {
   preTool?: string;
   postTool?: string;
   onEdit?: string;
   onCommand?: string;
+  onSessionStart?: string;
+  onSessionEnd?: string;
 }
 
 export interface HookResult {
@@ -21,23 +26,69 @@ export interface HookResult {
 }
 
 /**
+ * Discovers and loads hook configurations from workspace (.siliconflower/hooks.json) or global (~/.siliconflower/hooks.json).
+ */
+export async function loadHooksConfig(cwd: string = process.cwd()): Promise<HookConfig | undefined> {
+  const localHooksFile = join(cwd, ".siliconflower", "hooks.json");
+  const globalHooksFile = join(homedir(), ".siliconflower", "hooks.json");
+
+  try {
+    await access(localHooksFile);
+    const raw = await readFile(localHooksFile, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    // Fallback to global
+  }
+
+  try {
+    await access(globalHooksFile);
+    const raw = await readFile(globalHooksFile, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    // No hooks file found
+  }
+
+  return undefined;
+}
+
+/**
  * Runs a configured hook shell command for a given event.
  */
 export async function runHook(
   event: HookEvent,
   config?: HookConfig,
-  cwd: string = process.cwd()
+  context: { toolName?: string; toolArgs?: Record<string, unknown>; command?: string; cwd?: string } = {}
 ): Promise<HookResult> {
-  if (!config) return { executed: false };
+  const effectiveCwd = context.cwd || process.cwd();
+  
+  // If no explicit config provided, try loading from workspace/global
+  const effectiveConfig = config || (await loadHooksConfig(effectiveCwd));
+  if (!effectiveConfig) return { executed: false };
 
-  const command = config[event];
+  const command = effectiveConfig[event];
   if (!command || !command.trim()) {
     return { executed: false };
   }
 
   try {
     await log("info", `Executando hook [${event}]: ${command}`);
-    const { stdout, stderr } = await execAsync(command, { cwd, windowsHide: true });
+    
+    // Pass hook context as environment variables
+    const env = {
+      ...process.env,
+      SILICONFLOWER_EVENT: event,
+      SILICONFLOWER_TOOL_NAME: context.toolName || "",
+      SILICONFLOWER_TOOL_ARGS: context.toolArgs ? JSON.stringify(context.toolArgs) : "",
+      SILICONFLOWER_COMMAND: context.command || "",
+    };
+
+    const { stdout, stderr } = await execAsync(command, {
+      cwd: effectiveCwd,
+      env,
+      windowsHide: true,
+      timeout: 30000,
+    });
+
     const output = (stdout + (stderr ? `\nStderr: ${stderr}` : "")).trim();
     return { executed: true, command, output };
   } catch (e: any) {

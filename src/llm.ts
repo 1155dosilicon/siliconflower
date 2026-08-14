@@ -70,7 +70,7 @@ function buildOpenAIMessages(
       out.push({
         role: "tool",
         content: m.content,
-        tool_call_id: m.toolName ?? "call",
+        tool_call_id: m.toolCallId ?? m.toolName ?? "call",
       });
     }
   }
@@ -88,7 +88,7 @@ function buildOpenAITools(tools: McpTool[]): OpenAI.Chat.Completions.ChatComplet
   }));
 }
 
-const STREAM_CONNECT_TIMEOUT_MS = 90_000;
+const STREAM_CONNECT_TIMEOUT_MS = 300_000;
 
 async function withConnectTimeout<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -136,7 +136,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
 
   void log("info", `LLM request: model=${config.model}, tools=${apiTools.length}, reasoning=${reasoning}`);
 
-  for (let step = 0; step < 25; step++) {
+  for (let step = 0; step < 50; step++) {
     let content = "";
     let thinking = "";
     const pendingCalls: {
@@ -152,6 +152,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
           model: config.model,
           messages: working,
           stream: true,
+          max_tokens: 16384,
           stream_options: { include_usage: true },
           ...(withEffort && effort ? { reasoning_effort: effort } : {}),
           ...(apiTools.length ? { tools: apiTools, tool_choice: "auto" } : {}),
@@ -338,7 +339,7 @@ function buildAnthropicMessages(
     } else if (m.role === "tool") {
       const toolBlock: Anthropic.ToolResultBlockParam = {
         type: "tool_result",
-        tool_use_id: m.toolName ?? "call",
+        tool_use_id: m.toolCallId ?? m.toolName ?? "call",
         content: m.content,
       };
       const last = out[out.length - 1];
@@ -389,7 +390,7 @@ async function* streamAnthropic(opts: ChatOptions): AsyncGenerator<StreamEvent> 
   let finalContent = "";
   let finalThinking = "";
 
-  for (let step = 0; step < 25; step++) {
+  for (let step = 0; step < 50; step++) {
     let content = "";
     let thinking = "";
     const pending: { id: string; name: string; input: Record<string, unknown> }[] = [];

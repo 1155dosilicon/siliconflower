@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "fs/promises";
-import { log } from "../logger";
+import { log } from "../logger.js";
 
 export interface EditOptions {
   path: string;
@@ -73,7 +73,7 @@ export async function smartEditFile(options: EditOptions): Promise<EditResult> {
         updatedNorm = normOriginal.slice(0, idx) + normNew + normOriginal.slice(idx + normOld.length);
       }
       // Re-apply CRLF if original used CRLF
-      const finalContent = useCRLF ? updatedNorm.replace(/\n/g, "\r\n") : updatedNorm;
+      const finalContent = useCRLF ? updatedNorm.replace(/\r?\n/g, "\r\n") : updatedNorm;
       await writeFile(path, finalContent, "utf8");
       await log("info", `smartEditFile (normalized_newlines): ${path}`);
       return {
@@ -114,7 +114,7 @@ export async function smartEditFile(options: EditOptions): Promise<EditResult> {
           ...origLines.slice(foundIndex + targetLength),
         ];
         let finalContent = updatedLines.join("\n");
-        if (useCRLF) finalContent = finalContent.replace(/\n/g, "\r\n");
+        if (useCRLF) finalContent = finalContent.replace(/\r?\n/g, "\r\n");
 
         await writeFile(path, finalContent, "utf8");
         await log("info", `smartEditFile (fuzzy_whitespace): ${path}`);

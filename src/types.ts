@@ -30,6 +30,7 @@ export interface ChatMessage {
   content: string;
   reasoning?: string;
   toolName?: string;
+  toolCallId?: string;
   toolCalls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
 }
 

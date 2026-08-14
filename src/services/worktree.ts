@@ -1,7 +1,7 @@
 import { exec } from "child_process";
 import { promisify } from "util";
 import { join } from "path";
-import { log } from "../logger";
+import { log } from "../logger.js";
 
 const execAsync = promisify(exec);
 

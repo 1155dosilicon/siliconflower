@@ -45,7 +45,7 @@ export function estimateMessagesTokens(messages: ChatMessage[]): number {
  * If output exceeds maxChars (default 8000), saves the full output to a temp file
  * and returns a truncated version with a clear reference and total lines/size.
  */
-export async function processToolOutput(output: string, maxChars = 8000): Promise<string> {
+export async function processToolOutput(output: string, maxChars = 32000): Promise<string> {
   if (output.length <= maxChars) {
     return output;
   }
@@ -82,14 +82,14 @@ export async function processToolOutput(output: string, maxChars = 8000): Promis
  * Compresses chat history when token threshold is reached or message count is high.
  * Keeps system/recent messages intact, compresses old tool outputs.
  */
-export function compressHistory(messages: ChatMessage[], maxTokens = 20000): ChatMessage[] {
+export function compressHistory(messages: ChatMessage[], maxTokens = 90000): ChatMessage[] {
   const currentTokens = estimateMessagesTokens(messages);
-  if (currentTokens <= maxTokens && messages.length <= 20) {
+  if (currentTokens <= maxTokens && messages.length <= 40) {
     return messages;
   }
 
-  // Keep last 10 messages untouched
-  const KEEP_RECENT = 10;
+  // Keep last 20 messages untouched
+  const KEEP_RECENT = 20;
   if (messages.length <= KEEP_RECENT) {
     return messages;
   }

@@ -5,12 +5,15 @@ import { promisify } from "node:util";
 import { search } from "./glob-util.js";
 import { searchContent } from "./grep.js";
 import { setTodos } from "./todo.js";
-import { runSubagentTask, listBackgroundTasks } from "./services/subagent.js";
+import { runSubagentTask, sendSubagentMessage } from "./services/subagent.js";
+import { startBackgroundCommand, listBackgroundTasks, getBackgroundTask, killBackgroundTask } from "./services/background-tasks.js";
+import { createArtifact, readArtifact, listArtifacts, deleteArtifact } from "./services/artifact.js";
+import { webFetch, webSearch } from "./services/web.js";
 import { smartEditFile } from "./services/smart-edit.js";
 import { generateRepoMap, findSymbolInRepo } from "./services/repomap.js";
 import { saveMemory, recallMemories, forgetMemory } from "./services/memory.js";
 import { enterWorktree, exitWorktree, listWorktrees } from "./services/worktree.js";
-import { runHook } from "./core/hooks.js";
+import { runHook, loadHooksConfig } from "./core/hooks.js";
 import { processToolOutput } from "./context.js";
 import { tailLogs } from "./logger.js";
 import type { AppConfig, McpTool, TodoItem } from "./types.js";
@@ -271,7 +274,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     name: "run_task",
     description:
-      "Lança um subagente autônomo para executar tarefas complexas, pesquisas ou verificações em paralelo ou em background.",
+      "Lança um subagente autônomo para executar tarefas complexas, pesquisas, refatorações ou verificações em paralelo ou em background.",
     inputSchema: {
       type: "object",
       properties: {
@@ -279,9 +282,10 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
         prompt: { type: "string", description: "Instruções completas para o subagente" },
         role: {
           type: "string",
-          enum: ["general", "research", "verification", "plan"],
-          description: "Especialidade do subagente: general | research | verification | plan",
+          enum: ["general", "research", "verification", "plan", "coder", "custom"],
+          description: "Especialidade do subagente: general | research | verification | plan | coder | custom",
         },
+        customPrompt: { type: "string", description: "Instrução de persona personalizada quando role='custom'" },
         runInBackground: { type: "boolean", description: "Executar em background sem bloquear o agente principal" },
       },
       required: ["description", "prompt"],
@@ -293,28 +297,77 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       const desc = String(a.description);
       const prompt = String(a.prompt);
       const role = (a.role as any) || "general";
+      const customPrompt = a.customPrompt ? String(a.customPrompt) : undefined;
       const runInBackground = Boolean(a.runInBackground);
       const result = await runSubagentTask({
         config: ctx.config,
         description: desc,
         prompt,
         role,
+        customPrompt,
         runInBackground,
       });
       return { result, isError: false };
     },
   },
   {
-    name: "list_background_tasks",
-    description: "Lista todas as tarefas de subagentes executando ou concluídas em background.",
+    name: "send_subagent_message",
+    description: "Envia uma instrução de acompanhamento a uma sessão ativa de subagente criada anteriormente.",
     inputSchema: {
       type: "object",
-      properties: {},
+      properties: {
+        sessionId: { type: "string", description: "ID da sessão do subagente (ex: sub_12345)" },
+        message: { type: "string", description: "Nova mensagem ou instrução para o subagente" },
+      },
+      required: ["sessionId", "message"],
     },
-    run: async () => {
-      const tasks = listBackgroundTasks();
-      if (tasks.length === 0) return { result: "Nenhuma tarefa em background.", isError: false };
-      return { result: JSON.stringify(tasks, null, 2), isError: false };
+    run: async (a, ctx) => {
+      if (!ctx?.config) return { result: "Configuração indisponível.", isError: true };
+      const sessionId = String(a.sessionId);
+      const message = String(a.message);
+      const res = await sendSubagentMessage(sessionId, message, ctx.config);
+      return { result: res.result, isError: res.isError };
+    },
+  },
+  {
+    name: "manage_background_task",
+    description: "Gerencia tarefas rodando em background (subagentes ou comandos). Permite listar, verificar status e detalhes ou encerrar um processo.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["list", "status", "kill"],
+          description: "Ação a realizar: 'list' (todas as tarefas), 'status' (detalhes por ID) ou 'kill' (encerrar por ID)",
+        },
+        taskId: { type: "string", description: "ID da tarefa em background (necessário para 'status' e 'kill')" },
+      },
+      required: ["action"],
+    },
+    run: async (a) => {
+      const action = String(a.action);
+      const taskId = a.taskId ? String(a.taskId) : undefined;
+
+      if (action === "list") {
+        const tasks = listBackgroundTasks();
+        if (tasks.length === 0) return { result: "Nenhuma tarefa em background registrada.", isError: false };
+        return { result: JSON.stringify(tasks, null, 2), isError: false };
+      }
+
+      if (action === "status") {
+        if (!taskId) return { result: "Parâmetro 'taskId' obrigatório para ação 'status'.", isError: true };
+        const task = getBackgroundTask(taskId);
+        if (!task) return { result: `Tarefa em background '${taskId}' não encontrada.`, isError: true };
+        return { result: JSON.stringify(task, null, 2), isError: false };
+      }
+
+      if (action === "kill") {
+        if (!taskId) return { result: "Parâmetro 'taskId' obrigatório para ação 'kill'.", isError: true };
+        const res = killBackgroundTask(taskId);
+        return { result: res.message, isError: !res.success };
+      }
+
+      return { result: `Ação '${action}' desconhecida.`, isError: true };
     },
   },
   {
@@ -667,22 +720,177 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     },
   },
   {
+    name: "web_fetch",
+    description:
+      "Busca o conteúdo de uma página web via HTTP/HTTPS e o converte automaticamente em Markdown limpo e legível. Não requer servidores MCP externos.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "URL da página web a buscar (ex: https://exemplo.com)" },
+        maxChars: { type: "number", description: "Limite máximo de caracteres no retorno (padrão: 15000)" },
+        timeoutMs: { type: "number", description: "Tempo limite em milissegundos (padrão: 15000ms)" },
+      },
+      required: ["url"],
+    },
+    run: async (a) => {
+      const url = String(a.url);
+      const maxChars = a.maxChars ? Number(a.maxChars) : 15000;
+      const timeoutMs = a.timeoutMs ? Number(a.timeoutMs) : 15000;
+      const res = await webFetch(url, { maxChars, timeoutMs });
+      const processed = await processToolOutput(res.content);
+      return { result: processed, isError: res.isError };
+    },
+  },
+  {
+    name: "web_search",
+    description: "Pesquisa na web por um termo ou dúvida e retorna uma lista de resultados com títulos, URLs e trechos (snippets).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Termo de busca na web" },
+        maxResults: { type: "number", description: "Número máximo de resultados (padrão: 8)" },
+      },
+      required: ["query"],
+    },
+    run: async (a) => {
+      const query = String(a.query);
+      const maxResults = a.maxResults ? Number(a.maxResults) : 8;
+      const res = await webSearch(query, maxResults);
+      if (res.isError || res.results.length === 0) {
+        return { result: `Nenhum resultado encontrado na web para '${query}'.`, isError: res.isError };
+      }
+      return { result: JSON.stringify(res.results, null, 2), isError: false };
+    },
+  },
+  {
+    name: "create_artifact",
+    description:
+      "Cria ou atualiza um artefato estruturado persistente (relatório, diagrama Mermaid, documento HTML, especificação de arquitetura ou código). Salva o arquivo em .siliconflower/artifacts/.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Identificador único do artefato (ex: plano_arquitetura)" },
+        title: { type: "string", description: "Título legível do artefato" },
+        type: {
+          type: "string",
+          enum: ["markdown", "code", "mermaid", "html", "json"],
+          description: "Tipo de artefato: markdown | code | mermaid | html | json",
+        },
+        content: { type: "string", description: "Conteúdo completo do artefato" },
+        summary: { type: "string", description: "Resumo explicativo do objetivo do artefato" },
+        scope: {
+          type: "string",
+          enum: ["project", "global"],
+          default: "project",
+          description: "Escopo: 'project' (repositório atual) ou 'global' (pasta do usuário)",
+        },
+      },
+      required: ["id", "title", "type", "content", "summary"],
+    },
+    run: async (a) => {
+      const res = await createArtifact({
+        id: String(a.id),
+        title: String(a.title),
+        type: a.type as any,
+        content: String(a.content),
+        summary: String(a.summary),
+        scope: (a.scope as any) || "project",
+      });
+      return { result: res.message, isError: false };
+    },
+  },
+  {
+    name: "read_artifact",
+    description: "Lê o conteúdo e os detalhes de um artefato salvo anteriormente pelo ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "ID do artefato a ler" },
+      },
+      required: ["id"],
+    },
+    run: async (a) => {
+      const res = await readArtifact(String(a.id));
+      if (!res) return { result: `Artefato '${a.id}' não encontrado.`, isError: true };
+      const processed = await processToolOutput(res.content);
+      return { result: processed, isError: false };
+    },
+  },
+  {
+    name: "list_artifacts",
+    description: "Lista todos os artefatos salvos no repositório atual e no escopo global.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+    run: async () => {
+      const list = await listArtifacts();
+      if (list.length === 0) return { result: "Nenhum artefato encontrado.", isError: false };
+      return { result: JSON.stringify(list, null, 2), isError: false };
+    },
+  },
+  {
+    name: "delete_artifact",
+    description: "Remove um artefato pelo ID.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "ID do artefato a remover" },
+      },
+      required: ["id"],
+    },
+    run: async (a) => {
+      const res = await deleteArtifact(String(a.id));
+      return { result: res.message, isError: !res.success };
+    },
+  },
+  {
+    name: "manage_hooks",
+    description: "Exibe a configuração atual de hooks ativados no repositório ou no ambiente global.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+    run: async (_, ctx) => {
+      const cfg = ctx?.config?.hooks || (await loadHooksConfig());
+      if (!cfg || Object.keys(cfg).length === 0) {
+        return { result: "Nenhum hook configurado em .siliconflower/hooks.json ou ~/.siliconflower/hooks.json.", isError: false };
+      }
+      return { result: JSON.stringify(cfg, null, 2), isError: false };
+    },
+  },
+  {
     name: "execute_command",
     description:
-      "Executa um comando de sistema no terminal (PowerShell no Windows / Bash no Linux/macOS). Retorna a saída padrão (stdout) e erros (stderr). Use para consultar estado do sistema ou rodar ferramentas CLI.",
+      "Executa um comando de sistema no terminal (PowerShell no Windows / Bash no Linux/macOS). Retorna a saída padrão (stdout) e erros (stderr). Suporta 'runInBackground=true' para iniciar processos em segundo plano.",
     inputSchema: {
       type: "object",
       properties: {
         command: { type: "string", description: "Comando PowerShell/Bash a ser executado" },
         cwd: { type: "string", description: "Diretório de execução (padrão: diretório atual)" },
         timeout: { type: "number", description: "Tempo limite em ms (padrão: 30000ms)" },
+        runInBackground: { type: "boolean", description: "Executar em segundo plano sem aguardar término" },
       },
       required: ["command"],
     },
-    run: async (a) => {
+    run: async (a, ctx) => {
       const cmd = String(a.command ?? "").trim();
       if (!cmd) return { result: "Nenhum comando fornecido.", isError: true };
       const workDir = a.cwd ? toAbs(String(a.cwd)) : process.cwd();
+
+      // Trigger onCommand hook if configured
+      if (ctx?.config?.hooks) {
+        await runHook("onCommand", ctx.config.hooks, { command: cmd, cwd: workDir });
+      }
+
+      if (a.runInBackground) {
+        const taskId = startBackgroundCommand(cmd, workDir, a.timeout ? Number(a.timeout) : 300000);
+        return {
+          result: `Comando iniciado em background! [Task ID: ${taskId}]\nComando: ${cmd}\nUse 'manage_background_task' com action='status' e taskId='${taskId}' para verificar resultados.`,
+          isError: false,
+        };
+      }
+
       const rawTimeout = Number(a.timeout);
       const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.min(rawTimeout, 120000) : 30000;
       const isWin = process.platform === "win32";
@@ -736,9 +944,11 @@ export async function runBuiltin(
   const tool = BUILTIN_TOOLS.find((t) => t.name === name);
   if (!tool) return { result: `ferramenta nativa desconhecida: ${name}`, isError: true };
 
+  const hookCtx = { toolName: name, toolArgs: args, cwd: process.cwd() };
+
   // Pre-tool hook
   if (ctx?.config?.hooks) {
-    await runHook("preTool", ctx.config.hooks);
+    await runHook("preTool", ctx.config.hooks, hookCtx);
   }
 
   const rawTimeout = Number(args?.timeout);
@@ -757,9 +967,9 @@ export async function runBuiltin(
     // On-edit and Post-tool hooks
     if (ctx?.config?.hooks) {
       if (name === "edit_file" || name === "write_file") {
-        await runHook("onEdit", ctx.config.hooks);
+        await runHook("onEdit", ctx.config.hooks, hookCtx);
       }
-      await runHook("postTool", ctx.config.hooks);
+      await runHook("postTool", ctx.config.hooks, hookCtx);
     }
 
     return res;

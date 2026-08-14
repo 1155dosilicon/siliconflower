@@ -193,7 +193,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
       setLiveText("");
       setStatus("pensando...");
 
-      const recentMessages = messages.slice(-30);
+      const recentMessages = messages.slice(-60);
       const history: ChatMessage[] = [
         ...recentMessages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
         { role: "user" as const, content: cleanText },

@@ -10,33 +10,33 @@ O Siliconflower é um harness CLI/TUI autônomo para desenvolvimento de software
 
 ```
 src/
-├── core/                  # Núcleo do Harness
-│   ├── config.ts          # Gerenciamento de configurações em ~/.siliconflower/config.json
-│   ├── context.ts         # Janela de contexto, histórico e compactação inteligente
-│   ├── hooks.ts           # Hooks de eventos (preTool, postTool, onEdit, onCommand)
-│   ├── llm.ts             # Cliente unificado de chamadas e streaming para OpenAI/Anthropic
-│   └── modes.ts           # Modos de operação (code, architect, ask, debug)
+├── core/                  # Núcleo de Hooks
+│   └── hooks.ts           # Hooks de eventos (preTool, postTool, onEdit, onCommand)
 │
 ├── services/              # Serviços do Agente e Ferramentas
 │   ├── memory.ts          # Memória persistente entre sessões (.siliconflower/memory)
 │   ├── repomap.ts         # Gerador de RepoMap e busca semântica de símbolos
 │   ├── smart-edit.ts      # Edição inteligente de arquivos (fuzzy/newline normalization/exact)
 │   ├── subagent.ts        # Orquestrador de subagentes concorrentes e background tasks
-│   ├── worktree.ts        # Gerenciador de Git Worktrees isolados
-│   ├── mcp.ts             # Cliente para servidores MCP (Model Context Protocol)
-│   ├── skills.ts          # Carregador e executor de skills (.md)
-│   ├── grep.ts            # Mecanismo de busca por conteúdo ripgrep/native
-│   ├── glob-util.ts       # Busca por padrões globais de arquivos
-│   └── todo.ts            # Gerenciador de lista de tarefas na sessão
+│   └── worktree.ts        # Gerenciador de Git Worktrees isolados
 │
+├── App.tsx                # Componente TUI principal da aplicação (Ink/React)
+├── MarkdownText.tsx       # Renderizador de Markdown adaptado para terminal
+├── ascii.ts               # Arte ASCII e logotipo
+├── config.ts              # Gerenciamento de configurações em ~/.siliconflower/config.json
+├── context.ts             # Janela de contexto, histórico e compactação inteligente
+├── glob-util.ts           # Busca por padrões globais de arquivos
+├── grep.ts                # Mecanismo de busca por conteúdo
+├── index.tsx              # Ponto de entrada CLI (Commander)
+├── llm.ts                 # Cliente unificado de chamadas e streaming para OpenAI/Anthropic
+├── logger.ts              # Sistema de logs com rotação e busca
+├── mcp.ts                 # Cliente para servidores MCP (Model Context Protocol)
+├── modes.ts               # Modos de operação (programação, sistema, plano)
+├── skills.ts              # Carregador e executor de skills (.md)
+├── todo.ts                # Gerenciador de lista de tarefas na sessão
 ├── tools.ts               # Definição e registro central de todas as ferramentas nativas
 ├── types.ts               # Interfaces e tipos globais do TypeScript
-│
-└── ui/                    # Interface do Usuário (TUI via Ink/React)
-    ├── App.tsx            # Componente principal da aplicação
-    ├── MarkdownText.tsx   # Renderizador de Markdown adaptado para terminal
-    ├── wizard.ts          # Assistente interativo de configuração inicial
-    └── ascii.ts           # Arte ASCII e logotipo
+└── wizard.ts              # Assistente interativo de configuração inicial
 ```
 
 ---
