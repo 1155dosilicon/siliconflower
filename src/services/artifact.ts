@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { mkdir, writeFile, readFile, readdir, rm } from "node:fs/promises";
+import { writeFile, readFile, readdir, rm } from "node:fs/promises";
+import { ensureDir } from "../fs-util.js";
 import { log } from "../logger.js";
 
 export type ArtifactType = "markdown" | "code" | "mermaid" | "html" | "json";
@@ -33,7 +34,7 @@ export async function createArtifact(opts: {
 }): Promise<{ artifact: ArtifactMetadata; message: string }> {
   const scope = opts.scope || "project";
   const dir = getArtifactsDir(opts.cwd, scope);
-  await mkdir(dir, { recursive: true });
+  await ensureDir(dir);
 
   const safeId = opts.id.replace(/[^a-zA-Z0-9_\-]/g, "_").toLowerCase();
   const ext = opts.type === "markdown" || opts.type === "mermaid" ? "md" : opts.type === "html" ? "html" : opts.type === "json" ? "json" : "txt";

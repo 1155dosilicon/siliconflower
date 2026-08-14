@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join, basename } from "node:path";
-import { readdir, readFile, mkdir, writeFile, stat } from "node:fs/promises";
+import { readdir, readFile, writeFile, stat } from "node:fs/promises";
+import { ensureDir } from "./fs-util.js";
 
 export interface Skill {
   name: string;
@@ -70,7 +71,7 @@ Use esta skill quando o usuário pedir privacidade, telemetria, diagnóstico, an
 };
 
 export async function syncSkills(): Promise<{ copied: string[]; skipped: string[]; errors: string[] }> {
-  await mkdir(USER_SKILLS_DIR, { recursive: true });
+  await ensureDir(USER_SKILLS_DIR);
   const copied: string[] = [];
   const skipped: string[] = [];
   const errors: string[] = [];
@@ -93,7 +94,7 @@ export async function syncSkills(): Promise<{ copied: string[]; skipped: string[
 }
 
 export async function loadSkills(): Promise<Skill[]> {
-  await mkdir(USER_SKILLS_DIR, { recursive: true });
+  await ensureDir(USER_SKILLS_DIR);
   const out: Skill[] = [];
   let names: string[] = [];
   try {

@@ -1,7 +1,8 @@
-import { readFile, writeFile, readdir, mkdir, stat, rename, rm, access } from "node:fs/promises";
+import { readFile, writeFile, readdir, stat, rename, rm, access } from "node:fs/promises";
 import { resolve, isAbsolute, dirname } from "node:path";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+import { ensureDir } from "./fs-util.js";
 import { search } from "./glob-util.js";
 import { searchContent } from "./grep.js";
 import { setTodos } from "./todo.js";
@@ -136,7 +137,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       const path = toAbs(String(a.path));
       if (isPathBlocked(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
       try {
-        await mkdir(dirname(path), { recursive: true });
+        await ensureDir(dirname(path));
         await writeFile(path, String(a.content ?? ""), "utf8");
         await log("info", `write_file: ${path} (${String(a.content ?? "").length} bytes)`);
         return { result: `Arquivo escrito: ${path} (${String(a.content ?? "").length} bytes)`, isError: false };
@@ -597,7 +598,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       const path = toAbs(String(a.path));
       if (isPathBlocked(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
       try {
-        await mkdir(path, { recursive: true });
+        await ensureDir(path);
         return { result: `Diretório criado/confirmado: ${path}`, isError: false };
       } catch (e) {
         return { result: `Erro ao criar diretório ${path}: ${String(e)}`, isError: true };
@@ -617,7 +618,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       const dst = toAbs(String(a.destination));
       if (isPathBlocked(src) || isPathBlocked(dst)) return { result: `Acesso bloqueado`, isError: true };
       try {
-        await mkdir(dirname(dst), { recursive: true });
+        await ensureDir(dirname(dst));
         await rename(src, dst);
         await log("info", `move_path: ${src} -> ${dst}`);
         return { result: `Movido: ${src} -> ${dst}`, isError: false };

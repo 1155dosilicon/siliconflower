@@ -1,4 +1,4 @@
-$src = "C:\Users\Eli\Desktop\ia\siliconflower-main"
+$src = (Get-Item -Path "$PSScriptRoot\..").FullName
 $zip = "C:\Users\Eli\Desktop\siliconflower.zip"
 
 if (Test-Path $zip) {
@@ -16,11 +16,11 @@ New-Item -ItemType Directory -Path $targetFolder | Out-Null
 
 $exclude = @('node_modules', 'dist', '.openclaude', '.siliconflower', '.git')
 
-Get-ChildItem -Path $src | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+Get-ChildItem -Path $src | Where-Object { $exclude -notcontains $_.Name -and $_.Name -notlike "*.zip" } | ForEach-Object {
     Copy-Item -Path $_.FullName -Destination $targetFolder -Recurse -Force
 }
 
-Compress-Archive -Path $targetFolder -DestinationPath $zip -Force
+Compress-Archive -Path "$targetFolder\*" -DestinationPath $zip -Force
 
 Remove-Item $tempDir -Recurse -Force
 

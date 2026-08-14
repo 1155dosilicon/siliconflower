@@ -1,6 +1,7 @@
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { ensureDir } from "./fs-util.js";
 import type { ChatMessage } from "./types.js";
 import { log } from "./logger.js";
 
@@ -51,7 +52,7 @@ export async function processToolOutput(output: string, maxChars = 32000): Promi
   }
 
   try {
-    await mkdir(OUTPUT_DIR, { recursive: true });
+    await ensureDir(OUTPUT_DIR);
     const filename = `output_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.txt`;
     const fullPath = join(OUTPUT_DIR, filename);
     await writeFile(fullPath, output, "utf8");

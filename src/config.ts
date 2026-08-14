@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { mkdir, readFile, writeFile, access } from "node:fs/promises";
+import { readFile, writeFile, access } from "node:fs/promises";
+import { ensureDir } from "./fs-util.js";
 import type { AppConfig, McpServerConfig, Provider } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
 import { MODES } from "./modes.js";
@@ -53,7 +54,7 @@ export async function loadConfig(): Promise<AppConfig | null> {
 }
 
 export async function saveConfig(config: AppConfig): Promise<void> {
-  await mkdir(CONFIG_DIR, { recursive: true });
+  await ensureDir(CONFIG_DIR);
   await writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), "utf8");
 }
 

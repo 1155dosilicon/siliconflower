@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { mkdir, appendFile, readFile, writeFile, stat } from "node:fs/promises";
+import { appendFile, readFile, writeFile, stat } from "node:fs/promises";
+import { ensureDir } from "./fs-util.js";
 
 const LOG_DIR = join(homedir(), ".siliconflower", "logs");
 const LOG_FILE = join(LOG_DIR, "siliconflower.log");
@@ -14,7 +15,7 @@ let isRotating = false;
 async function ensure() {
   if (ensured) return;
   try {
-    await mkdir(LOG_DIR, { recursive: true });
+    await ensureDir(LOG_DIR);
     ensured = true;
   } catch {
     ensured = true;

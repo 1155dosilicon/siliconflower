@@ -1,6 +1,7 @@
-import { mkdir, readFile, writeFile, unlink, readdir } from "fs/promises";
+import { readFile, writeFile, unlink, readdir } from "fs/promises";
 import { join } from "path";
 import { homedir } from "os";
+import { ensureDir } from "../fs-util.js";
 
 export type MemoryType = "user" | "feedback" | "project" | "reference";
 export type MemoryScope = "project" | "global";
@@ -20,14 +21,6 @@ function getGlobalMemoryDir(): string {
 
 function getProjectMemoryDir(cwd: string = process.cwd()): string {
   return join(cwd, ".siliconflower", "memory");
-}
-
-async function ensureDir(dirPath: string): Promise<void> {
-  try {
-    await mkdir(dirPath, { recursive: true });
-  } catch (e) {
-    // Already exists
-  }
 }
 
 /**

@@ -93,7 +93,7 @@ export async function runSubagentTask(opts: SubagentOptions): Promise<string> {
     // Execute asynchronously without blocking caller
     runSubagentExecution(opts, systemPrompt, session)
       .then((res) => {
-        const bgTask = registerBackgroundTask({
+        registerBackgroundTask({
           id: sessionId,
           type: "subagent",
           description: opts.description,
