@@ -68,7 +68,7 @@ Instrução: Use as ferramentas necessárias e responda com um resumo completo d
 export async function runSubagentTask(opts: SubagentOptions): Promise<string> {
   const role = opts.role || "general";
   const systemPrompt = getRoleSystemPrompt(role, opts.description, opts.customPrompt);
-  const sessionId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+  const sessionId = `sub_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
   const session: SubagentSession = {
     id: sessionId,

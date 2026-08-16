@@ -332,6 +332,8 @@ function buildAnthropicMessages(
       if (last && last.role === "assistant") {
         if (typeof last.content === "string") {
           last.content += "\n\n" + m.content;
+        } else if (Array.isArray(last.content)) {
+          (last.content as Anthropic.TextBlockParam[]).push({ type: "text", text: m.content });
         }
       } else {
         out.push({ role: "assistant", content: m.content });
@@ -526,6 +528,7 @@ async function* streamAnthropic(opts: ChatOptions): AsyncGenerator<StreamEvent> 
       ],
     });
 
+    const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const call of pending) {
       yield { type: "tool_call", id: call.id, name: call.name, args: JSON.stringify(call.input) };
       let result = "";
@@ -539,18 +542,18 @@ async function* streamAnthropic(opts: ChatOptions): AsyncGenerator<StreamEvent> 
         isError = true;
       }
       yield { type: "tool_result", id: call.id, name: call.name, result, isError };
-      working.push({
-        role: "user",
-        content: [
-          {
-            type: "tool_result" as const,
-            tool_use_id: call.id,
-            content: result,
-            ...(isError ? { is_error: true } : {}),
-          },
-        ],
+      toolResults.push({
+        type: "tool_result",
+        tool_use_id: call.id,
+        content: result,
+        ...(isError ? { is_error: true } : {}),
       });
     }
+
+    working.push({
+      role: "user",
+      content: toolResults as unknown as Anthropic.ContentBlock[],
+    });
   }
 
   // If we exhausted all steps without a done event, yield one with accumulated content

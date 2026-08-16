@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-08-16
+
+### Fixed
+- **Anthropic Batch Tool Results Streaming (`src/llm.ts`):** Fixed Anthropic API HTTP 400 Bad Request error caused by parallel tool call results pushing multiple consecutive `{ role: "user" }` messages during streaming loops. Now all tool results are aggregated into a single user message with content blocks, strictly satisfying Anthropic's role alternation protocol.
+- **Artifact Exact Matching & Deduplication (`src/services/artifact.ts`):** Fixed prefix collision bug where short artifact IDs matched longer IDs (e.g., `report` matching `report_analysis.md`). Added path deduplication when the workspace is located at user home root.
+- **Memory Service Deduplication (`src/services/memory.ts`):** Added directory deduplication in `recallMemories` when project root matches user home.
+- **Subagent Session Tracking & Unification (`src/task.ts` & `src/services/subagent.ts`):** Unified subagent invocation by delegating `runSubagentTask` in `src/task.ts` to the comprehensive `src/services/subagent.ts` pipeline, preserving session registration and background tracking. Replaced deprecated `.substr()` usage with `.slice()`.
+- **Config & Wizard State Preservation (`src/config.ts` & `src/wizard.ts`):** Fixed `normalize()` dropping `hooks` settings, added normalization for unaccented mode variants (`"programacao"`, `"prog"`), and preserved existing `mode` and `hooks` settings during wizard re-configuration.
+- **Plan Mode Modifying Tools Guard (`src/App.tsx`):** Expanded the modification guard in `plano` mode to encompass `move_path`, `create_directory`, `delete_artifact`, `forget_memory`, and `exit_worktree`.
+
+### Added
+- **Comprehensive Test Suites:** Added new test suites covering Smart Edit (`tests/smart-edit.test.ts`), RepoMap (`tests/repomap.test.ts`), Persistent Memory (`tests/memory.test.ts`), Subagents (`tests/subagent.test.ts`), and Config Normalization (`tests/config.test.ts`).
+- **Complete Native Tools Documentation (`README.md` & `LLMS.md`):** Documented all 34 native tools, subagents architecture, memory scopes, Git worktrees, and lifecycle hooks.
+
 ## [0.2.2] - 2026-08-14
 
 ### Fixed

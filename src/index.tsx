@@ -15,7 +15,7 @@ const program = new Command();
 program
   .name("siliconflower")
   .description("CLI/TUI AI agent with MCP, reasoning, skills, modes, and OpenAI/Anthropic-compatible backends.")
-  .version("0.2.2")
+  .version("0.2.3")
   .option("-m, --model <id>", "override the model")
   .option("-r, --reasoning <level>", `reasoning level: ${REASONING_LEVELS.join(", ")}`)
   .option("--mode <mode>", `mode: ${MODES.join(", ")}`)
@@ -150,8 +150,11 @@ function normalizeReasoning(v: string | undefined): ReasoningLevel | undefined {
 
 function normalizeMode(v: string | undefined): Mode | undefined {
   if (!v) return undefined;
-  const lower = v.toLowerCase();
-  return (MODES as string[]).includes(lower) ? (lower as Mode) : undefined;
+  const lower = v.toLowerCase().trim();
+  if (lower === "programacao" || lower === "programação" || lower === "prog") return "programação";
+  if (lower === "sistema" || lower === "sys") return "sistema";
+  if (lower === "plano" || lower === "plan") return "plano";
+  return (MODES as readonly string[]).includes(lower) ? (lower as Mode) : undefined;
 }
 
 program.parseAsync(process.argv);

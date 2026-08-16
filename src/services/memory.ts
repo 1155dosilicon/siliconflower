@@ -1,5 +1,5 @@
 import { readFile, writeFile, unlink, readdir } from "fs/promises";
-import { join } from "path";
+import { join, resolve } from "path";
 import { homedir } from "os";
 import { ensureDir } from "../fs-util.js";
 
@@ -96,10 +96,11 @@ export async function recallMemories(
   cwd: string = process.cwd()
 ): Promise<MemoryEntry[]> {
   const memories: MemoryEntry[] = [];
-
+  const globalDir = getGlobalMemoryDir();
+  const projectDir = getProjectMemoryDir(cwd);
   const dirs: { dir: string; scope: MemoryScope }[] = [
-    { dir: getGlobalMemoryDir(), scope: "global" },
-    { dir: getProjectMemoryDir(cwd), scope: "project" },
+    { dir: globalDir, scope: "global" },
+    ...(resolve(projectDir) !== resolve(globalDir) ? [{ dir: projectDir, scope: "project" as MemoryScope }] : []),
   ];
 
   for (const { dir, scope } of dirs) {

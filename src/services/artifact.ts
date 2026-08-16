@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { writeFile, readFile, readdir, rm } from "node:fs/promises";
 import { ensureDir } from "../fs-util.js";
@@ -72,7 +72,9 @@ updatedAt: "${now}"
 
 export async function listArtifacts(cwd: string = process.cwd()): Promise<ArtifactMetadata[]> {
   const results: ArtifactMetadata[] = [];
-  const dirs = [getArtifactsDir(cwd, "project"), getArtifactsDir(cwd, "global")];
+  const projectDir = getArtifactsDir(cwd, "project");
+  const globalDir = getArtifactsDir(cwd, "global");
+  const dirs = resolve(projectDir) === resolve(globalDir) ? [projectDir] : [projectDir, globalDir];
 
   for (const dir of dirs) {
     try {
@@ -119,12 +121,14 @@ export async function listArtifacts(cwd: string = process.cwd()): Promise<Artifa
 
 export async function readArtifact(id: string, cwd: string = process.cwd()): Promise<{ content: string; path: string } | null> {
   const safeId = id.replace(/[^a-zA-Z0-9_\-]/g, "_").toLowerCase();
-  const dirs = [getArtifactsDir(cwd, "project"), getArtifactsDir(cwd, "global")];
+  const projectDir = getArtifactsDir(cwd, "project");
+  const globalDir = getArtifactsDir(cwd, "global");
+  const dirs = resolve(projectDir) === resolve(globalDir) ? [projectDir] : [projectDir, globalDir];
 
   for (const dir of dirs) {
     try {
       const files = await readdir(dir);
-      const match = files.find((f) => f.startsWith(safeId));
+      const match = files.find((f) => f.replace(/\.[^/.]+$/, "").toLowerCase() === safeId);
       if (match) {
         const filePath = join(dir, match);
         const content = await readFile(filePath, "utf8");
@@ -140,12 +144,14 @@ export async function readArtifact(id: string, cwd: string = process.cwd()): Pro
 
 export async function deleteArtifact(id: string, cwd: string = process.cwd()): Promise<{ success: boolean; message: string }> {
   const safeId = id.replace(/[^a-zA-Z0-9_\-]/g, "_").toLowerCase();
-  const dirs = [getArtifactsDir(cwd, "project"), getArtifactsDir(cwd, "global")];
+  const projectDir = getArtifactsDir(cwd, "project");
+  const globalDir = getArtifactsDir(cwd, "global");
+  const dirs = resolve(projectDir) === resolve(globalDir) ? [projectDir] : [projectDir, globalDir];
 
   for (const dir of dirs) {
     try {
       const files = await readdir(dir);
-      const match = files.find((f) => f.startsWith(safeId));
+      const match = files.find((f) => f.replace(/\.[^/.]+$/, "").toLowerCase() === safeId);
       if (match) {
         const filePath = join(dir, match);
         await rm(filePath);

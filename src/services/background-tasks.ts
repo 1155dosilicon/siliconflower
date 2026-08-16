@@ -24,7 +24,7 @@ export function registerBackgroundTask(task: BackgroundTaskRecord): void {
 }
 
 export function startBackgroundCommand(command: string, cwd: string = process.cwd(), timeout = 300000): string {
-  const taskId = `cmd_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`;
+  const taskId = `cmd_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
   const isWin = process.platform === "win32";
   const shell = isWin ? "powershell.exe" : process.env.SHELL || "/bin/bash";
 

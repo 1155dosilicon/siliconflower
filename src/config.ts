@@ -2,9 +2,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFile, writeFile, access } from "node:fs/promises";
 import { ensureDir } from "./fs-util.js";
-import type { AppConfig, McpServerConfig, Provider } from "./types.js";
+import type { AppConfig, McpServerConfig, Provider, Mode } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
-import { MODES } from "./modes.js";
 
 const CONFIG_DIR = join(homedir(), ".siliconflower");
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
@@ -58,13 +57,25 @@ export async function saveConfig(config: AppConfig): Promise<void> {
   await writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), "utf8");
 }
 
-function normalize(data: Partial<AppConfig>): AppConfig {
+export function normalize(data: Partial<AppConfig>): AppConfig {
   const provider: Provider = data.provider === "anthropic" ? "anthropic" : "openai";
   const apiKey = (process.env.SILICONFLOWER_API_KEY || data.apiKey || "").trim();
   const baseURL = (process.env.SILICONFLOWER_BASE_URL || data.baseURL || "").trim();
   const model = (process.env.SILICONFLOWER_MODEL || data.model || "").trim();
   const reasoning = data.reasoning && REASONING_LEVELS.includes(data.reasoning) ? data.reasoning : "high";
-  const mode = data.mode && (MODES as readonly string[]).includes(data.mode) ? data.mode : "programação";
+  
+  let mode: Mode = "programação";
+  if (data.mode) {
+    const rawMode = data.mode.toLowerCase().trim();
+    if (rawMode === "programacao" || rawMode === "programação" || rawMode === "prog") {
+      mode = "programação";
+    } else if (rawMode === "sistema" || rawMode === "sys") {
+      mode = "sistema";
+    } else if (rawMode === "plano" || rawMode === "plan") {
+      mode = "plano";
+    }
+  }
+
   return {
     provider,
     baseURL,
@@ -74,6 +85,7 @@ function normalize(data: Partial<AppConfig>): AppConfig {
     mode,
     system: data.system?.trim() || undefined,
     mcpServers: (data.mcpServers ?? {}) as Record<string, McpServerConfig>,
+    hooks: data.hooks ? { ...data.hooks } : undefined,
   };
 }
 

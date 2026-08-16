@@ -116,8 +116,10 @@ export async function runSetup(existing: AppConfig | null): Promise<AppConfig> {
     apiKey: finalKey.trim(),
     model: model.trim(),
     reasoning,
+    mode: existing?.mode ?? "programação",
     system: system?.trim() || undefined,
     mcpServers,
+    hooks: existing?.hooks,
   };
 
   await saveConfig(config);

@@ -46,7 +46,8 @@ const SUPPORTED_EXTS = new Set([
 /**
  * Extracts symbols from source code text using language-aware regex patterns.
  */
-export function extractSymbols(content: string, ext: string): SymbolInfo[] {
+export function extractSymbols(content: string, fileOrExt: string): SymbolInfo[] {
+  const ext = fileOrExt.startsWith(".") ? fileOrExt.toLowerCase() : extname(fileOrExt).toLowerCase();
   const symbols: SymbolInfo[] = [];
   const lines = content.split("\n");
 

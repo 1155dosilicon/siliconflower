@@ -143,7 +143,18 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
   const executeTool = useCallback(
     async (name: string, args: Record<string, unknown>): Promise<{ result: string; isError: boolean }> => {
       // Plan mode guard for modifying tools
-      const MODIFYING_TOOLS = ["write_file", "edit_file", "apply_patch", "delete_path", "execute_command"];
+      const MODIFYING_TOOLS = [
+        "write_file",
+        "edit_file",
+        "apply_patch",
+        "delete_path",
+        "execute_command",
+        "create_directory",
+        "move_path",
+        "delete_artifact",
+        "forget_memory",
+        "exit_worktree",
+      ];
       if (modeRef.current === "plano" && MODIFYING_TOOLS.includes(name)) {
         return {
           result: `[MODO PLANO ATIVO] Execução de ${name} bloqueada. Apresente o plano ao usuário e peça para alternar para o modo 'programação' (Ctrl+O) para aplicar as alterações.`,
