@@ -8,22 +8,9 @@
 
 Agente CLI/TUI de Inteligência Artificial de alta performance para desenvolvimento de software, com suporte nativo a **MCP** (Model Context Protocol), **Subagentes Concorrentes & Background Tasks**, **Memória Persistente**, **Git Worktrees Isolados**, **RepoMap & Busca de Símbolos**, **Artefatos Estruturados**, **Web Search & Fetch**, **Hooks de Automação**, **Raciocínio Controlável (Reasoning)**, **Contador de Tokens em Tempo Real**, **Tratamento de Tarefas (To-Do)**, **Habilidades (.md)** e compatibilidade total com APIs do **SiliconFlow, OpenRouter, OpenAI e Anthropic**.
 
-```text
-  S I L I C O N F L O W E R
---------------------------------------------------------------------------------
-  voce  > crie um backup da pasta src em backups/ e organize as tarefas
-  ia    > análise concluída. criando diretório e copiando arquivos...
---------------------------------------------------------------------------------
-  Tarefas (To-Do):
-  [✓] Analisar estrutura da pasta src
-  [▶] Executar cópia de segurança em backups/
---------------------------------------------------------------------------------
-  > digite para a LLM...
---------------------------------------------------------------------------------
-  Model: deepseek-ai/DeepSeek-V4-Pro  Reasoning: high  Mode: PROG
-  Tools: 34  Skills: 3  Tokens: 3.2K
-  pronto (3.2K tokens)
-```
+<p align="center">
+  <img src="assets/preview.png" alt="SiliconFlower TUI Preview" width="100%" />
+</p>
 
 > 💡 **Interface Limpa e Leve:** Projetada para Windows Terminal, PowerShell, CMD e VS Code Terminal. Sem necessidade de Nerd Fonts ou caracteres especiais.
 
@@ -403,6 +390,8 @@ siliconflower --version
 
 ```text
 siliconflower/
+├── assets/
+│   └── preview.png              # Imagem de demonstração da interface TUI
 ├── bin/
 │   └── siliconflower.js         # Inicializador híbrido (Bun -> tsx -> npx tsx)
 ├── src/
