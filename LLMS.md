@@ -6,7 +6,7 @@ Este documento serve como mapa arquitetural e guia de desenvolvimento do **Silic
 
 ## 🏗️ Visão Geral da Arquitetura
 
-O Siliconflower é um harness CLI/TUI autônomo para desenvolvimento de software, projetado para operar com múltiplos provedores de LLM no Windows, Linux e macOS.
+O Siliconflower é um harness CLI/TUI autônomo para desenvolvimento de software, projetado exclusivamente para o ecossistema Windows (PowerShell/Bun/Node), operando com múltiplos provedores de LLM.
 
 ```text
 src/
@@ -63,7 +63,7 @@ src/
 | `grep_content` | Busca textual e regex recursiva no conteúdo dos arquivos com número de linha. | `src/grep.ts` |
 | `repo_map` | Gera visualização estrutural do repositório exibindo símbolos e assinaturas. | `src/services/repomap.ts` |
 | `find_symbol` | Localiza definições e assinaturas de símbolos específicos no código. | `src/services/repomap.ts` |
-| `execute_command` | Execução de comandos do sistema (PowerShell/Bash) com timeout e captura segura. | `src/tools.ts` |
+| `execute_command` | Execução de comandos do sistema no terminal PowerShell com timeout e captura segura. | `src/tools.ts` |
 | `read_logs` | Consulta e filtra logs de execução do Siliconflower. | `src/logger.ts` |
 | `ask_question` | Faz perguntas diretas ao usuário com opções interativas. | `src/tools.ts` |
 | `todowrite` | Gerencia o checklist interativo de tarefas exibido na interface TUI. | `src/todo.ts` |

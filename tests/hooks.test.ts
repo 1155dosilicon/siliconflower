@@ -8,8 +8,7 @@ describe("hooks system", () => {
   });
 
   test("executes hook command with environment variables", async () => {
-    const isWin = process.platform === "win32";
-    const echoCmd = isWin ? "echo %SILICONFLOWER_TOOL_NAME%" : "echo $SILICONFLOWER_TOOL_NAME";
+    const echoCmd = "echo %SILICONFLOWER_TOOL_NAME%";
 
     const res = await runHook(
       "preTool",

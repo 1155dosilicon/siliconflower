@@ -863,11 +863,11 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     name: "execute_command",
     description:
-      "Executa um comando de sistema no terminal (PowerShell no Windows / Bash no Linux/macOS). Retorna a saída padrão (stdout) e erros (stderr). Suporta 'runInBackground=true' para iniciar processos em segundo plano.",
+      "Executa um comando de sistema no terminal PowerShell do Windows. Retorna a saída padrão (stdout) e erros (stderr). Suporta 'runInBackground=true' para iniciar processos em segundo plano.",
     inputSchema: {
       type: "object",
       properties: {
-        command: { type: "string", description: "Comando PowerShell/Bash a ser executado" },
+        command: { type: "string", description: "Comando PowerShell a ser executado" },
         cwd: { type: "string", description: "Diretório de execução (padrão: diretório atual)" },
         timeout: { type: "number", description: "Tempo limite em ms (padrão: 30000ms)" },
         runInBackground: { type: "boolean", description: "Executar em segundo plano sem aguardar término" },
@@ -894,12 +894,11 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
 
       const rawTimeout = Number(a.timeout);
       const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.min(rawTimeout, 120000) : 30000;
-      const isWin = process.platform === "win32";
       const execOptions = {
         cwd: workDir,
         timeout,
         maxBuffer: 10 * 1024 * 1024,
-        shell: isWin ? "powershell.exe" : (process.env.SHELL || "/bin/bash"),
+        shell: "powershell.exe",
         windowsHide: true,
       };
       try {

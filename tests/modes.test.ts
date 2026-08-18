@@ -18,7 +18,14 @@ describe("modes", () => {
     const prompt = buildSystemPrompt("programação", "Be concise", []);
     expect(prompt).toContain("siliconflower");
     expect(prompt).toContain("MODO PROGRAMAÇÃO");
+    expect(prompt).toContain("Windows (PowerShell/Bun/Node)");
     expect(prompt).toContain("Be concise");
     expect(prompt).toContain(process.cwd().replace(/\\/g, "/"));
+  });
+
+  test("buildSystemPrompt includes Windows in sistema mode", () => {
+    const prompt = buildSystemPrompt("sistema", undefined, []);
+    expect(prompt).toContain("MODO SISTEMA (Windows)");
+    expect(prompt).toContain("PowerShell");
   });
 });

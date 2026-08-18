@@ -3,8 +3,7 @@ import { startBackgroundCommand, listBackgroundTasks, getBackgroundTask, killBac
 
 describe("background tasks service", () => {
   test("starts, queries status, and lists background command task", async () => {
-    const isWin = process.platform === "win32";
-    const cmd = isWin ? "Start-Sleep -Seconds 10" : "sleep 10";
+    const cmd = "Start-Sleep -Seconds 10";
 
     const taskId = startBackgroundCommand(cmd);
     expect(taskId).toBeDefined();

@@ -28,7 +28,7 @@ describe("tools", () => {
   });
 
   test("execute_command runs shell commands and returns output", async () => {
-    const cmd = process.platform === "win32" ? "Write-Output 'hello siliconflower'" : "echo 'hello siliconflower'";
+    const cmd = "Write-Output 'hello siliconflower'";
     const res = await runBuiltin("execute_command", { command: cmd });
     expect(res.isError).toBe(false);
     expect(res.result).toContain("hello siliconflower");

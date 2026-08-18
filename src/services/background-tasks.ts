@@ -25,8 +25,7 @@ export function registerBackgroundTask(task: BackgroundTaskRecord): void {
 
 export function startBackgroundCommand(command: string, cwd: string = process.cwd(), timeout = 300000): string {
   const taskId = `cmd_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-  const isWin = process.platform === "win32";
-  const shell = isWin ? "powershell.exe" : process.env.SHELL || "/bin/bash";
+  const shell = "powershell.exe";
 
   const taskRecord: BackgroundTaskRecord = {
     id: taskId,
@@ -93,7 +92,7 @@ export function killBackgroundTask(id: string): { success: boolean; message: str
   if (task.processRef) {
     try {
       task.processRef.kill("SIGTERM");
-      if (process.platform === "win32" && task.processRef.pid) {
+      if (task.processRef.pid) {
         exec(`taskkill /pid ${task.processRef.pid} /T /F`);
       }
     } catch {

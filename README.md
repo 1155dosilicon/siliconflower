@@ -2,7 +2,7 @@
 
 ![Version](https://img.shields.io/badge/version-0.2.3-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20PowerShell%20%7C%20Linux%20%7C%20macOS-0078D6.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20PowerShell-0078D6.svg)
 ![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black.svg)
 ![Node](https://img.shields.io/badge/Node.js-%3E%3D20-green.svg)
 
@@ -209,7 +209,7 @@ O Siliconflower disponibiliza um conjunto completo de 34 ferramentas integradas:
 | | `grep_content` | Busca textual e regex recursiva em conteúdos de arquivos com número de linha. |
 | | `repo_map` | Gera visualização estruturada de arquitetura do repositório com assinaturas de classes e funções. |
 | | `find_symbol` | Localiza definições e assinaturas de símbolos específicos pelo repositório. |
-| **Execução & Sistema** | `execute_command` | Executa comandos de terminal de forma segura e transparente no PowerShell ou Bash. |
+| **Execução & Sistema** | `execute_command` | Executa comandos de terminal de forma segura e transparente no PowerShell. |
 | | `read_logs` | Consulta e filtra logs de execução do Siliconflower por nível (`info`, `warn`, `error`) e termo. |
 | | `ask_question` | Apresenta perguntas interativas de múltipla escolha ou confirmação ao usuário. |
 | | `todowrite` | Gerencia o checklist interativo de tarefas exibido na interface TUI (`[✓]`, `[▶]`, `[ ]`). |
@@ -348,7 +348,7 @@ Adicione qualquer servidor compatível com Model Context Protocol no seu `~/.sil
 | Modo | Foco | Segurança |
 | :--- | :--- | :--- |
 | `programação` | Leitura, escrita, revisão e refatoração de código com ferramentas completas. | Padrão |
-| `sistema` | Administração de sistemas operacionais: scripts PowerShell/Bash, rede e processos. | Alertas prévios |
+| `sistema` | Administração de sistemas operacionais: scripts PowerShell/Batch, rede e processos no Windows. | Alertas prévios |
 | `plano` | **Apenas Leitura / Planejamento.** Ferramentas modificadoras (`write_file`, `edit_file`, `execute_command`, `delete_path`) são estritamente bloqueadas. | Máxima proteção |
 
 ---

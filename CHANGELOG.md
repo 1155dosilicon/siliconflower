@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Windows-Only Focus & Simplification:** Removed Linux and macOS compatibility layers, platform branching, and bash fallback logic across `src/modes.ts`, `src/tools.ts`, `src/fs-util.ts`, `src/services/background-tasks.ts`, and test suites. Siliconflower is now centered exclusively on Windows (PowerShell/Bun/Node).
+- **Documentation & Packaging:** Updated `README.md`, `LLMS.md`, and `package.json` (`"os": ["win32"]`) to reflect the dedicated Windows platform focus.
+
 ## [0.2.3] - 2026-08-16
 
 ### Fixed

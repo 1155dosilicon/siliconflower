@@ -2,6 +2,9 @@
   "name": "siliconflower",
   "version": "0.2.3",
   "description": "CLI/TUI AI agent for Windows with MCP, reasoning control, skills, and OpenAI/Anthropic-compatible backends.",
+  "os": [
+    "win32"
+  ],
   "type": "module",
   "license": "MIT",
   "author": "siliconflower contributors",
