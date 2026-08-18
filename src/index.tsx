@@ -9,6 +9,7 @@ import { MODES } from "./modes.js";
 import { skillsDir, loadSkills, syncSkills } from "./skills.js";
 import { logFile, tailLogs, clearLogs } from "./logger.js";
 import { log } from "./logger.js";
+import { getWorkspaceDataDir, getWorkspaceId } from "./fs-util.js";
 
 const program = new Command();
 
@@ -57,6 +58,8 @@ program
   .action(async () => {
     console.log("Config path:", configFile());
     console.log("Config dir:", configDir());
+    console.log("Workspace ID:", getWorkspaceId());
+    console.log("Workspace data dir:", getWorkspaceDataDir());
     const cfg = await loadConfig();
     if (!cfg) {
       console.log("No config found. Run `siliconflower config` to set one up.");

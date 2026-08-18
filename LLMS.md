@@ -14,9 +14,9 @@ src/
 │   └── hooks.ts           # Hooks de eventos (preTool, postTool, onEdit, onCommand)
 │
 ├── services/              # Serviços de Especialização do Agente
-│   ├── artifact.ts        # Gestão de entregáveis e artefatos (.html, .json, .md, .txt)
+│   ├── artifact.ts        # Gestão de entregáveis e artefatos (~/.siliconflower/workspaces/<id>/artifacts/)
 │   ├── background-tasks.ts# Gerenciador de tarefas assíncronas e comandos em background
-│   ├── memory.ts          # Memória persistente entre sessões (.siliconflower/memory)
+│   ├── memory.ts          # Memória persistente (~/.siliconflower/workspaces/<id>/memory/)
 │   ├── repomap.ts         # Gerador de RepoMap e busca semântica de símbolos em código
 │   ├── smart-edit.ts      # Edição inteligente de arquivos (fuzzy/newline/exact)
 │   ├── subagent.ts        # Orquestrador de subagentes especializados e sessões
@@ -28,7 +28,7 @@ src/
 ├── ascii.ts               # Arte ASCII e logotipo
 ├── config.ts              # Gerenciamento de configurações em ~/.siliconflower/config.json
 ├── context.ts             # Janela de contexto, histórico e compactação inteligente
-├── fs-util.ts             # Utilitários de sistema de arquivos e segurança de caminhos
+├── fs-util.ts             # Utilitários de sistema de arquivos, workspace IDs e segurança de caminhos
 ├── glob-util.ts           # Busca por padrões globais de arquivos
 ├── grep.ts                # Mecanismo de busca textual e regex recursiva
 ├── index.tsx              # Ponto de entrada CLI (Commander)
@@ -72,7 +72,7 @@ src/
 | `send_subagent_message`| Envia mensagens adicionais para continuar uma sessão de subagente. | `src/services/subagent.ts` |
 | `manage_background_task` | Consulta status, recupera saídas ou encerra tarefas e subagentes em background. | `src/services/background-tasks.ts` |
 | `save_memory` | Armazena regras, aprendizados e diretrizes persistentes entre sessões. | `src/services/memory.ts` |
-| `recall_memory` | Consulta memórias salvas do projeto (`.siliconflower/memory`) ou globais (`~/.siliconflower/memory`). | `src/services/memory.ts` |
+| `recall_memory` | Consulta memórias salvas do projeto (`~/.siliconflower/workspaces/<id>/memory`) ou globais (`~/.siliconflower/memory`). | `src/services/memory.ts` |
 | `forget_memory` | Remove memórias obsoletas ou desatualizadas. | `src/services/memory.ts` |
 | `enter_worktree` | Cria um ambiente de trabalho Git isolado em branch temporária. | `src/services/worktree.ts` |
 | `exit_worktree` | Remove um Git Worktree após a conclusão do trabalho ou testes. | `src/services/worktree.ts` |
@@ -87,11 +87,15 @@ src/
 
 ---
 
-## 🧠 Sistema de Memória Persistente
+## 🧠 Sistema de Memória Persistente & Isolamento de Workspaces
 
-O Siliconflower armazena memórias em markdown com cabeçalhos frontmatter sob dois diretórios:
-- **Projeto:** `<workspace>/.siliconflower/memory/` (específico para o repositório atual)
-- **Global:** `~/.siliconflower/memory/` (aplicável a qualquer projeto do usuário)
+Seguindo o padrão de harnesses modernos (como Antigravity), o Siliconflower **não polui o repositório do usuário** com pastas locais no workspace. Todos os dados são centralizados e isolados deterministicamente:
+
+- **Projeto (Centralizado):** `~/.siliconflower/workspaces/<workspace-id>/memory/`
+- **Global:** `~/.siliconflower/memory/`
+- **Retrocompatibilidade:** Se existir uma pasta legada `<workspace>/.siliconflower/`, ela é consultada transparentemente para leitura/exclusão.
+
+O `<workspace-id>` é derivado a partir do nome da pasta e um hash SHA-256 do caminho absoluto (ex: `meu-app-8f3a1b2c`).
 
 Tipos de Memória suportados: `user`, `feedback`, `project`, `reference`.
 As memórias ativas são injetadas automaticamente no prompt do sistema durante cada interação.

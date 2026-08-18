@@ -1,7 +1,6 @@
 import { join, resolve } from "node:path";
-import { homedir } from "node:os";
-import { writeFile, readFile, readdir, rm } from "node:fs/promises";
-import { ensureDir } from "../fs-util.js";
+import { writeFile, readFile, readdir, rm, access } from "node:fs/promises";
+import { ensureDir, getWorkspaceDataDir, getGlobalDataDir } from "../fs-util.js";
 import { log } from "../logger.js";
 
 export type ArtifactType = "markdown" | "code" | "mermaid" | "html" | "json";
@@ -16,11 +15,15 @@ export interface ArtifactMetadata {
   updatedAt: string;
 }
 
-function getArtifactsDir(cwd: string = process.cwd(), scope: "project" | "global" = "project"): string {
+export function getArtifactsDir(cwd: string = process.cwd(), scope: "project" | "global" = "project"): string {
   if (scope === "project") {
-    return join(cwd, ".siliconflower", "artifacts");
+    return join(getWorkspaceDataDir(cwd), "artifacts");
   }
-  return join(homedir(), ".siliconflower", "artifacts");
+  return join(getGlobalDataDir(), "artifacts");
+}
+
+export function getLegacyArtifactsDir(cwd: string = process.cwd()): string {
+  return join(cwd, ".siliconflower", "artifacts");
 }
 
 export async function createArtifact(opts: {
@@ -72,15 +75,28 @@ updatedAt: "${now}"
 
 export async function listArtifacts(cwd: string = process.cwd()): Promise<ArtifactMetadata[]> {
   const results: ArtifactMetadata[] = [];
+  const seenIds = new Set<string>();
+
   const projectDir = getArtifactsDir(cwd, "project");
   const globalDir = getArtifactsDir(cwd, "global");
-  const dirs = resolve(projectDir) === resolve(globalDir) ? [projectDir] : [projectDir, globalDir];
+  const legacyDir = getLegacyArtifactsDir(cwd);
 
-  for (const dir of dirs) {
+  const candidateDirs = [projectDir, globalDir];
+  try {
+    await access(legacyDir);
+    candidateDirs.push(legacyDir);
+  } catch {}
+
+  const uniqueDirs = Array.from(new Set(candidateDirs.map((d) => resolve(d))));
+
+  for (const dir of uniqueDirs) {
     try {
       const files = await readdir(dir);
       for (const f of files) {
         if (f.endsWith(".md") || f.endsWith(".html") || f.endsWith(".json") || f.endsWith(".txt")) {
+          const safeId = f.replace(/\.[^/.]+$/, "").toLowerCase();
+          if (seenIds.has(safeId)) continue;
+
           const filePath = join(dir, f);
           try {
             const raw = await readFile(filePath, "utf8");
@@ -96,7 +112,7 @@ export async function listArtifacts(cwd: string = process.cwd()): Promise<Artifa
             else if (ext === "txt") resolvedType = "code";
             else if (matchType) resolvedType = matchType[1] as ArtifactType;
 
-            const safeId = f.replace(/\.[^/.]+$/, "");
+            seenIds.add(safeId);
             results.push({
               id: safeId,
               title: matchTitle ? matchTitle[1] : safeId,
@@ -123,9 +139,17 @@ export async function readArtifact(id: string, cwd: string = process.cwd()): Pro
   const safeId = id.replace(/[^a-zA-Z0-9_\-]/g, "_").toLowerCase();
   const projectDir = getArtifactsDir(cwd, "project");
   const globalDir = getArtifactsDir(cwd, "global");
-  const dirs = resolve(projectDir) === resolve(globalDir) ? [projectDir] : [projectDir, globalDir];
+  const legacyDir = getLegacyArtifactsDir(cwd);
 
-  for (const dir of dirs) {
+  const candidateDirs = [projectDir, globalDir];
+  try {
+    await access(legacyDir);
+    candidateDirs.push(legacyDir);
+  } catch {}
+
+  const uniqueDirs = Array.from(new Set(candidateDirs.map((d) => resolve(d))));
+
+  for (const dir of uniqueDirs) {
     try {
       const files = await readdir(dir);
       const match = files.find((f) => f.replace(/\.[^/.]+$/, "").toLowerCase() === safeId);
@@ -146,20 +170,33 @@ export async function deleteArtifact(id: string, cwd: string = process.cwd()): P
   const safeId = id.replace(/[^a-zA-Z0-9_\-]/g, "_").toLowerCase();
   const projectDir = getArtifactsDir(cwd, "project");
   const globalDir = getArtifactsDir(cwd, "global");
-  const dirs = resolve(projectDir) === resolve(globalDir) ? [projectDir] : [projectDir, globalDir];
+  const legacyDir = getLegacyArtifactsDir(cwd);
 
-  for (const dir of dirs) {
+  const candidateDirs = [projectDir, globalDir];
+  try {
+    await access(legacyDir);
+    candidateDirs.push(legacyDir);
+  } catch {}
+
+  const uniqueDirs = Array.from(new Set(candidateDirs.map((d) => resolve(d))));
+  let deleted = false;
+
+  for (const dir of uniqueDirs) {
     try {
       const files = await readdir(dir);
       const match = files.find((f) => f.replace(/\.[^/.]+$/, "").toLowerCase() === safeId);
       if (match) {
         const filePath = join(dir, match);
         await rm(filePath);
-        return { success: true, message: `Artefato '${safeId}' removido com sucesso.` };
+        deleted = true;
       }
     } catch {
       // Skip missing dir
     }
+  }
+
+  if (deleted) {
+    return { success: true, message: `Artefato '${safeId}' removido com sucesso.` };
   }
 
   return { success: false, message: `Artefato '${id}' não foi encontrado.` };

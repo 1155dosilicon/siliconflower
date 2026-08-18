@@ -17,7 +17,7 @@ Agente de IA em terminal (CLI/TUI) de alta performance para desenvolvimento de s
 ## ✨ Recursos Principais
 
 - 🤖 **Subagentes & Background Tasks**: Spawning de agentes autônomos com papéis dedicados (`research`, `verification`, `plan`, `coder`, `custom`) em segundo plano.
-- 🧠 **Memória Persistente**: Armazena preferências e contexto do projeto (`.siliconflower/memory`) injetados automaticamente no prompt do sistema.
+- 🧠 **Memória Persistente & Workspace Limpo**: Armazena preferências, regras e contexto do projeto de forma isolada em `~/.siliconflower/workspaces/<workspace-id>/memory/`, mantendo o repositório do projeto 100% limpo sem pastas visíveis no workspace (estilo Antigravity e harnesses modernos).
 - 🌳 **Git Worktrees Isolados**: Testes e refatorações em branches temporárias sem afetar a área de trabalho atual.
 - 🗺️ **RepoMap & Símbolos**: Mapeamento estrutural de código (TS, JS, Python, Go, Rust, C/C++) com baixo consumo de tokens.
 - ⚡ **Raciocínio & Modos de Operação**: Controle de *reasoning effort* / *thinking tokens* (`Ctrl+E`) e modos de segurança (`Ctrl+O`: `programação`, `sistema`, `plano`).
@@ -50,9 +50,17 @@ siliconflower          # Executa a partir de qualquer pasta
 
 ---
 
-## ⚙️ Configuração
+## ⚙️ Configuração & Armazenamento Isolado
 
-As configurações ficam salvas em `~/.siliconflower/config.json`:
+As configurações globais e dados do Siliconflower ficam organizados em `~/.siliconflower/`:
+
+- **Configurações:** `~/.siliconflower/config.json`
+- **Habilidades (Skills):** `~/.siliconflower/skills/`
+- **Memórias Globais:** `~/.siliconflower/memory/`
+- **Artefatos Globais:** `~/.siliconflower/artifacts/`
+- **Workspaces Isolados:** `~/.siliconflower/workspaces/<workspace-id>/` (armazena memórias, artefatos e hooks do projeto sem poluir o repositório local)
+- **Logs:** `~/.siliconflower/logs/`
+- **Saídas Truncadas:** `~/.siliconflower/outputs/`
 
 ```json
 {
@@ -68,7 +76,7 @@ As configurações ficam salvas em `~/.siliconflower/config.json`:
 ### Comandos de Gerenciamento & Flags CLI
 ```powershell
 bun run start -- config       # Reabre o assistente de configuração
-bun run start -- show         # Exibe a configuração ativa (chave mascarada)
+bun run start -- show         # Exibe a configuração ativa e ID do workspace
 bun run start -- -m <model> -r <level> --mode <mode>  # Executa com parâmetros específicos
 ```
 

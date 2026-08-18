@@ -1,7 +1,6 @@
-import { readFile, writeFile, unlink, readdir } from "fs/promises";
+import { readFile, writeFile, unlink, readdir, access } from "fs/promises";
 import { join, resolve } from "path";
-import { homedir } from "os";
-import { ensureDir } from "../fs-util.js";
+import { ensureDir, getWorkspaceDataDir, getGlobalDataDir } from "../fs-util.js";
 
 export type MemoryType = "user" | "feedback" | "project" | "reference";
 export type MemoryScope = "project" | "global";
@@ -15,16 +14,22 @@ export interface MemoryEntry {
   updatedAt: string;
 }
 
-function getGlobalMemoryDir(): string {
-  return join(homedir(), ".siliconflower", "memory");
+export function getGlobalMemoryDir(): string {
+  return join(getGlobalDataDir(), "memory");
 }
 
-function getProjectMemoryDir(cwd: string = process.cwd()): string {
+export function getProjectMemoryDir(cwd: string = process.cwd()): string {
+  return join(getWorkspaceDataDir(cwd), "memory");
+}
+
+export function getLegacyProjectMemoryDir(cwd: string = process.cwd()): string {
   return join(cwd, ".siliconflower", "memory");
 }
 
 /**
  * Saves or updates a persistent memory entry.
+ * Project memories are saved in ~/.siliconflower/workspaces/<workspace-id>/memory/
+ * Global memories are saved in ~/.siliconflower/memory/
  */
 export async function saveMemory(
   entry: Omit<MemoryEntry, "updatedAt">,
@@ -96,14 +101,26 @@ export async function recallMemories(
   cwd: string = process.cwd()
 ): Promise<MemoryEntry[]> {
   const memories: MemoryEntry[] = [];
+  const seenNames = new Set<string>();
+
   const globalDir = getGlobalMemoryDir();
   const projectDir = getProjectMemoryDir(cwd);
-  const dirs: { dir: string; scope: MemoryScope }[] = [
+  const legacyDir = getLegacyProjectMemoryDir(cwd);
+
+  const candidateDirs: { dir: string; scope: MemoryScope }[] = [
     { dir: globalDir, scope: "global" },
-    ...(resolve(projectDir) !== resolve(globalDir) ? [{ dir: projectDir, scope: "project" as MemoryScope }] : []),
+    { dir: projectDir, scope: "project" },
   ];
 
-  for (const { dir, scope } of dirs) {
+  // Check if legacy directory exists in cwd
+  try {
+    await access(legacyDir);
+    if (resolve(legacyDir) !== resolve(projectDir) && resolve(legacyDir) !== resolve(globalDir)) {
+      candidateDirs.push({ dir: legacyDir, scope: "project" });
+    }
+  } catch {}
+
+  for (const { dir, scope } of candidateDirs) {
     try {
       await ensureDir(dir);
       const files = await readdir(dir);
@@ -118,9 +135,15 @@ export async function recallMemories(
         const dateMatch = raw.match(/^updatedAt:\s*(.+)$/m);
 
         const content = raw.replace(/^---[\s\S]*?---/, "").trim();
+        const entryName = nameMatch ? nameMatch[1].trim() : file.replace(".md", "");
+
+        // Avoid duplicates across legacy and new workspace directories
+        const key = `${scope}:${entryName.toLowerCase()}`;
+        if (seenNames.has(key)) continue;
+        seenNames.add(key);
 
         const entry: MemoryEntry = {
-          name: nameMatch ? nameMatch[1].trim() : file.replace(".md", ""),
+          name: entryName,
           type: (typeMatch ? typeMatch[1].trim() : "feedback") as MemoryType,
           description: descMatch ? descMatch[1].trim() : "",
           scope,
@@ -158,6 +181,7 @@ export async function forgetMemory(
 
   const globalPath = join(getGlobalMemoryDir(), fileName);
   const projectPath = join(getProjectMemoryDir(cwd), fileName);
+  const legacyPath = join(getLegacyProjectMemoryDir(cwd), fileName);
 
   let deleted = false;
 
@@ -170,6 +194,12 @@ export async function forgetMemory(
   try {
     await unlink(globalPath);
     await updateMemoryIndex(getGlobalMemoryDir());
+    deleted = true;
+  } catch (e) {}
+
+  try {
+    await unlink(legacyPath);
+    await updateMemoryIndex(getLegacyProjectMemoryDir(cwd));
     deleted = true;
   } catch (e) {}
 

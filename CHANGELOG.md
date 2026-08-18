@@ -6,9 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Centralized Workspace Data Storage (`~/.siliconflower/workspaces/<workspace-id>/`):** Replaced in-tree `.siliconflower` folder creation inside user project directories with deterministic, centralized workspace data storage located in `~/.siliconflower/workspaces/<workspace-id>/` (mirroring Antigravity and modern AI harness conventions). Project workspaces now remain 100% clean and free of visible config/cache directories.
+- **Workspace ID Computation (`src/fs-util.ts`):** Added `getWorkspaceId(cwd)` and `getWorkspaceDataDir(cwd)` helpers generating consistent, filesystem-safe slugs with short SHA-256 hashes.
+- **Backward-Compatible Legacy Data Discovery:** Maintained full backward compatibility across `recallMemories`, `forgetMemory`, `listArtifacts`, `readArtifact`, `deleteArtifact`, and `loadHooksConfig` so existing repositories with legacy `.siliconflower` folders continue to resolve seamlessly.
+
 ### Changed
 - **Windows-Only Focus & Simplification:** Removed Linux and macOS compatibility layers, platform branching, and bash fallback logic across `src/modes.ts`, `src/tools.ts`, `src/fs-util.ts`, `src/services/background-tasks.ts`, and test suites. Siliconflower is now centered exclusively on Windows (PowerShell/Bun/Node).
-- **Documentation & Packaging:** Updated `README.md`, `LLMS.md`, and `package.json` (`"os": ["win32"]`) to reflect the dedicated Windows platform focus.
+- **Documentation & CLI:** Updated `README.md`, `LLMS.md`, and `siliconflower show` command to display the active workspace ID and data directory path.
 
 ## [0.2.3] - 2026-08-16
 

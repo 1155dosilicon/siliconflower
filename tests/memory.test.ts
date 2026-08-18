@@ -1,8 +1,9 @@
 import { describe, expect, test, afterEach } from "bun:test";
 import { saveMemory, recallMemories, forgetMemory, buildMemorySystemPrompt } from "../src/services/memory.js";
-import { rm } from "node:fs/promises";
+import { rm, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { getWorkspaceDataDir } from "../src/fs-util.js";
 
 describe("memory service", () => {
   const testWorkspace = join(tmpdir(), `memory_test_${Date.now()}`);
@@ -11,9 +12,13 @@ describe("memory service", () => {
     try {
       await rm(testWorkspace, { recursive: true, force: true });
     } catch {}
+    try {
+      const wsDir = getWorkspaceDataDir(testWorkspace);
+      await rm(wsDir, { recursive: true, force: true });
+    } catch {}
   });
 
-  test("saves, recalls and builds memory system prompt", async () => {
+  test("saves, recalls and builds memory system prompt without creating .siliconflower in workspace", async () => {
     const saveRes = await saveMemory(
       {
         name: "test_rule",
@@ -26,6 +31,20 @@ describe("memory service", () => {
     );
 
     expect(saveRes.message).toContain("salva com sucesso");
+
+    // Verify workspace directory does NOT have .siliconflower created in it
+    let localDirExists = false;
+    try {
+      await access(join(testWorkspace, ".siliconflower"));
+      localDirExists = true;
+    } catch {
+      localDirExists = false;
+    }
+    expect(localDirExists).toBe(false);
+
+    // Verify memory file was written into centralized workspace storage
+    expect(saveRes.path).toContain(".siliconflower");
+    expect(saveRes.path).toContain("workspaces");
 
     const memories = await recallMemories("clean code", testWorkspace);
     expect(memories.length).toBeGreaterThanOrEqual(1);

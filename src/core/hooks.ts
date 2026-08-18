@@ -1,9 +1,9 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { readFile, access } from "node:fs/promises";
 import { log } from "../logger.js";
+import { getWorkspaceDataDir, getGlobalDataDir } from "../fs-util.js";
 
 const execAsync = promisify(exec);
 
@@ -26,15 +26,25 @@ export interface HookResult {
 }
 
 /**
- * Discovers and loads hook configurations from workspace (.siliconflower/hooks.json) or global (~/.siliconflower/hooks.json).
+ * Discovers and loads hook configurations from workspace (~/.siliconflower/workspaces/<workspace-id>/hooks.json),
+ * legacy repo (.siliconflower/hooks.json), or global (~/.siliconflower/hooks.json).
  */
 export async function loadHooksConfig(cwd: string = process.cwd()): Promise<HookConfig | undefined> {
-  const localHooksFile = join(cwd, ".siliconflower", "hooks.json");
-  const globalHooksFile = join(homedir(), ".siliconflower", "hooks.json");
+  const workspaceHooksFile = join(getWorkspaceDataDir(cwd), "hooks.json");
+  const legacyHooksFile = join(cwd, ".siliconflower", "hooks.json");
+  const globalHooksFile = join(getGlobalDataDir(), "hooks.json");
 
   try {
-    await access(localHooksFile);
-    const raw = await readFile(localHooksFile, "utf8");
+    await access(workspaceHooksFile);
+    const raw = await readFile(workspaceHooksFile, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    // Fallback to legacy
+  }
+
+  try {
+    await access(legacyHooksFile);
+    const raw = await readFile(legacyHooksFile, "utf8");
     return JSON.parse(raw);
   } catch {
     // Fallback to global

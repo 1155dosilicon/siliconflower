@@ -1,8 +1,38 @@
 import { mkdir } from "node:fs/promises";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
+import { createHash } from "node:crypto";
+import { join, basename, resolve } from "node:path";
+import { homedir } from "node:os";
 
 const execAsync = promisify(exec);
+
+/**
+ * Returns the global siliconflower data and configuration directory (~/.siliconflower).
+ */
+export function getGlobalDataDir(): string {
+  return join(homedir(), ".siliconflower");
+}
+
+/**
+ * Generates a unique, deterministic, filesystem-safe workspace ID for a given directory path.
+ * Format: `<sanitized-folder-name>-<sha256-short-hash>` (e.g., `my-project-8f3a1b2c`)
+ */
+export function getWorkspaceId(cwd: string = process.cwd()): string {
+  const normalized = resolve(cwd).replace(/\\/g, "/").toLowerCase();
+  const folderName = basename(normalized).replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase() || "workspace";
+  const hash = createHash("sha256").update(normalized).digest("hex").slice(0, 8);
+  return `${folderName}-${hash}`;
+}
+
+/**
+ * Returns the centralized, isolated data directory for a specific project/workspace.
+ * Located at: `~/.siliconflower/workspaces/<workspace-id>/`
+ * This ensures the user's project/repository remains completely clean without polluting it with `.siliconflower` folders.
+ */
+export function getWorkspaceDataDir(cwd: string = process.cwd()): string {
+  return join(getGlobalDataDir(), "workspaces", getWorkspaceId(cwd));
+}
 
 /**
  * Applies the Windows 'Hidden' (+h) attribute to a target path.
@@ -12,7 +42,7 @@ export async function hidePathOnWindows(targetPath: string): Promise<void> {
   try {
     await execAsync(`attrib +h "${targetPath}"`);
   } catch {
-    // Ignore errors (e.g., command unavailable)
+    // Ignore errors (e.g., command unavailable or non-Windows)
   }
 }
 

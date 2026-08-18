@@ -766,7 +766,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     name: "create_artifact",
     description:
-      "Cria ou atualiza um artefato estruturado persistente (relatório, diagrama Mermaid, documento HTML, especificação de arquitetura ou código). Salva o arquivo em .siliconflower/artifacts/.",
+      "Cria ou atualiza um artefato estruturado persistente (relatório, diagrama Mermaid, documento HTML, especificação de arquitetura ou código). Salva o arquivo no diretório isolado do Siliconflower (~/.siliconflower/workspaces/<workspace-id>/artifacts/ ou ~/.siliconflower/artifacts/).",
     inputSchema: {
       type: "object",
       properties: {
@@ -847,7 +847,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   },
   {
     name: "manage_hooks",
-    description: "Exibe a configuração atual de hooks ativados no repositório ou no ambiente global.",
+    description: "Exibe a configuração atual de hooks ativados no workspace ou no ambiente global.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -855,7 +855,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     run: async (_, ctx) => {
       const cfg = ctx?.config?.hooks || (await loadHooksConfig());
       if (!cfg || Object.keys(cfg).length === 0) {
-        return { result: "Nenhum hook configurado em .siliconflower/hooks.json ou ~/.siliconflower/hooks.json.", isError: false };
+        return { result: "Nenhum hook configurado em ~/.siliconflower/workspaces/<workspace-id>/hooks.json ou ~/.siliconflower/hooks.json.", isError: false };
       }
       return { result: JSON.stringify(cfg, null, 2), isError: false };
     },
