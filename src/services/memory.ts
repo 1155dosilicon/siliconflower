@@ -175,7 +175,8 @@ export async function recallMemories(
  */
 export async function forgetMemory(
   name: string,
-  cwd: string = process.cwd()
+  cwd: string = process.cwd(),
+  scope: MemoryScope | "all" = "project"
 ): Promise<{ message: string; isError: boolean }> {
   const fileName = `${name.replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase()}.md`;
 
@@ -185,26 +186,30 @@ export async function forgetMemory(
 
   let deleted = false;
 
-  try {
-    await unlink(projectPath);
-    await updateMemoryIndex(getProjectMemoryDir(cwd));
-    deleted = true;
-  } catch (e) {}
+  if (scope === "project" || scope === "all") {
+    try {
+      await unlink(projectPath);
+      await updateMemoryIndex(getProjectMemoryDir(cwd));
+      deleted = true;
+    } catch {}
 
-  try {
-    await unlink(globalPath);
-    await updateMemoryIndex(getGlobalMemoryDir());
-    deleted = true;
-  } catch (e) {}
+    try {
+      await unlink(legacyPath);
+      await updateMemoryIndex(getLegacyProjectMemoryDir(cwd));
+      deleted = true;
+    } catch {}
+  }
 
-  try {
-    await unlink(legacyPath);
-    await updateMemoryIndex(getLegacyProjectMemoryDir(cwd));
-    deleted = true;
-  } catch (e) {}
+  if (scope === "global" || scope === "all") {
+    try {
+      await unlink(globalPath);
+      await updateMemoryIndex(getGlobalMemoryDir());
+      deleted = true;
+    } catch {}
+  }
 
   if (deleted) {
-    return { message: `Memória '${name}' removida com sucesso.`, isError: false };
+    return { message: `Memória '${name}' removida com sucesso do escopo [${scope}].`, isError: false };
   } else {
     return { message: `Memória '${name}' não encontrada.`, isError: true };
   }

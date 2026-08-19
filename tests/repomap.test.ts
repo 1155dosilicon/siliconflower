@@ -63,4 +63,11 @@ export function calculateTotal(items: number[]): number {
     expect(results[0].symbols[0].name).toBe("complexMathFormula");
     expect(results[0].symbols[0].kind).toBe("function");
   });
+
+  test("rejects focus paths outside the repository", async () => {
+    await mkdir(testDir, { recursive: true });
+    const map = await generateRepoMap(testDir, { focusPath: ".." });
+    expect(map.fileCount).toBe(0);
+    expect(map.mapText).toContain("fora do repositório");
+  });
 });

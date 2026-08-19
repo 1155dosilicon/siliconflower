@@ -1,7 +1,6 @@
-import { homedir } from "node:os";
 import { join, basename } from "node:path";
 import { readdir, readFile, writeFile, stat } from "node:fs/promises";
-import { ensureDir } from "./fs-util.js";
+import { ensureDir, getGlobalDataDir } from "./fs-util.js";
 
 export interface Skill {
   name: string;
@@ -10,7 +9,7 @@ export interface Skill {
   content: string;
 }
 
-const USER_SKILLS_DIR = join(homedir(), ".siliconflower", "skills");
+const USER_SKILLS_DIR = join(getGlobalDataDir(), "skills");
 
 export function skillsDir(): string {
   return USER_SKILLS_DIR;

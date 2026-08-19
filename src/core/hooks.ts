@@ -67,7 +67,7 @@ export async function loadHooksConfig(cwd: string = process.cwd()): Promise<Hook
 export async function runHook(
   event: HookEvent,
   config?: HookConfig,
-  context: { toolName?: string; toolArgs?: Record<string, unknown>; command?: string; cwd?: string } = {}
+  context: { toolName?: string; toolArgs?: Record<string, unknown>; command?: string; cwd?: string; filePath?: string } = {}
 ): Promise<HookResult> {
   const effectiveCwd = context.cwd || process.cwd();
   
@@ -90,6 +90,7 @@ export async function runHook(
       SILICONFLOWER_TOOL_NAME: context.toolName || "",
       SILICONFLOWER_TOOL_ARGS: context.toolArgs ? JSON.stringify(context.toolArgs) : "",
       SILICONFLOWER_COMMAND: context.command || "",
+      SILICONFLOWER_FILE_PATH: context.filePath || "",
     };
 
     const { stdout, stderr } = await execAsync(command, {
@@ -97,6 +98,7 @@ export async function runHook(
       env,
       windowsHide: true,
       timeout: 30000,
+      shell: "powershell.exe",
     });
 
     const output = (stdout + (stderr ? `\nStderr: ${stderr}` : "")).trim();

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { htmlToMarkdown, webFetch } from "../src/services/web.js";
+import { htmlToMarkdown, isPrivateAddress, webFetch } from "../src/services/web.js";
 
 describe("web fetch and markdown conversion", () => {
   test("converts basic HTML to clean markdown", () => {
@@ -27,5 +27,15 @@ describe("web fetch and markdown conversion", () => {
     const res = await webFetch("https://invalid-nonexistent-domain-12345.org", { timeoutMs: 1000 });
     expect(res.isError).toBe(true);
     expect(res.content).toContain("Erro ao buscar URL");
+  });
+
+  test("blocks local and private network destinations", async () => {
+    expect(isPrivateAddress("127.0.0.1")).toBe(true);
+    expect(isPrivateAddress("10.1.2.3")).toBe(true);
+    expect(isPrivateAddress("::1")).toBe(true);
+    expect(isPrivateAddress("8.8.8.8")).toBe(false);
+    const res = await webFetch("http://127.0.0.1/internal");
+    expect(res.isError).toBe(true);
+    expect(res.content).toContain("não é permitido");
   });
 });

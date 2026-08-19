@@ -77,4 +77,22 @@ describe("memory service", () => {
     const found = memories.find((m) => m.name === "obsolete_rule");
     expect(found).toBeUndefined();
   });
+
+  test("forgets only the requested memory scope", async () => {
+    const name = `scoped_rule_${Date.now()}`;
+    const base = {
+      name,
+      type: "project" as const,
+      description: "Scoped memory",
+      content: "Scope-specific content",
+    };
+    await saveMemory({ ...base, scope: "project" }, testWorkspace);
+    await saveMemory({ ...base, scope: "global" }, testWorkspace);
+
+    expect((await forgetMemory(name, testWorkspace, "project")).isError).toBe(false);
+    const remaining = await recallMemories(name, testWorkspace);
+    expect(remaining.some((entry) => entry.scope === "global")).toBe(true);
+    expect(remaining.some((entry) => entry.scope === "project")).toBe(false);
+    await forgetMemory(name, testWorkspace, "global");
+  });
 });

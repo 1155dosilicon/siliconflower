@@ -1,6 +1,6 @@
 # 🌸 SILICONFLOWER
 
-![Version](https://img.shields.io/badge/version-0.2.3-blue.svg)
+![Version](https://img.shields.io/badge/version-0.2.4-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20PowerShell-0078D6.svg)
 ![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black.svg)
@@ -21,7 +21,7 @@ Agente de IA em terminal (CLI/TUI) de alta performance para desenvolvimento de s
 - 🌳 **Git Worktrees Isolados**: Testes e refatorações em branches temporárias sem afetar a área de trabalho atual.
 - 🗺️ **RepoMap & Símbolos**: Mapeamento estrutural de código (TS, JS, Python, Go, Rust, C/C++) com baixo consumo de tokens.
 - ⚡ **Raciocínio & Modos de Operação**: Controle de *reasoning effort* / *thinking tokens* (`Ctrl+E`) e modos de segurança (`Ctrl+O`: `programação`, `sistema`, `plano`).
-- 🧩 **Ecossistema MCP & Hooks**: Suporte nativo ao Model Context Protocol e automações disparadas por eventos do ciclo de vida (`preTool`, `postTool`, `onEdit`, `onCommand`).
+- 🧩 **Ecossistema MCP & Hooks**: Suporte nativo ao Model Context Protocol e automações disparadas por eventos do ciclo de vida (`preTool`, `postTool`, `onEdit`, `onCommand`, `onSessionStart`, `onSessionEnd`).
 - 📦 **Binário Nativo Standalone**: Compilação para `.exe` único via Bun, sem necessidade de Node.js instalado.
 
 ---
@@ -99,6 +99,8 @@ bun run start -- -m <model> -r <level> --mode <mode>  # Executa com parâmetros 
 - **`sistema`**: Focado em administração de SO, processos e scripts PowerShell.
 - **`plano`**: Modo seguro *apenas leitura* — bloqueia edições de arquivo e comandos modificadores.
 
+No modo `plano`, ferramentas desconhecidas e ferramentas MCP também são bloqueadas por padrão. Apenas a lista nativa explicitamente classificada como leitura pode ser usada; subagentes, worktrees, persistência e cancelamento de tarefas ficam indisponíveis.
+
 ---
 
 ## 🛠️ Ferramentas Nativas (34 Ferramentas)
@@ -107,12 +109,12 @@ O Siliconflower disponibiliza um conjunto completo de ferramentas integradas:
 
 - 📁 **Arquivos & Edição**: `read_file`, `write_file`, `edit_file` (fuzzy/newline matching), `apply_patch`, `list_directory`, `create_directory`, `move_path`, `delete_path`, `file_info`.
 - 🔍 **Busca & Navegação**: `search_files` (glob), `grep_content` (regex), `repo_map`, `find_symbol`.
-- 💻 **Execução & Tarefas**: `execute_command` (PowerShell seguro), `read_logs`, `ask_question`, `todowrite`, `read_skill`.
+- 💻 **Execução & Tarefas**: `execute_command` (PowerShell arbitrário com os privilégios do usuário), `read_logs`, `ask_question`, `todowrite`, `read_skill`.
 - 🤖 **Subagentes & Async**: `run_task`, `send_subagent_message`, `manage_background_task`.
 - 🧠 **Memória & Worktrees**: `save_memory`, `recall_memory`, `forget_memory`, `enter_worktree`, `exit_worktree`, `list_worktrees`.
 - 📄 **Artefatos & Web**: `create_artifact`, `read_artifact`, `list_artifacts`, `delete_artifact`, `web_fetch` (HTML para Markdown), `web_search`, `manage_hooks`.
 
-> 📖 Para a documentação técnica detalhada das ferramentas e arquitetura, consulte o [LLMS.md](file:///C:/Users/Eli/Desktop/ia/siliconflower-main/LLMS.md).
+> 📖 Para a documentação técnica detalhada das ferramentas e arquitetura, consulte o [LLMS.md](LLMS.md).
 
 ---
 
@@ -129,6 +131,12 @@ O Siliconflower disponibiliza um conjunto completo de ferramentas integradas:
   }
 }
 ```
+
+As ferramentas MCP são anunciadas à LLM com nomes qualificados e estáveis no formato `mcp_<servidor>_<ferramenta>_<hash>`. Isso evita colisões entre servidores ou com ferramentas nativas; o nome original continua sendo usado ao chamar o servidor.
+
+### Testes e diretório de dados alternativo
+
+Defina `SILICONFLOWER_DATA_DIR` para redirecionar configurações e dados persistentes para outro diretório. A suíte de testes usa essa variável automaticamente e nunca escreve no perfil real do usuário.
 
 ### Hooks de Automação
 ```json
@@ -166,4 +174,4 @@ siliconflower/
 
 ## 📜 Licença
 
-Distribuído sob a licença **MIT**. Veja [LICENSE](file:///C:/Users/Eli/Desktop/ia/siliconflower-main/LICENSE) para mais informações.
+Distribuído sob a licença **MIT**. Veja [LICENSE](LICENSE) para mais informações.

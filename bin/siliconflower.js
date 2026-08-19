@@ -2,30 +2,26 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { createRequire } from "node:module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const entry = join(__dirname, "..", "src", "index.tsx");
 
 function findRunner() {
-  // Prefer bun (runs TSX natively), fall back to tsx, then npx tsx.
-  const order = [
-    ["bun", ["run", entry]],
-    ["tsx", [entry]],
-    ["npx", ["tsx", entry]],
-  ];
-  for (const [cmd, args] of order) {
-    const probe = spawnSync(cmd, ["--version"], { shell: true, stdio: "ignore" });
-    if (!probe.error && probe.status === 0) {
-      return [cmd, args];
-    }
+  const bunProbe = spawnSync("bun", ["--version"], { shell: false, stdio: "ignore" });
+  if (!bunProbe.error && bunProbe.status === 0) {
+    return ["bun", ["run", entry]];
   }
-  return ["npx", ["tsx", entry]];
+
+  const require = createRequire(import.meta.url);
+  const tsxCli = require.resolve("tsx/cli");
+  return [process.execPath, [tsxCli, entry]];
 }
 
 const [cmd, args] = findRunner();
 const result = spawnSync(cmd, [...args, ...process.argv.slice(2)], {
   stdio: "inherit",
-  shell: true,
+  shell: false,
   env: process.env,
 });
 

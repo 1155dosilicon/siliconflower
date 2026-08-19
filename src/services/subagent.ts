@@ -1,7 +1,7 @@
 import { streamChat } from "../llm.js";
 import { builtinToolsAsMcp, runBuiltin, isBuiltin } from "../tools.js";
 import type { AppConfig, ChatMessage, StreamEvent } from "../types.js";
-import { registerBackgroundTask } from "./background-tasks.js";
+import { registerBackgroundTask, settleBackgroundTask } from "./background-tasks.js";
 import { log } from "../logger.js";
 
 export type SubagentRole = "general" | "research" | "verification" | "plan" | "coder" | "custom";
@@ -13,6 +13,7 @@ export interface SubagentOptions {
   role?: SubagentRole;
   customPrompt?: string;
   runInBackground?: boolean;
+  signal?: AbortSignal;
 }
 
 export interface SubagentSession {
@@ -21,6 +22,7 @@ export interface SubagentSession {
   role: SubagentRole;
   history: ChatMessage[];
   createdAt: string;
+  customPrompt?: string;
 }
 
 const activeSubagentSessions = new Map<string, SubagentSession>();
@@ -76,11 +78,15 @@ export async function runSubagentTask(opts: SubagentOptions): Promise<string> {
     role,
     history: [{ role: "user", content: opts.prompt }],
     createdAt: new Date().toISOString(),
+    customPrompt: opts.customPrompt,
   };
 
   activeSubagentSessions.set(sessionId, session);
 
   if (opts.runInBackground) {
+    const controller = new AbortController();
+    const onParentAbort = () => controller.abort();
+    opts.signal?.addEventListener("abort", onParentAbort, { once: true });
     registerBackgroundTask({
       id: sessionId,
       type: "subagent",
@@ -88,34 +94,18 @@ export async function runSubagentTask(opts: SubagentOptions): Promise<string> {
       role,
       status: "running",
       startedAt: new Date().toISOString(),
+      cancel: () => controller.abort(),
     });
 
     // Execute asynchronously without blocking caller
-    runSubagentExecution(opts, systemPrompt, session)
+    runSubagentExecution({ ...opts, signal: controller.signal }, systemPrompt, session)
       .then((res) => {
-        registerBackgroundTask({
-          id: sessionId,
-          type: "subagent",
-          description: opts.description,
-          role,
-          status: "completed",
-          result: res,
-          startedAt: session.createdAt,
-          completedAt: new Date().toISOString(),
-        });
+        settleBackgroundTask(sessionId, "completed", res);
       })
       .catch((err) => {
-        registerBackgroundTask({
-          id: sessionId,
-          type: "subagent",
-          description: opts.description,
-          role,
-          status: "failed",
-          result: `Erro: ${err.message || String(err)}`,
-          startedAt: session.createdAt,
-          completedAt: new Date().toISOString(),
-        });
-      });
+        settleBackgroundTask(sessionId, "failed", `Erro: ${err.message || String(err)}`);
+      })
+      .finally(() => opts.signal?.removeEventListener("abort", onParentAbort));
 
     return `Subagente iniciado em background! [ID do Subagente: ${sessionId}] — Descrição: ${opts.description}`;
   }
@@ -129,7 +119,8 @@ export async function runSubagentTask(opts: SubagentOptions): Promise<string> {
 export async function sendSubagentMessage(
   sessionId: string,
   message: string,
-  config: AppConfig
+  config: AppConfig,
+  signal?: AbortSignal
 ): Promise<{ result: string; isError: boolean }> {
   const session = activeSubagentSessions.get(sessionId);
   if (!session) {
@@ -137,20 +128,25 @@ export async function sendSubagentMessage(
   }
 
   session.history.push({ role: "user", content: message });
-  const systemPrompt = getRoleSystemPrompt(session.role, session.description);
+  const systemPrompt = getRoleSystemPrompt(session.role, session.description, session.customPrompt);
 
-  const res = await runSubagentExecution(
-    {
-      config,
-      description: session.description,
-      prompt: message,
-      role: session.role,
-    },
-    systemPrompt,
-    session
-  );
-
-  return { result: res, isError: false };
+  try {
+    const res = await runSubagentExecution(
+      {
+        config,
+        description: session.description,
+        prompt: message,
+        role: session.role,
+        customPrompt: session.customPrompt,
+        signal,
+      },
+      systemPrompt,
+      session
+    );
+    return { result: res, isError: false };
+  } catch (err) {
+    return { result: `Erro ao executar subagente: ${err instanceof Error ? err.message : String(err)}`, isError: true };
+  }
 }
 
 async function runSubagentExecution(opts: SubagentOptions, systemPrompt: string, session: SubagentSession): Promise<string> {
@@ -167,6 +163,7 @@ async function runSubagentExecution(opts: SubagentOptions, systemPrompt: string,
       messages: session.history,
       tools,
       reasoning: "none",
+      signal: opts.signal,
       executeTool: async (name, args) => {
         if (isBuiltin(name)) {
           return runBuiltin(name, args, { config: opts.config });
@@ -181,7 +178,7 @@ async function runSubagentExecution(opts: SubagentOptions, systemPrompt: string,
       } else if (ev.type === "done") {
         if (ev.content) accumulatedContent = ev.content;
       } else if (ev.type === "error") {
-        return `[Erro no subagente: ${ev.message}]`;
+        throw new Error(ev.message);
       }
     }
 
@@ -194,7 +191,7 @@ async function runSubagentExecution(opts: SubagentOptions, systemPrompt: string,
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await log("error", `[Subagente erro] ${msg}`);
-    return `[Erro ao executar subagente: ${msg}]`;
+    throw err;
   }
 }
 

@@ -1,11 +1,12 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
-import { ensureDir } from "./fs-util.js";
+import { ensureDir, getGlobalDataDir } from "./fs-util.js";
 import type { ChatMessage } from "./types.js";
 import { log } from "./logger.js";
 
-const OUTPUT_DIR = join(homedir(), ".siliconflower", "outputs");
+function outputDir(): string {
+  return join(getGlobalDataDir(), "outputs");
+}
 
 /**
  * Formats a token count nicely (e.g. 850 -> "850", 1250 -> "1.3K", 35200 -> "35.2K").
@@ -51,32 +52,36 @@ export async function processToolOutput(output: string, maxChars = 32000): Promi
     return output;
   }
 
+  const safeMaxChars = Number.isFinite(maxChars) ? Math.max(100, Math.floor(maxChars)) : 32000;
+  const preview = buildBoundedPreview(output, safeMaxChars);
+
   try {
-    await ensureDir(OUTPUT_DIR);
+    const dir = outputDir();
+    await ensureDir(dir);
     const filename = `output_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.txt`;
-    const fullPath = join(OUTPUT_DIR, filename);
+    const fullPath = join(dir, filename);
     await writeFile(fullPath, output, "utf8");
 
-    const lines = output.split("\n");
-    const headLines = lines.slice(0, 100).join("\n");
-    const tailLines = lines.slice(-50).join("\n");
-
-    const msg = [
-      `[SAÍDA GRANDE TRUNCADA: Mostrando ~150 linhas de ${lines.length} linhas (${output.length} caracteres)]`,
-      `[Saída completa salva em: ${fullPath}]`,
-      `--- INÍCIO DA SAÍDA ---`,
-      headLines,
-      `... (${lines.length - 150} linhas omitidas. Use read_file com offset e limit para ler partes intermediárias) ...`,
-      tailLines,
-      `--- FIM DA SAÍDA ---`,
-    ].join("\n");
-
     await log("info", `Output de ferramenta salvo em ${fullPath} (${output.length} chars)`);
-    return msg;
+    return `${preview.header}\n[Saída completa salva em: ${fullPath}]\n${preview.body}`;
   } catch (err) {
     await log("warn", `Erro ao salvar output longo: ${String(err)}`);
-    return output.slice(0, maxChars) + `\n... (truncado, ${output.length - maxChars} chars omitidos)`;
+    return `${preview.header}\n[Não foi possível salvar a saída completa]\n${preview.body}`;
   }
+}
+
+function buildBoundedPreview(output: string, maxChars: number): { header: string; body: string } {
+  const lines = output.split(/\r?\n/).length;
+  const separator = `\n... (${output.length - maxChars} caracteres omitidos) ...\n`;
+  const available = Math.max(0, maxChars - separator.length);
+  const headSize = Math.ceil(available * 0.65);
+  const tailSize = Math.max(0, available - headSize);
+  const head = output.slice(0, headSize);
+  const tail = tailSize > 0 ? output.slice(-tailSize) : "";
+  return {
+    header: `[SAÍDA GRANDE TRUNCADA: ${lines} linhas, ${output.length} caracteres]`,
+    body: `--- INÍCIO DA SAÍDA ---\n${head}${separator}${tail}\n--- FIM DA SAÍDA ---`,
+  };
 }
 
 /**
@@ -89,14 +94,11 @@ export function compressHistory(messages: ChatMessage[], maxTokens = 90000): Cha
     return messages;
   }
 
-  // Keep last 20 messages untouched
+  // Preserve message ordering/protocol while progressively reducing oversized content.
   const KEEP_RECENT = 20;
-  if (messages.length <= KEEP_RECENT) {
-    return messages;
-  }
-
-  const oldMessages = messages.slice(0, messages.length - KEEP_RECENT);
-  const recentMessages = messages.slice(messages.length - KEEP_RECENT);
+  const splitAt = Math.max(0, messages.length - KEEP_RECENT);
+  const oldMessages = messages.slice(0, splitAt);
+  const recentMessages = messages.slice(splitAt);
 
   const compressedOld: ChatMessage[] = oldMessages.map((msg) => {
     if (msg.role === "tool" && msg.content.length > 500) {
@@ -115,5 +117,44 @@ export function compressHistory(messages: ChatMessage[], maxTokens = 90000): Cha
     return msg;
   });
 
-  return [...compressedOld, ...recentMessages];
+  const result = [...compressedOld, ...recentMessages].map((message) => ({ ...message }));
+  if (estimateMessagesTokens(result) <= maxTokens) return result;
+
+  // Remove reasoning first; it is useful for display but not required for protocol continuity.
+  for (const message of result) message.reasoning = undefined;
+
+  // Shrink oldest content first, but keep every message so tool-call role ordering remains valid.
+  for (let i = 0; i < result.length && estimateMessagesTokens(result) > maxTokens; i++) {
+    const message = result[i];
+    if (message.content.length > 160) {
+      message.content = `${message.content.slice(0, 120)}\n... [conteúdo reduzido por limite de contexto]`;
+    }
+    if (message.toolCalls) {
+      message.toolCalls = message.toolCalls.map((call) => ({
+        ...call,
+        function: {
+          ...call.function,
+          arguments: call.function.arguments.length > 160
+            ? `${call.function.arguments.slice(0, 120)}...`
+            : call.function.arguments,
+        },
+      }));
+    }
+  }
+
+  // If metadata and many small messages still exceed the budget, discard the oldest turns.
+  while (estimateMessagesTokens(result) > maxTokens && result.length > 1) {
+    result.shift();
+  }
+
+  // A single recent message can exceed the whole context budget; bound it as a last resort.
+  if (estimateMessagesTokens(result) > maxTokens && result.length === 1) {
+    const last = result[0];
+    last.reasoning = undefined;
+    last.toolCalls = undefined;
+    const charBudget = Math.max(0, Math.floor(maxTokens * 3.8));
+    last.content = last.content.slice(0, charBudget);
+  }
+
+  return result;
 }

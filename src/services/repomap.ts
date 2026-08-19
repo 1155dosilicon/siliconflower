@@ -1,5 +1,5 @@
 import { readdir, readFile } from "fs/promises";
-import { join, relative, extname } from "path";
+import { join, relative, extname, resolve, isAbsolute } from "path";
 
 export interface SymbolInfo {
   name: string;
@@ -163,8 +163,14 @@ export async function generateRepoMap(
   rootDir: string = process.cwd(),
   options: { maxFiles?: number; focusPath?: string } = {}
 ): Promise<{ mapText: string; fileCount: number; symbolCount: number }> {
-  const maxFiles = options.maxFiles || 50;
-  const targetDir = options.focusPath ? join(rootDir, options.focusPath) : rootDir;
+  const maxFilesRaw = Number(options.maxFiles);
+  const maxFiles = Number.isFinite(maxFilesRaw) ? Math.min(500, Math.max(1, Math.floor(maxFilesRaw))) : 50;
+  const resolvedRoot = resolve(rootDir);
+  const targetDir = options.focusPath ? resolve(resolvedRoot, options.focusPath) : resolvedRoot;
+  const focusRelative = relative(resolvedRoot, targetDir);
+  if (focusRelative.startsWith("..") || isAbsolute(focusRelative)) {
+    return { mapText: "Caminho de foco fora do repositório não é permitido.", fileCount: 0, symbolCount: 0 };
+  }
 
   const files = await scanDirectoryFiles(targetDir, rootDir);
   const selectedFiles = files.slice(0, maxFiles);
@@ -177,7 +183,7 @@ export async function generateRepoMap(
       const content = await readFile(filePath, "utf8");
       const ext = extname(filePath).toLowerCase();
       const symbols = extractSymbols(content, ext);
-      const relPath = relative(rootDir, filePath).replace(/\\/g, "/");
+      const relPath = relative(resolvedRoot, filePath).replace(/\\/g, "/");
 
       if (symbols.length > 0) {
         resultMap.push({ filePath, relPath, symbols });

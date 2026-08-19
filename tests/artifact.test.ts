@@ -98,4 +98,15 @@ describe("artifacts service", () => {
     await deleteArtifact(htmlTestId);
     await deleteArtifact(jsonTestId);
   });
+
+  test("deletes only the requested artifact scope", async () => {
+    const scopedId = `scoped_art_${Date.now()}`;
+    const base = { id: scopedId, title: "Scoped", type: "markdown" as const, summary: "scope test", content: "content" };
+    await createArtifact({ ...base, cwd: customWorkspace, scope: "project" });
+    await createArtifact({ ...base, cwd: customWorkspace, scope: "global" });
+
+    expect((await deleteArtifact(scopedId, customWorkspace, "project")).success).toBe(true);
+    expect(await readArtifact(scopedId, customWorkspace)).not.toBeNull();
+    expect((await deleteArtifact(scopedId, customWorkspace, "global")).success).toBe(true);
+  });
 });

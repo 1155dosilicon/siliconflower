@@ -14,6 +14,8 @@ import { MarkdownText } from "./MarkdownText.js";
 import { log, logFile } from "./logger.js";
 import type { AppConfig, ChatMessage, McpTool, ReasoningLevel, StreamEvent, TodoItem } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
+import { isToolAllowedInMode } from "./tool-policy.js";
+import { runHook } from "./core/hooks.js";
 
 const REASONING_LABEL: Record<ReasoningLevel, string> = {
   none: "off",
@@ -81,6 +83,9 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
       skillsRef.current = loaded;
       setSkills(loaded);
       await log("info", `siliconflower iniciado - provider=${config.provider} model=${model}`);
+      if (config.hooks) {
+        await runHook("onSessionStart", config.hooks, { cwd: process.cwd() });
+      }
       setStatus("conectando MCP...");
       try {
         const tools = await mcp.connectAll(config.mcpServers);
@@ -96,6 +101,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
     return () => {
       cancelled = true;
       abortRef.current?.abort();
+      if (config.hooks) void runHook("onSessionEnd", config.hooks, { cwd: process.cwd() });
       void mcp.close();
     };
   }, []);
@@ -142,20 +148,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
 
   const executeTool = useCallback(
     async (name: string, args: Record<string, unknown>): Promise<{ result: string; isError: boolean }> => {
-      // Plan mode guard for modifying tools
-      const MODIFYING_TOOLS = [
-        "write_file",
-        "edit_file",
-        "apply_patch",
-        "delete_path",
-        "execute_command",
-        "create_directory",
-        "move_path",
-        "delete_artifact",
-        "forget_memory",
-        "exit_worktree",
-      ];
-      if (modeRef.current === "plano" && MODIFYING_TOOLS.includes(name)) {
+      if (!isToolAllowedInMode(modeRef.current, name, args)) {
         return {
           result: `[MODO PLANO ATIVO] Execução de ${name} bloqueada. Apresente o plano ao usuário e peça para alternar para o modo 'programação' (Ctrl+O) para aplicar as alterações.`,
           isError: true,
@@ -170,7 +163,13 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
           return { result: String(e), isError: true };
         }
       }
-      if (isBuiltin(name)) return runBuiltin(name, args, { config });
+      if (isBuiltin(name)) {
+        return runBuiltin(name, args, {
+          config,
+          mode: modeRef.current,
+          signal: abortRef.current?.signal,
+        });
+      }
       const mcp = mcpRef.current;
       if (mcp) {
         try {

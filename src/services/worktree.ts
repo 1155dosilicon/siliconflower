@@ -1,9 +1,9 @@
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
-import { join } from "path";
+import { join, resolve } from "path";
 import { log } from "../logger.js";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface WorktreeInfo {
   path: string;
@@ -16,7 +16,7 @@ export interface WorktreeInfo {
  */
 export async function listWorktrees(cwd: string = process.cwd()): Promise<WorktreeInfo[]> {
   try {
-    const { stdout } = await execAsync("git worktree list --porcelain", { cwd });
+    const { stdout } = await execFileAsync("git", ["worktree", "list", "--porcelain"], { cwd, windowsHide: true });
     const lines = stdout.split("\n");
     const worktrees: WorktreeInfo[] = [];
 
@@ -59,11 +59,13 @@ export async function enterWorktree(
   cwd: string = process.cwd()
 ): Promise<{ result: string; isError: boolean; worktreePath?: string }> {
   const safeBranch = branchName.replace(/[^a-zA-Z0-9_-]/g, "_");
+  if (!safeBranch || !/[a-zA-Z0-9]/.test(safeBranch)) {
+    return { result: "Nome de branch inválido para criação do worktree.", isError: true };
+  }
   const targetDir = join(cwd, ".worktrees", safeBranch);
 
   try {
-    const cmd = `git worktree add -b ${safeBranch} "${targetDir}"`;
-    await execAsync(cmd, { cwd });
+    await execFileAsync("git", ["worktree", "add", "-b", safeBranch, targetDir], { cwd, windowsHide: true });
     await log("info", `enterWorktree: ${targetDir}`);
 
     return {
@@ -88,13 +90,19 @@ export async function exitWorktree(
   cwd: string = process.cwd()
 ): Promise<{ result: string; isError: boolean }> {
   try {
-    const forceFlag = force ? " --force" : "";
-    const cmd = `git worktree remove "${worktreePath}"${forceFlag}`;
-    await execAsync(cmd, { cwd });
-    await log("info", `exitWorktree: ${worktreePath}`);
+    const requestedPath = resolve(cwd, worktreePath);
+    const worktrees = await listWorktrees(cwd);
+    const registered = worktrees.find((tree) => resolve(tree.path).toLowerCase() === requestedPath.toLowerCase());
+    if (!registered) {
+      return { result: `Worktree não registrado neste repositório: ${requestedPath}`, isError: true };
+    }
+    const args = ["worktree", "remove", requestedPath];
+    if (force) args.push("--force");
+    await execFileAsync("git", args, { cwd, windowsHide: true });
+    await log("info", `exitWorktree: ${requestedPath}`);
 
     return {
-      result: `Worktree ${worktreePath} removido com sucesso.`,
+      result: `Worktree ${requestedPath} removido com sucesso.`,
       isError: false,
     };
   } catch (e: any) {

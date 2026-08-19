@@ -1,11 +1,10 @@
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { readFile, writeFile, access } from "node:fs/promises";
-import { ensureDir } from "./fs-util.js";
+import { ensureDir, getGlobalDataDir } from "./fs-util.js";
 import type { AppConfig, McpServerConfig, Provider, Mode } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
 
-const CONFIG_DIR = join(homedir(), ".siliconflower");
+const CONFIG_DIR = getGlobalDataDir();
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 export function configDir(): string {

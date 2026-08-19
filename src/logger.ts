@@ -1,9 +1,8 @@
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { appendFile, readFile, writeFile, stat } from "node:fs/promises";
-import { ensureDir } from "./fs-util.js";
+import { ensureDir, getGlobalDataDir } from "./fs-util.js";
 
-const LOG_DIR = join(homedir(), ".siliconflower", "logs");
+const LOG_DIR = join(getGlobalDataDir(), "logs");
 const LOG_FILE = join(LOG_DIR, "siliconflower.log");
 const MAX_BYTES = 200 * 1024; // 200 KB (~1,500 lines max)
 

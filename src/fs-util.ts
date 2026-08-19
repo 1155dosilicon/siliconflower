@@ -1,17 +1,18 @@
 import { mkdir } from "node:fs/promises";
-import { exec } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import { join, basename, resolve } from "node:path";
 import { homedir } from "node:os";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /**
  * Returns the global siliconflower data and configuration directory (~/.siliconflower).
  */
 export function getGlobalDataDir(): string {
-  return join(homedir(), ".siliconflower");
+  const override = process.env.SILICONFLOWER_DATA_DIR?.trim();
+  return override ? resolve(override) : join(homedir(), ".siliconflower");
 }
 
 /**
@@ -39,8 +40,9 @@ export function getWorkspaceDataDir(cwd: string = process.cwd()): string {
  * Fails silently if the path does not exist or attrib command fails.
  */
 export async function hidePathOnWindows(targetPath: string): Promise<void> {
+  if (process.platform !== "win32") return;
   try {
-    await execAsync(`attrib +h "${targetPath}"`);
+    await execFileAsync("attrib.exe", ["+h", resolve(targetPath)], { windowsHide: true });
   } catch {
     // Ignore errors (e.g., command unavailable or non-Windows)
   }

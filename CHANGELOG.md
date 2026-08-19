@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-08-18
+
+### Fixed
+- **Anthropic Streaming Tools:** Reconstructed tool arguments from `input_json_delta` events instead of invoking tools with the empty object from `content_block_start`.
+- **Plan Mode Isolation:** Replaced the partial mutation blocklist with a closed read-only allowlist; MCP tools, hooks, subagents, persistence and background cancellation can no longer bypass plan mode.
+- **Cancellation and Timeouts:** Propagated abort signals to LLM requests, commands, web fetches and subagents. Cancellable operations are actively aborted; filesystem operations without cancellation support are awaited instead of falsely reporting a timeout while continuing silently.
+- **Background Task State:** Killing a subagent now aborts its execution, and late completion/error callbacks can no longer overwrite the `killed` state. Subagent failures are reported as failures.
+- **MCP Tool Collisions:** Added deterministic qualified MCP tool names and preserved original transport names for dispatch.
+- **Context Bounds:** Large single-line outputs and recent oversized messages are bounded by character/token budgets.
+- **Scoped Deletion:** Memory and artifact deletion now defaults to project scope and requires explicit `global` or `all` scope for broader removal.
+- **Hooks:** Standardized hook execution on PowerShell, added file path context, edit coverage and session lifecycle hooks.
+- **Web Fetch:** Applied timeout to response bodies, bounded streaming reads, validated redirects and blocked private/reserved network targets.
+- **Worktrees and Launcher:** Removed shell interpolation from Git/attrib operations and from the Node launcher; `tsx` is now a runtime dependency for the documented Node fallback.
+- **Hermetic Tests:** Redirected persistent data to a temporary directory during tests and added regression coverage for LLM streaming, plan policy, MCP names, scopes, cancellation, SSRF and context truncation.
+
 ### Added
 - **Centralized Workspace Data Storage (`~/.siliconflower/workspaces/<workspace-id>/`):** Replaced in-tree `.siliconflower` folder creation inside user project directories with deterministic, centralized workspace data storage located in `~/.siliconflower/workspaces/<workspace-id>/` (mirroring Antigravity and modern AI harness conventions). Project workspaces now remain 100% clean and free of visible config/cache directories.
 - **Workspace ID Computation (`src/fs-util.ts`):** Added `getWorkspaceId(cwd)` and `getWorkspaceDataDir(cwd)` helpers generating consistent, filesystem-safe slugs with short SHA-256 hashes.
@@ -100,5 +115,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - First-run wizard with provider presets for SiliconFlow, OpenRouter,
   OpenAI, and Anthropic.
 
-[Unreleased]: https://github.com/siliconflower/siliconflower/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/siliconflower/siliconflower/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/siliconflower/siliconflower/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/siliconflower/siliconflower/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/siliconflower/siliconflower/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/siliconflower/siliconflower/compare/v0.1.0...v0.2.1
 [0.1.0]: https://github.com/siliconflower/siliconflower/releases/tag/v0.1.0

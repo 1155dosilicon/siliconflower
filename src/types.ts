@@ -22,6 +22,8 @@ export interface AppConfig {
     postTool?: string;
     onEdit?: string;
     onCommand?: string;
+    onSessionStart?: string;
+    onSessionEnd?: string;
   };
 }
 
@@ -55,6 +57,7 @@ export type StreamEvent =
 export interface McpTool {
   server: string;
   name: string;
+  originalName?: string;
   description?: string;
   inputSchema: Record<string, unknown>;
 }

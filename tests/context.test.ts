@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { estimateTokens, compressHistory, processToolOutput, formatTokenCount } from "../src/context.js";
+import { estimateTokens, estimateMessagesTokens, compressHistory, processToolOutput, formatTokenCount } from "../src/context.js";
 import type { ChatMessage } from "../src/types.js";
 
 describe("context & token management", () => {
@@ -16,7 +16,7 @@ describe("context & token management", () => {
     expect(tokens).toBeLessThan(text.length);
   });
 
-  test("compressHistory keeps recent messages intact and reduces old tool results", () => {
+  test("compressHistory preserves message order and enforces the token budget", () => {
     const messages: ChatMessage[] = [];
     for (let i = 0; i < 25; i++) {
       messages.push({
@@ -27,15 +27,21 @@ describe("context & token management", () => {
 
     const compressed = compressHistory(messages, 5000);
     expect(compressed.length).toBe(messages.length);
-    // Old tool output should be compressed
-    expect(compressed[1].content).toContain("Resultado antigo de ferramenta reduzido");
-    // Recent messages should remain intact
-    expect(compressed[24].content).not.toContain("Resultado antigo de ferramenta reduzido");
+    expect(estimateMessagesTokens(compressed)).toBeLessThanOrEqual(5000);
+    expect(compressed[0].role).toBe(messages[0].role);
+    expect(compressed[24].role).toBe(messages[24].role);
   });
 
   test("processToolOutput truncates huge outputs and preserves structure", async () => {
     const hugeOutput = "line\n".repeat(10000);
     const processed = await processToolOutput(hugeOutput, 100);
     expect(processed).toContain("SAÍDA GRANDE TRUNCADA");
+  });
+
+  test("processToolOutput bounds a huge single-line output", async () => {
+    const hugeOutput = "x".repeat(100_000);
+    const processed = await processToolOutput(hugeOutput, 1000);
+    expect(processed).toContain("SAÍDA GRANDE TRUNCADA");
+    expect(processed.length).toBeLessThan(1500);
   });
 });

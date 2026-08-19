@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { builtinToolsAsMcp, isBuiltin, runBuiltin, BUILTIN_TOOLS } from "../src/tools.js";
+import { parse } from "node:path";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 describe("tools", () => {
   test("isBuiltin recognizes builtin tools", () => {
@@ -21,10 +24,24 @@ describe("tools", () => {
     expect(res.result).toContain("confirmação");
   });
 
+  test("delete_path refuses filesystem roots even with confirmation", async () => {
+    const res = await runBuiltin("delete_path", { path: parse(process.cwd()).root, recursive: true, confirm: true });
+    expect(res.isError).toBe(true);
+    expect(res.result).toContain("caminho crítico");
+  });
+
   test("blocked paths prevent access to system directories", async () => {
     const res = await runBuiltin("read_file", { path: "C:\\Windows\\System32\\config\\SAM" });
     expect(res.isError).toBe(true);
     expect(res.result).toContain("bloqueado");
+  });
+
+  test("recursive search tools cannot bypass sensitive path guards", async () => {
+    const sensitivePath = join(tmpdir(), ".ssh");
+    const grepRes = await runBuiltin("grep_content", { path: sensitivePath, pattern: "secret" });
+    const listRes = await runBuiltin("list_directory", { path: sensitivePath });
+    expect(grepRes.isError).toBe(true);
+    expect(listRes.isError).toBe(true);
   });
 
   test("execute_command runs shell commands and returns output", async () => {

@@ -10,13 +10,14 @@ import { skillsDir, loadSkills, syncSkills } from "./skills.js";
 import { logFile, tailLogs, clearLogs } from "./logger.js";
 import { log } from "./logger.js";
 import { getWorkspaceDataDir, getWorkspaceId } from "./fs-util.js";
+import { APP_VERSION } from "./version.js";
 
 const program = new Command();
 
 program
   .name("siliconflower")
   .description("CLI/TUI AI agent with MCP, reasoning, skills, modes, and OpenAI/Anthropic-compatible backends.")
-  .version("0.2.3")
+  .version(APP_VERSION)
   .option("-m, --model <id>", "override the model")
   .option("-r, --reasoning <level>", `reasoning level: ${REASONING_LEVELS.join(", ")}`)
   .option("--mode <mode>", `mode: ${MODES.join(", ")}`)

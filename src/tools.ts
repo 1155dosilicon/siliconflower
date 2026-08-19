@@ -1,5 +1,8 @@
-import { readFile, writeFile, readdir, stat, rename, rm, access } from "node:fs/promises";
-import { resolve, isAbsolute, dirname } from "node:path";
+import { readFile, writeFile, readdir, stat, rename, rm, access, realpath } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
+import { resolve, isAbsolute, dirname, basename, parse, relative } from "node:path";
+import { homedir } from "node:os";
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { ensureDir } from "./fs-util.js";
@@ -17,13 +20,16 @@ import { enterWorktree, exitWorktree, listWorktrees } from "./services/worktree.
 import { runHook, loadHooksConfig } from "./core/hooks.js";
 import { processToolOutput } from "./context.js";
 import { tailLogs } from "./logger.js";
-import type { AppConfig, McpTool, TodoItem } from "./types.js";
+import type { AppConfig, McpTool, Mode, TodoItem } from "./types.js";
 import { log } from "./logger.js";
 
 const execAsync = promisify(exec);
+const CANCELLABLE_BUILTINS = new Set(["execute_command", "run_task", "send_subagent_message", "web_fetch"]);
 
 export interface ToolContext {
   config?: AppConfig;
+  mode?: Mode;
+  signal?: AbortSignal;
 }
 
 export interface BuiltinTool {
@@ -49,11 +55,56 @@ const BLOCKED_PATHS = [
 function isPathBlocked(p: string): boolean {
   const normalized = p.toLowerCase().replace(/\\/g, "/");
   for (const blocked of BLOCKED_PATHS) {
-    if (normalized.startsWith(blocked.toLowerCase().replace(/\\/g, "/"))) return true;
+    const normalizedBlocked = blocked.toLowerCase().replace(/\\/g, "/").replace(/\/$/, "");
+    if (normalized === normalizedBlocked || normalized.startsWith(`${normalizedBlocked}/`)) return true;
   }
   if (normalized.includes("/.ssh/") || normalized.endsWith("/.ssh")) return true;
   if (normalized.includes("/.aws/") || normalized.endsWith("/.aws")) return true;
   return false;
+}
+
+async function isPathBlockedSafe(p: string): Promise<boolean> {
+  if (isPathBlocked(p)) return true;
+  try {
+    return isPathBlocked(await realpath(p));
+  } catch {
+    try {
+      const parent = await realpath(dirname(p));
+      return isPathBlocked(resolve(parent, basename(p)));
+    } catch {
+      return false;
+    }
+  }
+}
+
+function isDangerousDeleteTarget(path: string): boolean {
+  const target = resolve(path);
+  const root = parse(target).root;
+  if (target.toLowerCase() === root.toLowerCase()) return true;
+  const protectedDirs = [resolve(homedir()), resolve(process.cwd())];
+  return protectedDirs.some((protectedDir) => {
+    const rel = relative(target, protectedDir);
+    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  });
+}
+
+async function readLineRange(path: string, offset: number, limit: number): Promise<string> {
+  const stream = createReadStream(path, { encoding: "utf8" });
+  const reader = createInterface({ input: stream, crlfDelay: Infinity });
+  const lines: string[] = [];
+  let lineNumber = 0;
+  try {
+    for await (const line of reader) {
+      lineNumber++;
+      if (lineNumber < offset) continue;
+      lines.push(`${lineNumber}: ${line}`);
+      if (lines.length >= limit) break;
+    }
+  } finally {
+    reader.close();
+    stream.destroy();
+  }
+  return lines.join("\n");
 }
 
 export const BUILTIN_TOOLS: BuiltinTool[] = [
@@ -72,17 +123,13 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     },
     run: async (a) => {
       const path = toAbs(String(a.path));
-      if (isPathBlocked(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
+      if (await isPathBlockedSafe(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
       try {
-        const raw = await readFile(path, "utf8");
-        const lines = raw.split(/\r?\n/);
         const rawOffset = Number(a.offset);
         const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 1;
         const rawLimit = Number(a.limit);
-        const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 2000;
-
-        const slice = lines.slice(offset - 1, offset - 1 + limit);
-        const formatted = slice.map((line, idx) => `${offset + idx}: ${line}`).join("\n");
+        const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), 10000) : 2000;
+        const formatted = await readLineRange(path, offset, limit);
         const processed = await processToolOutput(formatted);
         return { result: processed, isError: false };
       } catch (e) {
@@ -108,6 +155,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       const pattern = String(a.pattern);
       const include = a.include ? String(a.include) : undefined;
 
+      if (await isPathBlockedSafe(basePath)) return { result: `Acesso bloqueado: ${basePath}`, isError: true };
       try {
         const matches = await searchContent({ basePath, pattern, includePattern: include });
         if (matches.length === 0) {
@@ -135,7 +183,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     },
     run: async (a) => {
       const path = toAbs(String(a.path));
-      if (isPathBlocked(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
+      if (await isPathBlockedSafe(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
       try {
         await ensureDir(dirname(path));
         await writeFile(path, String(a.content ?? ""), "utf8");
@@ -162,7 +210,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     },
     run: async (a) => {
       const path = toAbs(String(a.path));
-      if (isPathBlocked(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
+      if (await isPathBlockedSafe(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
       const res = await smartEditFile({
         path,
         oldText: String(a.oldText ?? ""),
@@ -196,7 +244,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     },
     run: async (a) => {
       const path = toAbs(String(a.path));
-      if (isPathBlocked(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
+      if (await isPathBlockedSafe(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
       const changes = (a.changes as { oldText: string; newText: string }[]) ?? [];
       if (!Array.isArray(changes) || changes.length === 0) {
         return { result: "Nenhuma alteração fornecida.", isError: true };
@@ -307,6 +355,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
         role,
         customPrompt,
         runInBackground,
+        signal: ctx.signal,
       });
       return { result, isError: false };
     },
@@ -326,7 +375,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       if (!ctx?.config) return { result: "Configuração indisponível.", isError: true };
       const sessionId = String(a.sessionId);
       const message = String(a.message);
-      const res = await sendSubagentMessage(sessionId, message, ctx.config);
+      const res = await sendSubagentMessage(sessionId, message, ctx.config, ctx.signal);
       return { result: res.result, isError: res.isError };
     },
   },
@@ -468,11 +517,18 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       type: "object",
       properties: {
         name: { type: "string", description: "Nome da memória a remover" },
+        scope: {
+          type: "string",
+          enum: ["project", "global", "all"],
+          default: "project",
+          description: "Escopo a remover; use 'all' somente quando explicitamente necessário",
+        },
       },
       required: ["name"],
     },
     run: async (a) => {
-      const res = await forgetMemory(String(a.name), process.cwd());
+      const scope = a.scope === "global" || a.scope === "all" ? a.scope : "project";
+      const res = await forgetMemory(String(a.name), process.cwd(), scope);
       return { result: res.message, isError: res.isError };
     },
   },
@@ -577,6 +633,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     },
     run: async (a) => {
       const path = toAbs(String(a.path ?? "."));
+      if (await isPathBlockedSafe(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
       try {
         const entries = await readdir(path, { withFileTypes: true });
         const lines = entries.map((e) => `${e.isDirectory() ? "[DIR] " : "[FILE] "}${e.name}`).sort();
@@ -596,7 +653,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     },
     run: async (a) => {
       const path = toAbs(String(a.path));
-      if (isPathBlocked(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
+      if (await isPathBlockedSafe(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
       try {
         await ensureDir(path);
         return { result: `Diretório criado/confirmado: ${path}`, isError: false };
@@ -616,7 +673,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     run: async (a) => {
       const src = toAbs(String(a.source));
       const dst = toAbs(String(a.destination));
-      if (isPathBlocked(src) || isPathBlocked(dst)) return { result: `Acesso bloqueado`, isError: true };
+      if (await isPathBlockedSafe(src) || await isPathBlockedSafe(dst)) return { result: `Acesso bloqueado`, isError: true };
       try {
         await ensureDir(dirname(dst));
         await rename(src, dst);
@@ -637,6 +694,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     },
     run: async (a) => {
       const path = toAbs(String(a.path));
+      if (await isPathBlockedSafe(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
       try {
         const s = await stat(path);
         return {
@@ -673,6 +731,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     run: async (a) => {
       const path = toAbs(String(a.path));
       const includeHidden = Boolean(a.includeHidden);
+      if (await isPathBlockedSafe(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
       try {
         const matches = await search(path, String(a.pattern), includeHidden);
         return { result: matches.length ? matches.slice(0, 200).join("\n") : "(nenhum arquivo encontrado)", isError: false };
@@ -697,7 +756,10 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     },
     run: async (a) => {
       const path = toAbs(String(a.path));
-      if (isPathBlocked(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
+      if (await isPathBlockedSafe(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
+      if (isDangerousDeleteTarget(path)) {
+        return { result: `Exclusão bloqueada para caminho crítico: ${path}`, isError: true };
+      }
       const recursive = Boolean(a.recursive);
       const confirm = Boolean(a.confirm);
       if (!confirm) {
@@ -733,11 +795,11 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       },
       required: ["url"],
     },
-    run: async (a) => {
+    run: async (a, ctx) => {
       const url = String(a.url);
       const maxChars = a.maxChars ? Number(a.maxChars) : 15000;
       const timeoutMs = a.timeoutMs ? Number(a.timeoutMs) : 15000;
-      const res = await webFetch(url, { maxChars, timeoutMs });
+      const res = await webFetch(url, { maxChars, timeoutMs, signal: ctx?.signal });
       const processed = await processToolOutput(res.content);
       return { result: processed, isError: res.isError };
     },
@@ -837,11 +899,18 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       type: "object",
       properties: {
         id: { type: "string", description: "ID do artefato a remover" },
+        scope: {
+          type: "string",
+          enum: ["project", "global", "all"],
+          default: "project",
+          description: "Escopo a remover; use 'all' somente quando explicitamente necessário",
+        },
       },
       required: ["id"],
     },
     run: async (a) => {
-      const res = await deleteArtifact(String(a.id));
+      const scope = a.scope === "global" || a.scope === "all" ? a.scope : "project";
+      const res = await deleteArtifact(String(a.id), process.cwd(), scope);
       return { result: res.message, isError: !res.success };
     },
   },
@@ -900,6 +969,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
         maxBuffer: 10 * 1024 * 1024,
         shell: "powershell.exe",
         windowsHide: true,
+        signal: ctx?.signal,
       };
       try {
         await log("info", `execute_command: ${cmd} (cwd=${workDir})`);
@@ -944,29 +1014,47 @@ export async function runBuiltin(
   const tool = BUILTIN_TOOLS.find((t) => t.name === name);
   if (!tool) return { result: `ferramenta nativa desconhecida: ${name}`, isError: true };
 
-  const hookCtx = { toolName: name, toolArgs: args, cwd: process.cwd() };
+  const filePath = typeof args.path === "string"
+    ? toAbs(args.path)
+    : typeof args.destination === "string"
+      ? toAbs(args.destination)
+      : undefined;
+  const hookCtx = { toolName: name, toolArgs: args, cwd: process.cwd(), filePath };
+  const hooksEnabled = Boolean(ctx?.config?.hooks && ctx.mode !== "plano");
 
   // Pre-tool hook
-  if (ctx?.config?.hooks) {
+  if (hooksEnabled && ctx?.config?.hooks) {
     await runHook("preTool", ctx.config.hooks, hookCtx);
   }
 
   const rawTimeout = Number(args?.timeout);
-  const toolTimeoutArg = Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout + 5000 : 60000;
+  const toolTimeoutArg = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.min(rawTimeout + 5000, 125000) : 60000;
   const TOOL_TIMEOUT_MS = Math.max(60000, toolTimeoutArg);
-  let timer: ReturnType<typeof setTimeout>;
+  const controller = new AbortController();
+  const onParentAbort = () => controller.abort();
+  if (ctx?.signal?.aborted) controller.abort();
+  ctx?.signal?.addEventListener("abort", onParentAbort, { once: true });
+  let timedOut = false;
+  const cancellable = CANCELLABLE_BUILTINS.has(name);
+  let timer: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<{ result: string; isError: boolean }>((resolve) => {
+    if (!cancellable) return;
     timer = setTimeout(
-      () => resolve({ result: `Tempo limite excedido na execução da ferramenta: ${name}`, isError: true }),
+      () => {
+        timedOut = true;
+        controller.abort();
+        resolve({ result: `Tempo limite excedido na execução da ferramenta: ${name}`, isError: true });
+      },
       TOOL_TIMEOUT_MS
     );
   });
   try {
-    const res = await Promise.race([tool.run(args, ctx), timeoutPromise]);
+    const toolPromise = tool.run(args, { ...ctx, signal: controller.signal });
+    const res = cancellable ? await Promise.race([toolPromise, timeoutPromise]) : await toolPromise;
 
     // On-edit and Post-tool hooks
-    if (ctx?.config?.hooks) {
-      if (name === "edit_file" || name === "write_file") {
+    if (!timedOut && hooksEnabled && ctx?.config?.hooks) {
+      if (!res.isError && ["edit_file", "write_file", "apply_patch", "move_path", "delete_path"].includes(name)) {
         await runHook("onEdit", ctx.config.hooks, hookCtx);
       }
       await runHook("postTool", ctx.config.hooks, hookCtx);
@@ -974,6 +1062,7 @@ export async function runBuiltin(
 
     return res;
   } finally {
-    clearTimeout(timer!);
+    if (timer) clearTimeout(timer);
+    ctx?.signal?.removeEventListener("abort", onParentAbort);
   }
 }

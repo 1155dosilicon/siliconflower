@@ -38,10 +38,10 @@ Requirements: Bun >= 1.3 (recommended) or Node >= 20 with `tsx`.
 ## Style
 
 - TypeScript strict mode. No `any` unless wrapping an SDK response.
-- No emojis in source, comments, or UI strings.
-- No Unicode box-drawing glyphs in TUI output unless wrapped in a way that
-  falls back to ASCII on terminals that do not render them. The current
-  UI is ASCII-only on purpose.
+- Keep decorative Unicode limited to existing TUI status indicators and the
+  logo. New operational messages should remain understandable if a terminal
+  cannot render those glyphs.
+- Prefer plain ASCII in logs, protocol fields and machine-readable output.
 - Prefer `void promise.catch(...)` over unhandled promise paths.
 
 ## Pull request workflow

@@ -1,6 +1,8 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { createHash } from "node:crypto";
 import type { McpServerConfig, McpTool } from "./types.js";
+import { APP_VERSION } from "./version.js";
 
 interface ConnectedServer {
   name: string;
@@ -41,7 +43,7 @@ export class McpManager {
       env: cleanEnv,
     });
     const client = new Client(
-      { name: "siliconflower", version: "0.1.0" },
+      { name: "siliconflower", version: APP_VERSION },
       { capabilities: {} }
     );
     await client.connect(transport);
@@ -50,7 +52,8 @@ export class McpManager {
       const res = await client.listTools();
       toolList = (res.tools ?? []).map((t) => ({
         server: name,
-        name: t.name,
+        name: qualifyMcpToolName(name, t.name),
+        originalName: t.name,
         description: t.description,
         inputSchema: (t.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
       }));
@@ -62,14 +65,14 @@ export class McpManager {
 
   allTools(): McpTool[] {
     const out: McpTool[] = [];
-    const seen = new Map<string, string>();
+    const seen = new Set<string>();
     for (const s of this.servers.values()) {
       for (const tool of s.tools) {
-        const existing = seen.get(tool.name);
-        if (existing && existing !== s.name) {
-          process.stderr.write(`\n[MCP] Warning: tool "${tool.name}" exists in both "${existing}" and "${s.name}"\n`);
+        if (seen.has(tool.name)) {
+          process.stderr.write(`\n[MCP] ferramenta qualificada duplicada ignorada: "${tool.name}"\n`);
+          continue;
         }
-        seen.set(tool.name, s.name);
+        seen.add(tool.name);
         out.push(tool);
       }
     }
@@ -80,7 +83,7 @@ export class McpManager {
     for (const s of this.servers.values()) {
       const tool = s.tools.find((t) => t.name === name);
       if (!tool) continue;
-      const res = await s.client.callTool({ name, arguments: args });
+      const res = await s.client.callTool({ name: tool.originalName ?? tool.name, arguments: args });
       const content = (res.content as unknown[]) ?? [];
       const text = content
         .map((c) => (c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : JSON.stringify(c)))
@@ -106,4 +109,11 @@ export class McpManager {
     );
     this.servers.clear();
   }
+}
+
+export function qualifyMcpToolName(server: string, tool: string): string {
+  const slug = (value: string, max: number) =>
+    value.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/^_+|_+$/g, "").slice(0, max) || "unnamed";
+  const hash = createHash("sha256").update(`${server}\0${tool}`).digest("hex").slice(0, 8);
+  return `mcp_${slug(server, 14)}_${slug(tool, 30)}_${hash}`;
 }

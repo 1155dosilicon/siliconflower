@@ -36,6 +36,8 @@ src/
 ├── logger.ts              # Sistema de logs com rotação e busca (200 KB)
 ├── mcp.ts                 # Cliente para servidores MCP (Model Context Protocol) via stdio
 ├── modes.ts               # Modos de operação (programação, sistema, plano)
+├── tool-policy.ts         # Política fechada de ferramentas permitidas no modo plano
+├── version.ts             # Versão única usada pelo CLI e cliente MCP
 ├── skills.ts              # Carregador e executor de skills (.md)
 ├── task.ts                # Adaptador de compatibilidade para subagentes
 ├── todo.ts                # Gerenciador de lista de tarefas na sessão
@@ -73,17 +75,17 @@ src/
 | `manage_background_task` | Consulta status, recupera saídas ou encerra tarefas e subagentes em background. | `src/services/background-tasks.ts` |
 | `save_memory` | Armazena regras, aprendizados e diretrizes persistentes entre sessões. | `src/services/memory.ts` |
 | `recall_memory` | Consulta memórias salvas do projeto (`~/.siliconflower/workspaces/<id>/memory`) ou globais (`~/.siliconflower/memory`). | `src/services/memory.ts` |
-| `forget_memory` | Remove memórias obsoletas ou desatualizadas. | `src/services/memory.ts` |
+| `forget_memory` | Remove memória por nome e escopo (`project`, `global` ou `all`). | `src/services/memory.ts` |
 | `enter_worktree` | Cria um ambiente de trabalho Git isolado em branch temporária. | `src/services/worktree.ts` |
 | `exit_worktree` | Remove um Git Worktree após a conclusão do trabalho ou testes. | `src/services/worktree.ts` |
 | `list_worktrees` | Lista os Git Worktrees ativos no repositório. | `src/services/worktree.ts` |
 | `create_artifact` | Cria e armazena artefatos estruturados (`markdown`, `html`, `json`, `code`, `mermaid`). | `src/services/artifact.ts` |
 | `read_artifact` | Lê o conteúdo completo de um artefato salvo pelo ID. | `src/services/artifact.ts` |
 | `list_artifacts` | Lista os artefatos disponíveis do projeto ou globais com metadados. | `src/services/artifact.ts` |
-| `delete_artifact` | Remove um artefato persistente pelo ID. | `src/services/artifact.ts` |
+| `delete_artifact` | Remove um artefato pelo ID e escopo (`project`, `global` ou `all`). | `src/services/artifact.ts` |
 | `web_fetch` | Baixa o conteúdo de páginas Web convertendo automaticamente para Markdown limpo. | `src/services/web.ts` |
 | `web_search` | Realiza pesquisas na Web retornando snippets e URLs de referência. | `src/services/web.ts` |
-| `manage_hooks` | Consulta ou atualiza ganchos de execução configurados em tempo de execução. | `src/core/hooks.ts` |
+| `manage_hooks` | Consulta os ganchos de execução configurados. | `src/core/hooks.ts` |
 
 ---
 
@@ -119,6 +121,18 @@ Variáveis de ambiente injetadas nos hooks:
 - `SILICONFLOWER_TOOL_NAME`
 - `SILICONFLOWER_TOOL_ARGS`
 - `SILICONFLOWER_FILE_PATH` (quando aplicável)
+
+Os hooks são executados explicitamente pelo PowerShell. `onEdit` cobre `write_file`, `edit_file`, `apply_patch`, `move_path` e `delete_path`; hooks de sessão são disparados na montagem e encerramento da TUI. Hooks são desativados durante ferramentas permitidas no modo `plano`, evitando efeitos colaterais indiretos.
+
+---
+
+## 🔒 Política do Modo Plano e MCP
+
+O modo `plano` usa uma lista fechada de ferramentas somente leitura definida em `src/tool-policy.ts`. Qualquer ferramenta não reconhecida, subagente, mutação persistente ou ferramenta MCP é bloqueada por padrão. Consultas `list`/`status` de tarefas background são permitidas, mas `kill` não.
+
+Ferramentas MCP recebem nomes públicos qualificados (`mcp_<servidor>_<ferramenta>_<hash>`), mantendo o nome original apenas no transporte. Isso elimina ambiguidades e colisões nos schemas enviados aos provedores.
+
+`SILICONFLOWER_DATA_DIR` pode substituir `~/.siliconflower` para testes ou ambientes isolados.
 
 ---
 

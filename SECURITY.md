@@ -12,6 +12,8 @@ After configuration, the model can invoke tools that:
   resolved against your `cwd` if relative).
 - Search the file system recursively (`**/*.ts` supported).
 - Delete files and directories (`delete_path`).
+- Execute arbitrary PowerShell commands (`execute_command`) with the same
+  privileges as the current user.
 - Spawn arbitrary MCP servers (whichever binary you configured).
 
 By design there is **no sandbox**. The agent operates with the same
@@ -21,11 +23,20 @@ privileges as the user running `siliconflower`.
 
 - `delete_path` requires `confirm=true` for ALL deletions (file or directory). Without
   it the tool returns an error requiring explicit confirmation.
+- Filesystem roots, the current workspace and the user home (including their
+  ancestors) cannot be removed through `delete_path`.
+- Sensitive path checks are applied consistently to direct reads, metadata,
+  glob and grep operations, including resolved junction/symlink targets.
+- `web_fetch` rejects localhost, private/reserved IP addresses and redirects
+  to those destinations, and limits response time and body size.
+- In `plano` mode, only an explicit read-only allowlist is available. MCP,
+  hooks, subagents and persistence mutations are blocked by default.
 - The system prompt in `sistema` mode instructs the model to warn before
   destructive or registry-level actions and to prefer non-destructive
   commands.
-- `binsh` and shell execution paths are not exposed as tools. There is no
-  `run_command` tool by design.
+- `execute_command` is intentionally an arbitrary shell capability. File-tool
+  guards do not sandbox PowerShell commands; only enable the agent where this
+  trust level is acceptable.
 
 ## What you should still do
 

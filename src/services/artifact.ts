@@ -166,17 +166,25 @@ export async function readArtifact(id: string, cwd: string = process.cwd()): Pro
   return null;
 }
 
-export async function deleteArtifact(id: string, cwd: string = process.cwd()): Promise<{ success: boolean; message: string }> {
+export async function deleteArtifact(
+  id: string,
+  cwd: string = process.cwd(),
+  scope: "project" | "global" | "all" = "project"
+): Promise<{ success: boolean; message: string }> {
   const safeId = id.replace(/[^a-zA-Z0-9_\-]/g, "_").toLowerCase();
   const projectDir = getArtifactsDir(cwd, "project");
   const globalDir = getArtifactsDir(cwd, "global");
   const legacyDir = getLegacyArtifactsDir(cwd);
 
-  const candidateDirs = [projectDir, globalDir];
-  try {
-    await access(legacyDir);
-    candidateDirs.push(legacyDir);
-  } catch {}
+  const candidateDirs: string[] = [];
+  if (scope === "project" || scope === "all") {
+    candidateDirs.push(projectDir);
+    try {
+      await access(legacyDir);
+      candidateDirs.push(legacyDir);
+    } catch {}
+  }
+  if (scope === "global" || scope === "all") candidateDirs.push(globalDir);
 
   const uniqueDirs = Array.from(new Set(candidateDirs.map((d) => resolve(d))));
   let deleted = false;
@@ -196,7 +204,7 @@ export async function deleteArtifact(id: string, cwd: string = process.cwd()): P
   }
 
   if (deleted) {
-    return { success: true, message: `Artefato '${safeId}' removido com sucesso.` };
+    return { success: true, message: `Artefato '${safeId}' removido com sucesso do escopo [${scope}].` };
   }
 
   return { success: false, message: `Artefato '${id}' não foi encontrado.` };
