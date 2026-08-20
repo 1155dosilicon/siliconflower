@@ -161,4 +161,9 @@ function normalizeMode(v: string | undefined): Mode | undefined {
   return (MODES as readonly string[]).includes(lower) ? (lower as Mode) : undefined;
 }
 
-program.parseAsync(process.argv);
+program.parseAsync(process.argv).catch(async (err) => {
+  const msg = err instanceof Error ? err.message : String(err);
+  await log("error", `Erro fatal na CLI: ${msg}`);
+  console.error(`Erro: ${msg}`);
+  process.exitCode = 1;
+});

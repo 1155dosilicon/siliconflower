@@ -29,36 +29,34 @@ export interface HookResult {
  * Discovers and loads hook configurations from workspace (~/.siliconflower/workspaces/<workspace-id>/hooks.json),
  * legacy repo (.siliconflower/hooks.json), or global (~/.siliconflower/hooks.json).
  */
+async function readHooksFile(path: string): Promise<HookConfig | undefined> {
+  try {
+    await access(path);
+  } catch {
+    // File does not exist at this location; caller falls back to the next one.
+    return undefined;
+  }
+  try {
+    const raw = await readFile(path, "utf8");
+    return JSON.parse(raw);
+  } catch (err) {
+    // File exists but is unreadable or not valid JSON: warn instead of silently
+    // falling back to a different (unexpected) hooks source.
+    await log("warn", `Falha ao ler/parsear hooks.json em ${path}: ${err instanceof Error ? err.message : String(err)}`);
+    return undefined;
+  }
+}
+
 export async function loadHooksConfig(cwd: string = process.cwd()): Promise<HookConfig | undefined> {
   const workspaceHooksFile = join(getWorkspaceDataDir(cwd), "hooks.json");
   const legacyHooksFile = join(cwd, ".siliconflower", "hooks.json");
   const globalHooksFile = join(getGlobalDataDir(), "hooks.json");
 
-  try {
-    await access(workspaceHooksFile);
-    const raw = await readFile(workspaceHooksFile, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    // Fallback to legacy
-  }
-
-  try {
-    await access(legacyHooksFile);
-    const raw = await readFile(legacyHooksFile, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    // Fallback to global
-  }
-
-  try {
-    await access(globalHooksFile);
-    const raw = await readFile(globalHooksFile, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    // No hooks file found
-  }
-
-  return undefined;
+  return (
+    (await readHooksFile(workspaceHooksFile)) ??
+    (await readHooksFile(legacyHooksFile)) ??
+    (await readHooksFile(globalHooksFile))
+  );
 }
 
 /**

@@ -6,6 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Context Compaction Protocol Safety (`src/context.ts`):** `compressHistory` could drop only the `assistant` half of a tool-call turn while discarding the oldest messages, leaving an orphan `tool` message at the front of the history and causing HTTP 400 errors from the OpenAI/Anthropic APIs on long tool-heavy sessions. Turns are now discarded as a whole unit.
+- **Raw History Truncation Bypassing Compaction (`src/App.tsx`):** The TUI was slicing the last 60 messages before handing history to `streamChat`, silently discarding everything older regardless of token budget and defeating the token-aware compaction in `compressHistory`. The full history is now passed through.
+- **`grep_content` Path-Based Include Filters (`src/grep.ts`):** The `include` glob only matched against a bare filename, so patterns with a path segment (e.g. `src/**/*.tsx`) never matched anything. Now reuses the real glob-to-regex engine from `src/glob-util.ts` (also exported for reuse) against the path relative to `basePath`.
+- **MCP Connection Leaks and Hangs (`src/mcp.ts`):** A failed MCP server handshake left its child process running (the transport was never closed), and there was no connection timeout, so a hung MCP server blocked app startup indefinitely. Added a 20s connect timeout and transport cleanup on failure.
+- **Permanent Logging Disable on Transient I/O Error (`src/logger.ts`):** A single failed attempt to create the log directory (e.g. a transient permission/AV lock) marked logging as "ensured" forever, silently disabling all future logs, including errors. Failures are no longer cached, so logging retries on the next call.
+- **Silent Hooks Config Fallback (`src/core/hooks.ts`):** Invalid JSON in a `hooks.json` file was indistinguishable from a missing file and silently fell back to the next source (legacy/global) without any warning. Now logs a warning when a hooks file exists but fails to parse.
+- **Overzealous Ctrl-Key Input Suppression (`src/App.tsx`):** The 250ms window that strips a trailing `o`/`e`/`c` character after `Ctrl+O`/`Ctrl+E` (to swallow terminal-echoed shortcut chars) was being armed by *any* Ctrl combination (e.g. `Ctrl+C`, `Ctrl+V`), which could silently eat a legitimately typed character right after an unrelated shortcut.
+- **Unhandled CLI Startup Rejection (`src/index.tsx`):** `program.parseAsync()` had no `.catch()`, so a failure during config load/setup produced an unhandled promise rejection instead of a clean error message and exit code.
+- **Unbounded Background Task / Subagent Session Growth (`src/services/background-tasks.ts`, `src/services/subagent.ts`):** Finished background tasks and subagent sessions (including full message history) were never removed from their in-memory maps, growing without bound over long-lived sessions. Both are now capped, pruning the oldest finished/least-recent entries.
+- **Silent Wrong-Block Edits in Fuzzy Whitespace Matching (`src/services/smart-edit.ts`):** `edit_file`'s fuzzy whitespace-matching strategy applied the edit to the first matching block without checking for other identical blocks elsewhere in the file. It now detects multiple matches and reports an ambiguity error unless `replaceAll: true` is set (which now correctly replaces every occurrence instead of only the first).
+
+### Removed
+- **Dead Compatibility Shim (`src/task.ts`):** Removed the unused `runSubagentTask` re-export wrapper around `src/services/subagent.ts` — nothing in the codebase imported it anymore. Updated `LLMS.md` accordingly.
+
 ## [0.2.4] - 2026-08-18
 
 ### Fixed

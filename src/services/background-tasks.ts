@@ -20,6 +20,20 @@ export interface BackgroundTaskRecord {
 
 const backgroundTasks = new Map<string, BackgroundTaskRecord>();
 
+// Finished (non-running) records are never removed otherwise, so a long-lived session
+// running many background commands/subagents would grow this map without bound.
+const MAX_FINISHED_TASKS = 200;
+
+function pruneFinishedTasks(): void {
+  const finishedIds = [...backgroundTasks.entries()]
+    .filter(([, t]) => t.status !== "running")
+    .map(([id]) => id);
+  const excess = finishedIds.length - MAX_FINISHED_TASKS;
+  if (excess <= 0) return;
+  // Map preserves insertion order, so the oldest finished tasks are pruned first.
+  for (const id of finishedIds.slice(0, excess)) backgroundTasks.delete(id);
+}
+
 export function registerBackgroundTask(task: BackgroundTaskRecord): void {
   backgroundTasks.set(task.id, task);
 }
@@ -34,6 +48,7 @@ export function settleBackgroundTask(
   task.status = status;
   task.result = result;
   task.completedAt = new Date().toISOString();
+  pruneFinishedTasks();
 }
 
 export function startBackgroundCommand(command: string, cwd: string = process.cwd(), timeout = 300000): string {
@@ -76,6 +91,7 @@ export function startBackgroundCommand(command: string, cwd: string = process.cw
         taskRecord.result = finalOutput || "(Comando em background concluído sem saída)";
       }
       log("info", `[Background Task ${taskId}] concluída com status: ${taskRecord.status}`);
+      pruneFinishedTasks();
     });
   } catch (error) {
     taskRecord.status = "failed";
@@ -130,6 +146,7 @@ export function killBackgroundTask(id: string): { success: boolean; message: str
   task.status = "killed";
   task.completedAt = new Date().toISOString();
   task.result = "(Processo em background interrompido pelo usuário)";
+  pruneFinishedTasks();
 
   return { success: true, message: `Tarefa em background '${id}' foi encerrada com sucesso.` };
 }

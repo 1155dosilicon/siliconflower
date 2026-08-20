@@ -27,6 +27,19 @@ export interface SubagentSession {
 
 const activeSubagentSessions = new Map<string, SubagentSession>();
 
+// Sessions (with their full message history) are never removed otherwise, so a long-lived
+// session spawning many subagents would grow this map's memory usage without bound.
+const MAX_SUBAGENT_SESSIONS = 200;
+
+function pruneOldSessions(): void {
+  const excess = activeSubagentSessions.size - MAX_SUBAGENT_SESSIONS;
+  if (excess <= 0) return;
+  // Map preserves insertion order, so the oldest sessions are evicted first.
+  for (const id of [...activeSubagentSessions.keys()].slice(0, excess)) {
+    activeSubagentSessions.delete(id);
+  }
+}
+
 function getRoleSystemPrompt(role: SubagentRole, description: string, customPrompt?: string): string {
   if (role === "custom" && customPrompt) {
     return `${customPrompt}\n\nDescrição da Tarefa Atual: ${description}`;
@@ -82,6 +95,7 @@ export async function runSubagentTask(opts: SubagentOptions): Promise<string> {
   };
 
   activeSubagentSessions.set(sessionId, session);
+  pruneOldSessions();
 
   if (opts.runInBackground) {
     const controller = new AbortController();

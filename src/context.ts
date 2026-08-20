@@ -44,7 +44,7 @@ export function estimateMessagesTokens(messages: ChatMessage[]): number {
 
 /**
  * Handles large outputs from tools/commands.
- * If output exceeds maxChars (default 8000), saves the full output to a temp file
+ * If output exceeds maxChars (default 32000), saves the full output to a temp file
  * and returns a truncated version with a clear reference and total lines/size.
  */
 export async function processToolOutput(output: string, maxChars = 32000): Promise<string> {
@@ -143,8 +143,14 @@ export function compressHistory(messages: ChatMessage[], maxTokens = 90000): Cha
   }
 
   // If metadata and many small messages still exceed the budget, discard the oldest turns.
+  // Discard whole turns at once: dropping only the leading "assistant" message of a
+  // tool-call turn would leave an orphan "tool" message at the front, which breaks the
+  // assistant(tool_calls) -> tool(result) pairing the OpenAI/Anthropic APIs require.
   while (estimateMessagesTokens(result) > maxTokens && result.length > 1) {
     result.shift();
+    while (result.length > 1 && result[0].role === "tool") {
+      result.shift();
+    }
   }
 
   // A single recent message can exceed the whole context budget; bound it as a last resort.

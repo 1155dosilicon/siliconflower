@@ -8,7 +8,7 @@ function expandBraces(pattern: string): string {
   });
 }
 
-function globToRegex(pattern: string): RegExp {
+export function globToRegex(pattern: string): RegExp {
   const expanded = expandBraces(pattern);
   let re = "^";
   let i = 0;

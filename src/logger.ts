@@ -17,7 +17,8 @@ async function ensure() {
     await ensureDir(LOG_DIR);
     ensured = true;
   } catch {
-    ensured = true;
+    // Transient failure (permissions, AV lock, full disk): don't mark as ensured,
+    // so the next log() call retries instead of silently disabling logging forever.
   }
 }
 

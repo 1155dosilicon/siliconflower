@@ -91,7 +91,7 @@ export async function smartEditFile(options: EditOptions): Promise<EditResult> {
       const targetLength = oldLines.length;
       const normOldLines = oldLines.map(normalizeLineWhitespace);
 
-      let foundIndex = -1;
+      const foundIndexes: number[] = [];
       for (let i = 0; i <= origLines.length - targetLength; i++) {
         let match = true;
         for (let j = 0; j < targetLength; j++) {
@@ -101,25 +101,41 @@ export async function smartEditFile(options: EditOptions): Promise<EditResult> {
           }
         }
         if (match) {
-          foundIndex = i;
-          break;
+          foundIndexes.push(i);
+          if (!replaceAll) break;
+          i += targetLength - 1; // skip past this block so matches don't overlap
         }
       }
 
-      if (foundIndex !== -1) {
+      if (foundIndexes.length > 1 && !replaceAll) {
+        return {
+          result: `oldText corresponde a ${foundIndexes.length} trechos diferentes em ${path} (linhas: ${foundIndexes
+            .map((i) => i + 1)
+            .join(", ")}) apenas com espaçamento flexível — ambíguo. Forneça mais contexto em oldText para identificar um único trecho, ou use replaceAll: true se a intenção é editar todas as ocorrências.`,
+          isError: true,
+        };
+      }
+
+      if (foundIndexes.length > 0) {
         const newLines = normNew.split("\n");
-        const updatedLines = [
-          ...origLines.slice(0, foundIndex),
-          ...newLines,
-          ...origLines.slice(foundIndex + targetLength),
-        ];
+        const updatedLines: string[] = [];
+        let cursor = 0;
+        for (const idx of foundIndexes) {
+          updatedLines.push(...origLines.slice(cursor, idx));
+          updatedLines.push(...newLines);
+          cursor = idx + targetLength;
+        }
+        updatedLines.push(...origLines.slice(cursor));
         let finalContent = updatedLines.join("\n");
         if (useCRLF) finalContent = finalContent.replace(/\r?\n/g, "\r\n");
 
         await writeFile(path, finalContent, "utf8");
         await log("info", `smartEditFile (fuzzy_whitespace): ${path}`);
         return {
-          result: `Editado (correspondência flexível de espaçamento): ${path}`,
+          result:
+            foundIndexes.length > 1
+              ? `Editado (correspondência flexível de espaçamento, ${foundIndexes.length} ocorrências): ${path}`
+              : `Editado (correspondência flexível de espaçamento): ${path}`,
           isError: false,
           matchType: "fuzzy_whitespace",
         };

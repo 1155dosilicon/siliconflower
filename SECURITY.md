@@ -28,7 +28,14 @@ privileges as the user running `siliconflower`.
 - Sensitive path checks are applied consistently to direct reads, metadata,
   glob and grep operations, including resolved junction/symlink targets.
 - `web_fetch` rejects localhost, private/reserved IP addresses and redirects
-  to those destinations, and limits response time and body size.
+  to those destinations, and limits response time and body size. Known
+  limitation: the hostname is resolved once to validate it, then resolved
+  again independently by the HTTP client to connect; a malicious/compromised
+  DNS server that changes its answer between those two lookups (DNS
+  rebinding) could bypass this check. There is no dependency-free way to pin
+  the validated IP for the actual connection on the current runtime (Bun),
+  so treat `web_fetch` as unsuitable for fetching untrusted, attacker-influenced
+  URLs against sensitive internal endpoints.
 - In `plano` mode, only an explicit read-only allowlist is available. MCP,
   hooks, subagents and persistence mutations are blocked by default.
 - The system prompt in `sistema` mode instructs the model to warn before

@@ -203,9 +203,10 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
       setLiveText("");
       setStatus("pensando...");
 
-      const recentMessages = messages.slice(-60);
+      // Pass the full history (not a hard slice) so compressHistory in llm.ts can make the
+      // token-aware compaction decision instead of losing everything before a fixed cutoff.
       const history: ChatMessage[] = [
-        ...recentMessages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+        ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
         { role: "user" as const, content: cleanText },
       ];
 
@@ -302,9 +303,9 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
   );
 
   useInput((input, key) => {
-    if (key.ctrl) {
-      lastCtrlRef.current = Date.now();
-    }
+    // Note: lastCtrlRef is set specifically by cycleReasoning/cycleMode (Ctrl+E/Ctrl+O) below,
+    // not here for every Ctrl combo — otherwise Ctrl+C/Ctrl+V/etc. would also arm the 250ms
+    // window in handleInputChange and silently eat a legitimately typed trailing o/e/c.
     if (streaming) {
       if (key.ctrl && (input.toLowerCase() === "c" || input === "\x03")) handleCancel();
       return;

@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
+import { globToRegex } from "./glob-util.js";
 
 interface GrepOptions {
   basePath: string;
@@ -26,10 +27,12 @@ const IGNORED_DIRS = new Set([
   ".idea",
 ]);
 
-function matchesGlob(filename: string, pattern?: string): boolean {
+function matchesGlob(relPath: string, filename: string, pattern?: string): boolean {
   if (!pattern || pattern === "*") return true;
-  const cleanPattern = pattern.replace(/^\*\./, "");
-  return filename.endsWith(`.${cleanPattern}`) || filename.includes(cleanPattern);
+  const re = globToRegex(pattern);
+  // Patterns without a path separator match the basename at any depth (like ripgrep --glob);
+  // patterns with a separator (e.g. "src/**/*.tsx") match the full path relative to basePath.
+  return pattern.includes("/") ? re.test(relPath) : re.test(filename);
 }
 
 export async function searchContent(opts: GrepOptions): Promise<GrepMatch[]> {
@@ -42,6 +45,7 @@ export async function searchContent(opts: GrepOptions): Promise<GrepMatch[]> {
     regex = new RegExp(escaped, "i");
   }
   const matches: GrepMatch[] = [];
+  const root = resolve(basePath);
 
   async function walk(dir: string) {
     if (matches.length >= maxMatches) return;
@@ -61,8 +65,9 @@ export async function searchContent(opts: GrepOptions): Promise<GrepMatch[]> {
           await walk(fullPath);
         }
       } else if (entry.isFile()) {
-        if (includePattern && !matchesGlob(entry.name, includePattern)) {
-          continue;
+        if (includePattern) {
+          const relPath = relative(root, fullPath).replace(/\\/g, "/");
+          if (!matchesGlob(relPath, entry.name, includePattern)) continue;
         }
 
         // Avoid binary files / large files
@@ -90,6 +95,6 @@ export async function searchContent(opts: GrepOptions): Promise<GrepMatch[]> {
     }
   }
 
-  await walk(resolve(basePath));
+  await walk(root);
   return matches;
 }

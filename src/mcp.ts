@@ -11,6 +11,20 @@ interface ConnectedServer {
   tools: McpTool[];
 }
 
+const MCP_CONNECT_TIMEOUT_MS = 20_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, serverName: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timeout de ${ms / 1000}s ao conectar ao servidor MCP "${serverName}"`));
+    }, ms);
+    promise.then(
+      (v) => { clearTimeout(timer); resolve(v); },
+      (e) => { clearTimeout(timer); reject(e); }
+    );
+  });
+}
+
 export class McpManager {
   private servers = new Map<string, ConnectedServer>();
 
@@ -46,7 +60,14 @@ export class McpManager {
       { name: "siliconflower", version: APP_VERSION },
       { capabilities: {} }
     );
-    await client.connect(transport);
+    try {
+      await withTimeout(client.connect(transport), MCP_CONNECT_TIMEOUT_MS, name);
+    } catch (err) {
+      // client.connect() already spawned the child process; if the handshake fails
+      // or times out, close the transport so we don't leak an orphan process.
+      await transport.close().catch(() => {});
+      throw err;
+    }
     let toolList: McpTool[] = [];
     try {
       const res = await client.listTools();
