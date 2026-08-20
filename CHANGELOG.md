@@ -6,6 +6,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Alternate Screen Buffer & Viewport Management (`src/terminal.ts`, `src/App.tsx`, `src/index.tsx`):** Added robust xterm alternate screen buffer switching (`\x1b[?1049h` / `\x1b[?1049l`) and cursor lifecycle management, matching professional CLI harnesses like Claude Code and Antigravity CLI. The TUI starts in a clean, dedicated screen buffer without residual prompt text, and automatically restores the user's primary shell history upon exit.
+
 ### Fixed
 - **Context Compaction Protocol Safety (`src/context.ts`):** `compressHistory` could drop only the `assistant` half of a tool-call turn while discarding the oldest messages, leaving an orphan `tool` message at the front of the history and causing HTTP 400 errors from the OpenAI/Anthropic APIs on long tool-heavy sessions. Turns are now discarded as a whole unit.
 - **Raw History Truncation Bypassing Compaction (`src/App.tsx`):** The TUI was slicing the last 60 messages before handing history to `streamChat`, silently discarding everything older regardless of token budget and defeating the token-aware compaction in `compressHistory`. The full history is now passed through.

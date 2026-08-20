@@ -41,7 +41,7 @@ program
     if (opts.baseUrl) config.baseURL = opts.baseUrl;
     if (opts.apiKey) config.apiKey = opts.apiKey;
     await log("info", "=== siliconflower iniciado por CLI ===");
-    startApp(config, overrides);
+    await startApp(config, overrides);
   });
 
 program

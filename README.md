@@ -21,6 +21,7 @@ Agente de IA em terminal (CLI/TUI) de alta performance para desenvolvimento de s
 - 🌳 **Git Worktrees Isolados**: Testes e refatorações em branches temporárias sem afetar a área de trabalho atual.
 - 🗺️ **RepoMap & Símbolos**: Mapeamento estrutural de código (TS, JS, Python, Go, Rust, C/C++) com baixo consumo de tokens.
 - ⚡ **Raciocínio & Modos de Operação**: Controle de *reasoning effort* / *thinking tokens* (`Ctrl+E`) e modos de segurança (`Ctrl+O`: `programação`, `sistema`, `plano`).
+- 🖥️ **TUI em Alternate Screen Buffer**: Interface limpa e dedicada em buffer alternativo xterm (`\x1b[?1049h`), ocultando resíduos de comandos anteriores e restaurando perfeitamente o histórico do terminal ao sair (estilo Claude Code e Antigravity).
 - 🧩 **Ecossistema MCP & Hooks**: Suporte nativo ao Model Context Protocol e automações disparadas por eventos do ciclo de vida (`preTool`, `postTool`, `onEdit`, `onCommand`, `onSessionStart`, `onSessionEnd`).
 - 📦 **Binário Nativo Standalone**: Compilação para `.exe` único via Bun, sem necessidade de Node.js instalado.
 

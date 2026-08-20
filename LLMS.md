@@ -39,6 +39,7 @@ src/
 ├── tool-policy.ts         # Política fechada de ferramentas permitidas no modo plano
 ├── version.ts             # Versão única usada pelo CLI e cliente MCP
 ├── skills.ts              # Carregador e executor de skills (.md)
+├── terminal.ts            # Gerenciador de Alternate Screen Buffer e ciclo de vida do terminal
 ├── todo.ts                # Gerenciador de lista de tarefas na sessão
 ├── tools.ts               # Definição e registro central das 34 ferramentas nativas
 ├── types.ts               # Interfaces e tipos globais do TypeScript
