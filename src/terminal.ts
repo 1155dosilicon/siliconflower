@@ -1,27 +1,26 @@
 /**
  * Terminal Screen and Viewport Manager for Siliconflower.
  *
- * Implements full Alternate Screen Buffer management (\x1b[?1049h / \x1b[?1049l)
- * to provide a clean, isolated full-screen TUI experience matching major harnesses
- * like Claude Code and Antigravity CLI, preserving the user's shell history upon exit.
+ * Provides terminal clearing and cursor management in the primary screen buffer,
+ * matching modern harnesses like Claude Code and Gemini CLI, which allows native
+ * mouse-wheel scrolling throughout the chat and response history.
  */
 
-export const ANSI_ENTER_ALT_SCREEN = "\x1b[?1049h\x1b[2J\x1b[3J\x1b[H";
-export const ANSI_LEAVE_ALT_SCREEN = "\x1b[?1049l\x1b[?25h";
-
-let inAlternateScreen = false;
-let lifecycleRegistered = false;
+export const ANSI_CLEAR_SCREEN = "\x1b[2J\x1b[3J\x1b[H";
+export const ANSI_SHOW_CURSOR = "\x1b[?25h";
 
 export interface TerminalOptions {
   force?: boolean;
   stream?: NodeJS.WriteStream;
 }
 
+let lifecycleRegistered = false;
+
 /**
- * Activates the Alternate Screen Buffer, clears the display & scrollback,
- * and sets the cursor to (0,0).
+ * Clears the visible terminal viewport and homes the cursor,
+ * while keeping the primary buffer active so mouse wheel scrolling works natively.
  */
-export function enterAlternateScreen(options?: TerminalOptions): boolean {
+export function clearScreen(options?: TerminalOptions): boolean {
   const stream = options?.stream ?? process.stdout;
   const isTty = Boolean(stream.isTTY || options?.force);
 
@@ -29,48 +28,31 @@ export function enterAlternateScreen(options?: TerminalOptions): boolean {
     return false;
   }
 
-  if (!inAlternateScreen) {
-    stream.write(ANSI_ENTER_ALT_SCREEN);
-    inAlternateScreen = true;
-  }
-
+  stream.write(ANSI_CLEAR_SCREEN);
   registerLifecycleHooks(stream);
   return true;
 }
 
 /**
- * Restores the Primary Screen Buffer and ensures cursor visibility.
+ * Ensures cursor visibility and terminal cleanup on exit.
  */
-export function leaveAlternateScreen(options?: TerminalOptions): boolean {
+export function restoreTerminal(options?: TerminalOptions): boolean {
   const stream = options?.stream ?? process.stdout;
   const isTty = Boolean(stream.isTTY || options?.force);
 
-  if (inAlternateScreen) {
-    if (isTty) {
-      stream.write(ANSI_LEAVE_ALT_SCREEN);
-    }
-    inAlternateScreen = false;
+  if (isTty) {
+    stream.write(ANSI_SHOW_CURSOR);
     return true;
   }
   return false;
 }
 
-/**
- * Checks whether the Alternate Screen Buffer is currently active.
- */
-export function isAlternateScreenActive(): boolean {
-  return inAlternateScreen;
-}
-
-/**
- * Registers exit and signal listeners to guarantee terminal restoration.
- */
 function registerLifecycleHooks(stream: NodeJS.WriteStream) {
   if (lifecycleRegistered) return;
   lifecycleRegistered = true;
 
   const restore = () => {
-    leaveAlternateScreen({ stream, force: true });
+    restoreTerminal({ stream, force: true });
   };
 
   process.once("exit", restore);

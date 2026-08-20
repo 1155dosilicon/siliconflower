@@ -1,10 +1,9 @@
-import { describe, expect, test, beforeEach, afterEach } from "bun:test";
+import { describe, expect, test, beforeEach } from "bun:test";
 import {
-  ANSI_ENTER_ALT_SCREEN,
-  ANSI_LEAVE_ALT_SCREEN,
-  enterAlternateScreen,
-  leaveAlternateScreen,
-  isAlternateScreenActive,
+  ANSI_CLEAR_SCREEN,
+  ANSI_SHOW_CURSOR,
+  clearScreen,
+  restoreTerminal,
 } from "../src/terminal.js";
 import { Writable } from "node:stream";
 
@@ -22,49 +21,31 @@ describe("terminal screen manager", () => {
     }) as unknown as NodeJS.WriteStream;
     (stream as any).isTTY = true;
     mockStream = stream;
-    // ensure starting in clean primary buffer state
-    leaveAlternateScreen({ stream: mockStream, force: true });
-    mockOutput = [];
   });
 
-  afterEach(() => {
-    leaveAlternateScreen({ stream: mockStream, force: true });
+  test("clears screen and homes cursor on TTY", () => {
+    const cleared = clearScreen({ stream: mockStream });
+    expect(cleared).toBe(true);
+    expect(mockOutput.join("")).toContain(ANSI_CLEAR_SCREEN);
   });
 
-  test("enters alternate screen buffer on TTY", () => {
-    const entered = enterAlternateScreen({ stream: mockStream });
-    expect(entered).toBe(true);
-    expect(isAlternateScreenActive()).toBe(true);
-    expect(mockOutput.join("")).toContain(ANSI_ENTER_ALT_SCREEN);
+  test("restores cursor visibility on terminal restore", () => {
+    const restored = restoreTerminal({ stream: mockStream });
+    expect(restored).toBe(true);
+    expect(mockOutput.join("")).toContain(ANSI_SHOW_CURSOR);
   });
 
-  test("restores primary screen buffer on leave", () => {
-    enterAlternateScreen({ stream: mockStream });
-    mockOutput = [];
-
-    const left = leaveAlternateScreen({ stream: mockStream });
-    expect(left).toBe(true);
-    expect(isAlternateScreenActive()).toBe(false);
-    expect(mockOutput.join("")).toContain(ANSI_LEAVE_ALT_SCREEN);
-  });
-
-  test("does not enter alternate screen when isTTY is false and not forced", () => {
+  test("does not clear screen when isTTY is false and not forced", () => {
     (mockStream as any).isTTY = false;
-    const entered = enterAlternateScreen({ stream: mockStream });
-    expect(entered).toBe(false);
-    expect(isAlternateScreenActive()).toBe(false);
+    const cleared = clearScreen({ stream: mockStream });
+    expect(cleared).toBe(false);
     expect(mockOutput.length).toBe(0);
   });
 
-  test("handles consecutive enter and leave idempotently", () => {
-    expect(enterAlternateScreen({ stream: mockStream })).toBe(true);
-    // second enter while active should not write again
-    const secondOutputCount = mockOutput.length;
-    expect(enterAlternateScreen({ stream: mockStream })).toBe(true);
-    expect(mockOutput.length).toBe(secondOutputCount);
-
-    expect(leaveAlternateScreen({ stream: mockStream })).toBe(true);
-    // second leave should return false and not write again
-    expect(leaveAlternateScreen({ stream: mockStream })).toBe(false);
+  test("forces clear screen when forced flag is true even if isTTY is false", () => {
+    (mockStream as any).isTTY = false;
+    const cleared = clearScreen({ stream: mockStream, force: true });
+    expect(cleared).toBe(true);
+    expect(mockOutput.join("")).toContain(ANSI_CLEAR_SCREEN);
   });
 });

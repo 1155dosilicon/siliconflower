@@ -16,7 +16,7 @@ import type { AppConfig, ChatMessage, McpTool, ReasoningLevel, StreamEvent, Todo
 import { REASONING_LEVELS } from "./types.js";
 import { isToolAllowedInMode } from "./tool-policy.js";
 import { runHook } from "./core/hooks.js";
-import { enterAlternateScreen, leaveAlternateScreen } from "./terminal.js";
+import { clearScreen, restoreTerminal } from "./terminal.js";
 
 const REASONING_LABEL: Record<ReasoningLevel, string> = {
   none: "off",
@@ -406,11 +406,11 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
 };
 
 export async function startApp(config: AppConfig, overrides: { model?: string; reasoning?: ReasoningLevel; mode?: Mode }) {
-  enterAlternateScreen();
+  clearScreen();
   try {
     const app = render(<App config={config} overrides={overrides} />);
     await app.waitUntilExit();
   } finally {
-    leaveAlternateScreen();
+    restoreTerminal();
   }
 }
