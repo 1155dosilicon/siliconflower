@@ -83,7 +83,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
       if (cancelled) return;
       skillsRef.current = loaded;
       setSkills(loaded);
-      await log("info", `siliconflower iniciado - provider=${config.provider} model=${model}`);
+      await log("info", `siliconflower iniciado - model=${model}`);
       if (config.hooks) {
         await runHook("onSessionStart", config.hooks, { cwd: process.cwd() });
       }

@@ -145,7 +145,7 @@ export function compressHistory(messages: ChatMessage[], maxTokens = 90000): Cha
   // If metadata and many small messages still exceed the budget, discard the oldest turns.
   // Discard whole turns at once: dropping only the leading "assistant" message of a
   // tool-call turn would leave an orphan "tool" message at the front, which breaks the
-  // assistant(tool_calls) -> tool(result) pairing the OpenAI/Anthropic APIs require.
+  // assistant(tool_calls) -> tool(result) pairing the OpenAI-compatible APIs require.
   while (estimateMessagesTokens(result) > maxTokens && result.length > 1) {
     result.shift();
     while (result.length > 1 && result[0].role === "tool") {

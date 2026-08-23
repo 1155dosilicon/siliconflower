@@ -815,12 +815,18 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       },
       required: ["query"],
     },
-    run: async (a) => {
+    run: async (a, ctx) => {
       const query = String(a.query);
       const maxResults = a.maxResults ? Number(a.maxResults) : 8;
-      const res = await webSearch(query, maxResults);
-      if (res.isError || res.results.length === 0) {
-        return { result: `Nenhum resultado encontrado na web para '${query}'.`, isError: res.isError };
+      const res = await webSearch(query, maxResults, ctx?.signal);
+      if (res.isError) {
+        return {
+          result: `Erro ao realizar busca web para '${query}': ${res.error || "falha no motor de busca"}`,
+          isError: true,
+        };
+      }
+      if (res.results.length === 0) {
+        return { result: `Nenhum resultado encontrado na web para '${query}'.`, isError: false };
       }
       return { result: JSON.stringify(res.results, null, 2), isError: false };
     },

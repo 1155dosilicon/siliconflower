@@ -1,6 +1,6 @@
 import { select, input, password, editor, confirm } from "@inquirer/prompts";
-import { saveConfig, presets, loadConfig, configFile, configDir } from "./config.js";
-import type { AppConfig, McpServerConfig, Provider, ReasoningLevel } from "./types.js";
+import { saveConfig, defaultPreset, loadConfig, configFile, configDir } from "./config.js";
+import type { AppConfig, McpServerConfig, ReasoningLevel } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
 
 const LABELS: Record<ReasoningLevel, string> = {
@@ -23,16 +23,7 @@ export async function runSetup(existing: AppConfig | null): Promise<AppConfig> {
   console.clear();
   console.log("\n\x1b[35m✦ Setup Wizard\x1b[0m\n");
 
-  const provider = (await select<Provider>({
-    message: "API variant (openai / anthropic):",
-    default: existing?.provider ?? "openai",
-    choices: [
-      { name: presets().openai.label, value: "openai" },
-      { name: presets().anthropic.label, value: "anthropic" },
-    ],
-  })) as Provider;
-
-  const preset = presets()[provider];
+  const preset = defaultPreset();
 
   const baseURL = await input({
     message: "API base URL:",
@@ -111,7 +102,6 @@ export async function runSetup(existing: AppConfig | null): Promise<AppConfig> {
   const finalKey = (apiKey || (existing?.apiKey ?? "")).trim();
 
   const config: AppConfig = {
-    provider,
     baseURL: baseURL.trim(),
     apiKey: finalKey.trim(),
     model: model.trim(),

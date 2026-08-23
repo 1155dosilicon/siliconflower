@@ -24,9 +24,9 @@ Requirements: Bun >= 1.3 (recommended) or Node >= 20 with `tsx`.
 - `src/index.tsx` -- CLI entry (commander).
 - `src/App.tsx` -- TUI (ink/React). Keep components small and pure when
   possible.
-- `src/llm.ts` -- OpenAI + Anthropic streaming adapters. Keep both
-  branches symmetric so a new provider is roughly doubling one function,
-  not redesigning the loop.
+- `src/llm.ts` -- OpenAI-compatible streaming adapter. Keep the tool-call
+  loop provider-agnostic so a new backend is a variation of one function,
+  not a redesign of the loop.
 - `src/tools.ts` -- Native tool implementations. Validate input paths with
   the helpers in this file; never trust model output.
 - `src/mcp.ts` -- MCP client lifecycle. Treat MCP failures as warnings,

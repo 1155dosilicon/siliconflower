@@ -1,12 +1,12 @@
 # 🌸 SILICONFLOWER
 
-![Version](https://img.shields.io/badge/version-0.2.4-blue.svg)
+![Version](https://img.shields.io/badge/version-0.2.5-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20PowerShell-0078D6.svg)
 ![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black.svg)
 ![Node](https://img.shields.io/badge/Node.js-%3E%3D20-green.svg)
 
-Agente de IA em terminal (CLI/TUI) de alta performance para desenvolvimento de software no Windows. Integra **34 ferramentas nativas**, **Subagentes Concorrentes & Background Tasks**, **Memória Persistente**, **Git Worktrees**, **RepoMap**, **Busca Web** e **Protocolo MCP**, compatível com **SiliconFlow, OpenRouter, OpenAI e Anthropic**.
+Agente de IA em terminal (CLI/TUI) de alta performance para desenvolvimento de software no Windows. Integra **34 ferramentas nativas**, **Subagentes Concorrentes & Background Tasks**, **Memória Persistente**, **Git Worktrees**, **RepoMap**, **Busca Web** e **Protocolo MCP**, compatível com **SiliconFlow, OpenRouter, OpenAI** e demais backends compatíveis com a API da OpenAI.
 
 <p align="center">
   <img src="assets/preview.png" alt="SiliconFlower TUI Preview" width="100%" />
@@ -65,7 +65,6 @@ As configurações globais e dados do Siliconflower ficam organizados em `~/.sil
 
 ```json
 {
-  "provider": "openai",
   "baseURL": "https://api.siliconflow.com/v1",
   "apiKey": "sk-...",
   "model": "deepseek-ai/DeepSeek-V4-Pro",
@@ -162,7 +161,7 @@ siliconflower/
 │   ├── core/           # Hooks e ciclo de vida (preTool, postTool, etc.)
 │   ├── services/       # Subagentes, RepoMap, Memória, Worktrees, Artefatos, Web
 │   ├── App.tsx         # Interface TUI (Ink / React)
-│   ├── llm.ts          # Adaptador unificado OpenAI / Anthropic com streaming
+│   ├── llm.ts          # Adaptador de streaming para APIs compatíveis com OpenAI
 │   ├── tools.ts        # Registro central das 34 ferramentas nativas
 │   └── index.tsx       # CLI e comandos de entrada
 ├── scripts/            # Scripts de instalação no Windows PATH

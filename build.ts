@@ -27,9 +27,64 @@ export default devtools;
 export function connectToDevTools() {}
 `;
 
+const STAINLESS_SHIMS = `
+export const auto = false;
+export const kind = "bun";
+export const fetch = globalThis.fetch;
+export const Request = globalThis.Request;
+export const Response = globalThis.Response;
+export const Headers = globalThis.Headers;
+export const FormData = globalThis.FormData;
+export const Blob = globalThis.Blob;
+export const File = globalThis.File;
+export const ReadableStream = globalThis.ReadableStream;
+export const getMultipartRequestOptions = async (form, opts) => ({ ...opts, body: form });
+export const getDefaultAgent = (url) => undefined;
+export const fileFromPath = () => { throw new Error("fileFromPath not supported"); };
+export const isFsReadStream = (val) => false;
+export function setShims() {}
+export function init() {}
+export function getRuntime() {
+  return {
+    kind,
+    fetch,
+    Request,
+    Response,
+    Headers,
+    FormData,
+    Blob,
+    File,
+    ReadableStream,
+    getMultipartRequestOptions,
+    getDefaultAgent,
+    fileFromPath,
+    isFsReadStream,
+  };
+}
+export default {
+  auto,
+  kind,
+  fetch,
+  Request,
+  Response,
+  Headers,
+  FormData,
+  Blob,
+  File,
+  ReadableStream,
+  getMultipartRequestOptions,
+  getDefaultAgent,
+  fileFromPath,
+  isFsReadStream,
+  setShims,
+  init,
+  getRuntime,
+};
+`;
+
 const shimPlugin = {
   name: "optional-deps-shim",
-  setup(build) {
+  setup(build: import("bun").PluginBuilder) {
     // react-devtools-core -> no-op shim
     build.onResolve({ filter: /^react-devtools-core$/ }, () => ({
       path: "react-devtools-core",
@@ -41,6 +96,16 @@ const shimPlugin = {
       }
       return undefined;
     });
+
+    // Stainless shims (openai) -> static Bun shims (prevents minified mutable live binding bug)
+    build.onResolve({ filter: /(?:openai\/_shims|_shims\/(?:index|registry|auto\/runtime))/ }, () => ({
+      path: "stainless-shims",
+      namespace: "sf-stainless-shims",
+    }));
+    build.onLoad({ filter: /.*/, namespace: "sf-stainless-shims" }, () => ({
+      contents: STAINLESS_SHIMS,
+      loader: "js",
+    }));
   },
 };
 
@@ -54,10 +119,13 @@ mkdirSync(outDir, { recursive: true });
 const result = await Bun.build({
   entrypoints: [join(root, "src", "index.tsx")],
   outdir: outDir,
-  target: "bun-windows-x64",
   compile: true,
-  minify: true,
-  sourcemap: "external",
+  target: "bun-windows-x64",
+  minify: {
+    whitespace: true,
+    syntax: true,
+    identifiers: false,
+  },
   plugins: [shimPlugin],
 });
 

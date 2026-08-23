@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { readFile, writeFile, access } from "node:fs/promises";
 import { ensureDir, getGlobalDataDir } from "./fs-util.js";
-import type { AppConfig, McpServerConfig, Provider, Mode } from "./types.js";
+import type { AppConfig, McpServerConfig, Mode } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
 
 const CONFIG_DIR = getGlobalDataDir();
@@ -15,21 +15,14 @@ export function configFile(): string {
   return CONFIG_FILE;
 }
 
-const PRESETS: Record<Provider, { label: string; baseURL: string; example: string }> = {
-  openai: {
-    label: "OpenAI-compatible (SiliconFlow, OpenRouter, OpenAI, ...)",
-    baseURL: "https://api.siliconflow.com/v1",
-    example: "deepseek-ai/DeepSeek-V4-Pro or gpt-5.5",
-  },
-  anthropic: {
-    label: "Anthropic-compatible (Anthropic, proxies)",
-    baseURL: "https://api.anthropic.com",
-    example: "claude-5-sonnet or claude-opus-4.8",
-  },
+const DEFAULT_PRESET: { label: string; baseURL: string; example: string } = {
+  label: "OpenAI-compatible (SiliconFlow, OpenRouter, OpenAI, ...)",
+  baseURL: "https://api.siliconflow.com/v1",
+  example: "deepseek-ai/DeepSeek-V4-Pro or gpt-5.5",
 };
 
-export function presets() {
-  return PRESETS;
+export function defaultPreset() {
+  return DEFAULT_PRESET;
 }
 
 export async function configExists(): Promise<boolean> {
@@ -57,7 +50,6 @@ export async function saveConfig(config: AppConfig): Promise<void> {
 }
 
 export function normalize(data: Partial<AppConfig>): AppConfig {
-  const provider: Provider = data.provider === "anthropic" ? "anthropic" : "openai";
   const apiKey = (process.env.SILICONFLOWER_API_KEY || data.apiKey || "").trim();
   const baseURL = (process.env.SILICONFLOWER_BASE_URL || data.baseURL || "").trim();
   const model = (process.env.SILICONFLOWER_MODEL || data.model || "").trim();
@@ -75,8 +67,8 @@ export function normalize(data: Partial<AppConfig>): AppConfig {
     }
   }
 
+  // A legacy "provider" key may still sit in config.json; it is dropped on the next save.
   return {
-    provider,
     baseURL,
     apiKey,
     model,

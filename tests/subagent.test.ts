@@ -4,7 +4,6 @@ import type { AppConfig } from "../src/types.js";
 
 describe("subagent service", () => {
   const mockConfig: AppConfig = {
-    provider: "openai",
     baseURL: "https://api.mock.test/v1",
     apiKey: "mock-key",
     model: "mock-model",

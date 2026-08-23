@@ -51,8 +51,19 @@ export class McpManager {
         cleanEnv[k] = String(v);
       }
     }
+
+    let resolvedCommand = cfg.command;
+    if (typeof Bun !== "undefined" && typeof (Bun as any).which === "function") {
+      const found = (Bun as any).which(resolvedCommand);
+      if (found) {
+        resolvedCommand = found;
+      } else if (resolvedCommand === "npx" && (Bun as any).which("bunx")) {
+        resolvedCommand = (Bun as any).which("bunx")!;
+      }
+    }
+
     const transport = new StdioClientTransport({
-      command: cfg.command,
+      command: resolvedCommand,
       args: cfg.args ?? [],
       env: cleanEnv,
     });

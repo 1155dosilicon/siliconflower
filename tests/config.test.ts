@@ -1,18 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { isValid, presets, normalize } from "../src/config.js";
+import { isValid, defaultPreset, normalize } from "../src/config.js";
 import type { AppConfig } from "../src/types.js";
 
 describe("config", () => {
-  test("presets returns openai and anthropic presets", () => {
-    const p = presets();
-    expect(p.openai).toBeDefined();
-    expect(p.anthropic).toBeDefined();
-    expect(p.openai.baseURL).toContain("api.siliconflow.com");
+  test("defaultPreset points at an OpenAI-compatible endpoint", () => {
+    expect(defaultPreset().baseURL).toContain("api.siliconflow.com");
   });
 
   test("isValid validates configuration completeness", () => {
     const valid: AppConfig = {
-      provider: "openai",
       baseURL: "https://api.openai.com/v1",
       apiKey: "sk-123",
       model: "gpt-4o",
@@ -21,7 +17,6 @@ describe("config", () => {
     expect(isValid(valid)).toBe(true);
 
     const invalid: AppConfig = {
-      provider: "openai",
       baseURL: "",
       apiKey: "sk-123",
       model: "gpt-4o",
@@ -56,5 +51,10 @@ describe("config", () => {
       mode: "plan" as any,
     });
     expect(norm3.mode).toBe("plano");
+  });
+
+  test("normalize drops the legacy provider key from config data", () => {
+    const norm = normalize({ provider: "anthropic", model: "gpt-4o" } as any);
+    expect("provider" in norm).toBe(false);
   });
 });

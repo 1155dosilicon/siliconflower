@@ -1,7 +1,7 @@
 {
   "name": "siliconflower",
-  "version": "0.2.4",
-  "description": "CLI/TUI AI agent for Windows with MCP, reasoning control, skills, and OpenAI/Anthropic-compatible backends.",
+  "version": "0.2.5",
+  "description": "CLI/TUI AI agent for Windows with MCP, reasoning control, skills, and OpenAI-compatible backends.",
   "os": [
     "win32"
   ],
@@ -22,7 +22,6 @@
     "cli",
     "tui",
     "mcp",
-    "anthropic",
     "openai",
     "siliconflow",
     "openrouter",
@@ -42,7 +41,6 @@
     "install:bin": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.39.0",
     "@inquirer/prompts": "^7.2.1",
     "@modelcontextprotocol/sdk": "^1.9.0",
     "chalk": "^5.3.0",

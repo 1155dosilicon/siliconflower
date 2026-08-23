@@ -6,7 +6,7 @@ Este documento serve como mapa arquitetural e guia de desenvolvimento do **Silic
 
 ## 🏗️ Visão Geral da Arquitetura
 
-O Siliconflower é um harness CLI/TUI autônomo para desenvolvimento de software, projetado exclusivamente para o ecossistema Windows (PowerShell/Bun/Node), operando com múltiplos provedores de LLM.
+O Siliconflower é um harness CLI/TUI autônomo para desenvolvimento de software, projetado exclusivamente para o ecossistema Windows (PowerShell/Bun/Node), operando sobre APIs compatíveis com OpenAI (SiliconFlow, OpenRouter, OpenAI, ...).
 
 ```text
 src/
@@ -32,7 +32,7 @@ src/
 ├── glob-util.ts           # Busca por padrões globais de arquivos
 ├── grep.ts                # Mecanismo de busca textual e regex recursiva
 ├── index.tsx              # Ponto de entrada CLI (Commander)
-├── llm.ts                 # Cliente unificado de chamadas e streaming para OpenAI/Anthropic
+├── llm.ts                 # Cliente de chamadas e streaming para APIs compatíveis com OpenAI
 ├── logger.ts              # Sistema de logs com rotação e busca (200 KB)
 ├── mcp.ts                 # Cliente para servidores MCP (Model Context Protocol) via stdio
 ├── modes.ts               # Modos de operação (programação, sistema, plano)

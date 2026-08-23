@@ -16,12 +16,11 @@ const program = new Command();
 
 program
   .name("siliconflower")
-  .description("CLI/TUI AI agent with MCP, reasoning, skills, modes, and OpenAI/Anthropic-compatible backends.")
+  .description("CLI/TUI AI agent with MCP, reasoning, skills, modes, and OpenAI-compatible backends.")
   .version(APP_VERSION)
   .option("-m, --model <id>", "override the model")
   .option("-r, --reasoning <level>", `reasoning level: ${REASONING_LEVELS.join(", ")}`)
   .option("--mode <mode>", `mode: ${MODES.join(", ")}`)
-  .option("--provider <type>", "force provider: openai | anthropic")
   .option("--base-url <url>", "override the API base URL")
   .option("--api-key <key>", "override the API key")
   .action(async (opts) => {
@@ -37,7 +36,6 @@ program
     if (opts.model) overrides.model = opts.model;
     if (opts.reasoning) overrides.reasoning = normalizeReasoning(opts.reasoning);
     if (opts.mode) overrides.mode = normalizeMode(opts.mode);
-    if (opts.provider) config.provider = opts.provider === "anthropic" ? "anthropic" : "openai";
     if (opts.baseUrl) config.baseURL = opts.baseUrl;
     if (opts.apiKey) config.apiKey = opts.apiKey;
     await log("info", "=== siliconflower iniciado por CLI ===");

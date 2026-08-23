@@ -4,12 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.5] - 2026-08-23
+
+### Removed
+- **Anthropic API Support (`src/llm.ts`, `src/config.ts`, `src/types.ts`, `src/wizard.ts`, `src/index.tsx`, `build.ts`):** Dropped the Anthropic provider branch entirely, along with the `@anthropic-ai/sdk` dependency, the `anthropic` preset, the `--provider` CLI flag and the wizard provider prompt. `src/llm.ts` now carries a single OpenAI-compatible streaming adapter.
+- **`provider` Config Field (`src/types.ts`, `src/config.ts`, `src/wizard.ts`):** With a single supported API variant the field carried no information and was removed from `AppConfig`. A legacy `"provider"` key in `config.json` is ignored on load and dropped on the next save; `presets()` collapsed into `defaultPreset()`. Users previously on Anthropic must repoint `baseURL`/`model` at an OpenAI-compatible endpoint.
 
 ### Added
 - **Terminal Viewport & Native Mouse Scroll (`src/terminal.ts`, `src/App.tsx`, `src/index.tsx`):** Added robust terminal viewport clearing (`\x1b[2J\x1b[3J\x1b[H`) and cursor lifecycle management in the primary buffer, matching Claude Code. Starts with a clean screen without initial prompt residue while preserving full native mouse-wheel scrollback throughout the session.
 
 ### Fixed
+- **Web Fetch SSRF False Positives (`src/services/web.ts`):** Corrected `isPrivateAddress` range check that previously classified all `192.0.x.x` public IPs (e.g. Automattic/WordPress VIP CDN used by TechCrunch, MIT Tech Review) as private. Added exact RFC 6890 / RFC 5737 matching for `192.0.0.0/24` and `192.0.2.0/24` while allowing legitimate public IPs.
+- **Web Search Parser & Anti-Bot Protection (`src/services/web.ts`, `src/tools.ts`):** Updated DuckDuckGo HTML parser to support arbitrary attribute ordering (e.g. `rel="nofollow" class="result__a"`), added fallback regex scanning for `uddg=` redirect links, HTTP 202 anti-bot challenge handling, and context cancellation support (`ctx.signal`).
+- **Web Fetch HTML to Markdown Formatting (`src/services/web.ts`):** Upgraded `htmlToMarkdown` with cleaner tag stripping (`<noscript>`, `<svg>`, `<canvas>`, `<iframe>`), code blocks formatting (`<pre><code>`), blockquotes (`>`), bold/italics, and comprehensive HTML entity decoding.
+- **MCP Command Binary Resolution (`src/mcp.ts`):** Added automatic command binary resolution for Bun on Windows, allowing `bunx` to seamlessly execute MCP packages even when configurations specify `npx`.
 - **Context Compaction Protocol Safety (`src/context.ts`):** `compressHistory` could drop only the `assistant` half of a tool-call turn while discarding the oldest messages, leaving an orphan `tool` message at the front of the history and causing HTTP 400 errors from the OpenAI/Anthropic APIs on long tool-heavy sessions. Turns are now discarded as a whole unit.
 - **Raw History Truncation Bypassing Compaction (`src/App.tsx`):** The TUI was slicing the last 60 messages before handing history to `streamChat`, silently discarding everything older regardless of token budget and defeating the token-aware compaction in `compressHistory`. The full history is now passed through.
 - **`grep_content` Path-Based Include Filters (`src/grep.ts`):** The `include` glob only matched against a bare filename, so patterns with a path segment (e.g. `src/**/*.tsx`) never matched anything. Now reuses the real glob-to-regex engine from `src/glob-util.ts` (also exported for reuse) against the path relative to `basePath`.

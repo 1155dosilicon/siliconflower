@@ -1,4 +1,3 @@
-export type Provider = "openai" | "anthropic";
 export type ReasoningLevel = "none" | "low" | "medium" | "high";
 export type Mode = "programação" | "sistema" | "plano";
 
@@ -9,7 +8,6 @@ export interface McpServerConfig {
 }
 
 export interface AppConfig {
-  provider: Provider;
   baseURL: string;
   apiKey: string;
   model: string;
