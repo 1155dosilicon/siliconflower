@@ -13,17 +13,10 @@ import { estimateTokens, formatTokenCount } from "./context.js";
 import { MarkdownText } from "./MarkdownText.js";
 import { log, logFile } from "./logger.js";
 import type { AppConfig, ChatMessage, McpTool, ReasoningLevel, StreamEvent, TodoItem } from "./types.js";
-import { REASONING_LEVELS } from "./types.js";
 import { isToolAllowedInMode } from "./tool-policy.js";
 import { runHook } from "./core/hooks.js";
 import { clearScreen, restoreTerminal } from "./terminal.js";
-
-const REASONING_LABEL: Record<ReasoningLevel, string> = {
-  none: "off",
-  low: "low",
-  medium: "med",
-  high: "high",
-};
+import { reasoningLabel, reasoningOptions } from "./reasoning.js";
 
 interface AppProps {
   config: AppConfig;
@@ -111,13 +104,14 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
     lastCtrlRef.current = Date.now();
     setInput((prev) => prev.replace(/[\x00-\x1F\x7F]/g, "").replace(/e$/i, ""));
     setReasoning((r) => {
-      const idx = REASONING_LEVELS.indexOf(r);
-      const next = REASONING_LEVELS[(idx + 1) % REASONING_LEVELS.length];
-      setStatus(`pensamento: ${next}`);
+      const levels = reasoningOptions(config.baseURL);
+      const idx = levels.indexOf(r);
+      const next = levels[(idx + 1) % levels.length];
+      setStatus(`pensamento: ${reasoningLabel(next, config.baseURL)}`);
       setTimeout(() => setStatus("pronto"), 1200);
       return next;
     });
-  }, []);
+  }, [config.baseURL]);
 
   const cycleMode = useCallback(() => {
     lastCtrlRef.current = Date.now();
@@ -207,7 +201,11 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
       // Pass the full history (not a hard slice) so compressHistory in llm.ts can make the
       // token-aware compaction decision instead of losing everything before a fixed cutoff.
       const history: ChatMessage[] = [
-        ...messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+        ...messages.map((m) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+          ...(m.role === "assistant" && m.reasoning ? { reasoning: m.reasoning } : {}),
+        })),
         { role: "user" as const, content: cleanText },
       ];
 
@@ -392,7 +390,7 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
       <Text dimColor>{sep}</Text>
       <Box flexWrap="wrap">
         <Text><Text color="green" bold>Model:</Text> {model} </Text>
-        <Text><Text color="magenta" bold>Reasoning:</Text> {REASONING_LABEL[reasoning]} </Text>
+        <Text><Text color="magenta" bold>Reasoning:</Text> {reasoningLabel(reasoning, config.baseURL)} </Text>
         <Text><Text color="blue" bold>Mode:</Text> {modeLabel(mode)} </Text>
         <Text><Text color="yellow" bold>Tools:</Text> {totalTools} </Text>
         <Text><Text color="cyan" bold>Skills:</Text> {skills.length} </Text>

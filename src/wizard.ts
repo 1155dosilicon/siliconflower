@@ -1,7 +1,7 @@
 import { select, input, password, editor, confirm } from "@inquirer/prompts";
 import { saveConfig, defaultPreset, loadConfig, configFile, configDir } from "./config.js";
 import type { AppConfig, McpServerConfig, ReasoningLevel } from "./types.js";
-import { REASONING_LEVELS } from "./types.js";
+import { isXiaomiMimoEndpoint, reasoningOptions } from "./reasoning.js";
 
 const LABELS: Record<ReasoningLevel, string> = {
   none: "None (no reasoning)",
@@ -52,10 +52,19 @@ export async function runSetup(existing: AppConfig | null): Promise<AppConfig> {
     validate: (v) => (v.trim() ? true : "Provide a model ID"),
   });
 
+  const availableReasoning = reasoningOptions(baseURL);
+  const defaultReasoning = existing?.reasoning && availableReasoning.includes(existing.reasoning)
+    ? existing.reasoning
+    : availableReasoning.includes("high") ? "high" : availableReasoning[0];
   const reasoning = (await select<ReasoningLevel>({
     message: "Default reasoning level:",
-    default: existing?.reasoning ?? "high",
-    choices: REASONING_LEVELS.map((l) => ({ name: `${l} - ${LABELS[l]}`, value: l })),
+    default: defaultReasoning,
+    choices: availableReasoning.map((l) => ({
+      name: isXiaomiMimoEndpoint(baseURL)
+        ? (l === "none" ? "off - thinking disabled" : "on - thinking enabled")
+        : `${l} - ${LABELS[l]}`,
+      value: l,
+    })),
   })) as ReasoningLevel;
 
   const useSystem = await confirm({
