@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Xiaomi MiMo Thinking Control:** The official Xiaomi endpoint now exposes thinking as an on/off toggle, sends `thinking.type`, and preserves `reasoning_content` for tool-call continuations. Other OpenAI-compatible endpoints keep the existing reasoning-effort levels.
+
 ## [0.2.5] - 2026-08-23
 
 ### Removed
