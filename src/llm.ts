@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { log } from "./logger.js";
 import { compressHistory } from "./context.js";
 import type { AppConfig, ChatMessage, McpTool, ReasoningLevel, StreamEvent } from "./types.js";
+import { isXiaomiMimoEndpoint } from "./reasoning.js";
 
 export interface ChatOptions {
   config: AppConfig;
@@ -45,6 +46,7 @@ export function buildOpenAIMessages(
   config: AppConfig,
   messages: ChatMessage[]
 ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
+  const preserveReasoningContent = isXiaomiMimoEndpoint(config.baseURL);
   const out: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
   if (config.system) out.push({ role: "system", content: config.system });
   for (const m of messages) {
@@ -56,9 +58,14 @@ export function buildOpenAIMessages(
           role: "assistant",
           content: m.content || "",
           tool_calls: m.toolCalls,
-        });
+          ...(preserveReasoningContent && m.reasoning !== undefined ? { reasoning_content: m.reasoning } : {}),
+        } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam);
       } else {
-        out.push({ role: "assistant", content: m.content });
+        out.push({
+          role: "assistant",
+          content: m.content,
+          ...(preserveReasoningContent && m.reasoning !== undefined ? { reasoning_content: m.reasoning } : {}),
+        } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam);
       }
     } else if (m.role === "tool") {
       out.push({
@@ -121,7 +128,8 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   const { config, messages, tools, reasoning, executeTool, signal } = opts;
   const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey });
   const apiTools = buildOpenAITools(tools);
-  const effort = reasoning !== "none" ? reasoning : undefined;
+  const isXiaomiMimo = isXiaomiMimoEndpoint(config.baseURL);
+  const effort = !isXiaomiMimo && reasoning !== "none" ? reasoning : undefined;
   let supportsEffort = true;
 
   const compressed = compressHistory(messages);
@@ -158,8 +166,9 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
           max_tokens: 16384,
           stream_options: { include_usage: true },
           ...(withEffort && effort ? { reasoning_effort: effort } : {}),
+          ...(isXiaomiMimo ? { thinking: { type: reasoning === "none" ? "disabled" : "enabled" } } : {}),
           ...(apiTools.length ? { tools: apiTools, tool_choice: "auto" } : {}),
-        },
+        } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
         { signal: requestController.signal }
       );
     };
@@ -279,6 +288,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
         type: "function" as const,
         function: { name: c.name, arguments: c.args },
       })),
+      ...(isXiaomiMimo ? { reasoning_content: thinking } : {}),
     } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam);
 
     void log("info", `LLM step ${step}: executando ${pendingCalls.length} tool(s): ${pendingCalls.map(c => c.name).join(", ")}`);

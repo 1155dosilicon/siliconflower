@@ -90,7 +90,7 @@ bun run start -- -m <model> -r <level> --mode <mode>  # Executa com parâmetros 
 | Atalho | Ação |
 | :--- | :--- |
 | `Enter` | Envia a mensagem |
-| `Ctrl+E` | Alterna o nível de raciocínio (`none` ➔ `low` ➔ `medium` ➔ `high`) |
+| `Ctrl+E` | Alterna o nível de raciocínio (`none` ➔ `low` ➔ `medium` ➔ `high`); na API oficial Xiaomi MiMo, alterna pensamento desligado/ligado |
 | `Ctrl+O` | Alterna o modo de operação (`programação` ➔ `sistema` ➔ `plano`) |
 | `Ctrl+C` | Cancela geração em andamento / Pressione 2x para sair |
 
