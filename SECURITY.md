@@ -36,11 +36,15 @@ privileges as the user running `siliconflower`.
   the validated IP for the actual connection on the current runtime (Bun),
   so treat `web_fetch` as unsuitable for fetching untrusted, attacker-influenced
   URLs against sensitive internal endpoints.
-- In `plano` mode, only an explicit read-only allowlist is available. MCP,
-  hooks, subagents and persistence mutations are blocked by default.
+- In `plano` mode, an explicit allowlist permits workspace reads, web lookups,
+  user questions and session checklist updates. MCP tools, subagents and
+  persistent mutations are blocked. Tool hooks are disabled, but inline
+  `onSessionStart` and `onSessionEnd` hooks still run and can execute commands.
 - The system prompt in `sistema` mode instructs the model to warn before
   destructive or registry-level actions and to prefer non-destructive
-  commands.
+  commands. `programacao` and `sistema` change prompt focus only; neither
+  mode limits tool privileges. Only `plano` applies the read-only tool
+  allowlist.
 - `execute_command` is intentionally an arbitrary shell capability. File-tool
   guards do not sandbox PowerShell commands; only enable the agent where this
   trust level is acceptable.
@@ -49,8 +53,8 @@ privileges as the user running `siliconflower`.
 
 - Treat the API key (`~/.siliconflower/config.json`) like a password.
   The `show` command prints the key masked, but the raw file is plaintext.
-- Prefer `--mode programacao` for editing code and switch to `--mode
-  sistema` only when you intend the model to make system changes.
+- Choose `--mode programacao` or `--mode sistema` to set the model's focus,
+  not as a permission boundary. Both retain the same tool access.
 - Review the log (`bun run start -- logs`) periodically, especially if
   the agent has been busy.
 - If you put a destructive MCP server in your config, you trust the
