@@ -27,8 +27,10 @@ Requirements: Bun >= 1.3 (recommended) or Node >= 20 with `tsx`.
 - `src/llm.ts` -- OpenAI-compatible streaming adapter. Keep the tool-call
   loop provider-agnostic so a new backend is a variation of one function,
   not a redesign of the loop.
+- `src/reasoning.ts` -- Provider-specific reasoning behavior. Keep endpoint
+  detection and reasoning option selection here.
 - `src/tools.ts` -- Native tool implementations. Validate input paths with
-  the helpers in this file; never trust model output.
+  the helpers in `src/tools.ts` and `src/fs-util.ts`; never trust model output.
 - `src/mcp.ts` -- MCP client lifecycle. Treat MCP failures as warnings,
   not fatal errors -- the agent should still run with native tools.
 - `src/skills.ts`, `src/modes.ts`, `src/wizard.ts` -- user-facing config and
