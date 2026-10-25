@@ -73,8 +73,8 @@ export function startBackgroundCommand(command: string, cwd: string = process.cw
   try {
     child = exec(command, { cwd, shell, windowsHide: true, timeout }, (error, stdout, stderr) => {
       taskRecord.completedAt = new Date().toISOString();
-      stdoutBuf = stdout ? stdout.trim() : "";
-      stderrBuf = stderr ? stderr.trim() : "";
+      stdoutBuf = stdout ? String(stdout).trim() : "";
+      stderrBuf = stderr ? String(stderr).trim() : "";
 
       let finalOutput = stdoutBuf;
       if (stderrBuf) {
