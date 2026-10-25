@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Log Spam no Streaming (`src/llm.ts`):** cada delta de `tool_call` gerava uma linha INFO; agora o total é agregado em `toolCallChunks` no resumo do step.
+- **`read_skill` Indisponível em Subagentes (`src/services/subagent.ts`):** `run_task` passa a expor e executar `read_skill` igual à TUI principal.
+- **Tipagem de Saída de `execute_command`/Background (`src/tools.ts`, `src/services/background-tasks.ts`):** coerção segura de `stdout`/`stderr` (`string | Buffer`).
+
 ## [0.2.6] - 2026-10-17
 
 ### Added
