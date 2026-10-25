@@ -980,9 +980,11 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       try {
         await log("info", `execute_command: ${cmd} (cwd=${workDir})`);
         const { stdout, stderr } = await execAsync(cmd, execOptions);
+        const outStr = String(stdout ?? "").trim();
+        const errStr = String(stderr ?? "").trim();
         let output = "";
-        if (stdout.trim()) output += stdout.trim();
-        if (stderr.trim()) output += (output ? "\n--- STDERR ---\n" : "") + stderr.trim();
+        if (outStr) output += outStr;
+        if (errStr) output += (output ? "\n--- STDERR ---\n" : "") + errStr;
         if (!output) output = "(comando executado com sucesso sem saída de texto)";
         const processed = await processToolOutput(output);
         return { result: processed, isError: false };
