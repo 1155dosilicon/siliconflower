@@ -1,11 +1,11 @@
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
 import { join } from "node:path";
 import { readFile, access } from "node:fs/promises";
 import { log } from "../logger.js";
 import { getWorkspaceDataDir, getGlobalDataDir } from "../fs-util.js";
+import { runPowerShell, describeFailure } from "../shell.js";
+import { resolveWorkspaceRoot } from "../project.js";
 
-const execAsync = promisify(exec);
+const HOOK_TIMEOUT_MS = 30_000;
 
 export type HookEvent = "preTool" | "postTool" | "onEdit" | "onCommand" | "onSessionStart" | "onSessionEnd";
 
@@ -49,7 +49,7 @@ async function readHooksFile(path: string): Promise<HookConfig | undefined> {
 
 export async function loadHooksConfig(cwd: string = process.cwd()): Promise<HookConfig | undefined> {
   const workspaceHooksFile = join(getWorkspaceDataDir(cwd), "hooks.json");
-  const legacyHooksFile = join(cwd, ".siliconflower", "hooks.json");
+  const legacyHooksFile = join(resolveWorkspaceRoot(cwd), ".siliconflower", "hooks.json");
   const globalHooksFile = join(getGlobalDataDir(), "hooks.json");
 
   return (
@@ -91,15 +91,13 @@ export async function runHook(
       SILICONFLOWER_FILE_PATH: context.filePath || "",
     };
 
-    const { stdout, stderr } = await execAsync(command, {
-      cwd: effectiveCwd,
-      env,
-      windowsHide: true,
-      timeout: 30000,
-      shell: "powershell.exe",
-    });
-
-    const output = (stdout + (stderr ? `\nStderr: ${stderr}` : "")).trim();
+    const res = await runPowerShell(command, { cwd: effectiveCwd, env, timeout: HOOK_TIMEOUT_MS });
+    const output = (res.stdout + (res.stderr ? `\nStderr: ${res.stderr}` : "")).trim();
+    const failure = describeFailure(res, HOOK_TIMEOUT_MS);
+    if (failure) {
+      await log("error", `Erro ao executar hook [${event}]: ${failure}`);
+      return { executed: true, command, output, error: failure };
+    }
     return { executed: true, command, output };
   } catch (e: any) {
     const errorMsg = e.message || String(e);
