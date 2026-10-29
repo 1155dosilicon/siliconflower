@@ -1,15 +1,59 @@
 # Changelog
 
-All notable changes to this project are documented here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
-adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Todas as mudanças relevantes ficam registradas aqui. O formato segue o
+[Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e o projeto usa
+[Versionamento Semântico](https://semver.org/lang/pt-BR/). Uma linha por item.
 
 ## [Unreleased]
 
+### Changed
+- Documentação reorganizada: novo `AGENTS.md` curto (carregado automaticamente por agentes; `CLAUDE.md` aponta para ele), `LLMS.md` virou `docs/ARCHITECTURE.md` (enxuto, sem repetir README e schemas), `WINDOWS_BACKPORT.md` removido (já aplicado e desatualizado), `CONTRIBUTING.md` e `SECURITY.md` em pt-BR.
+- `SECURITY.md`: corrigida a descrição da proteção de caminhos em buscas recursivas e o canal de reporte; adicionado o risco de *prompt injection* via `SILICONFLOWER.md`/`AGENTS.md` de repositórios de terceiros.
+
+## [0.2.8] - 2026-10-29
+
+### Added
+- Projeto ativado por `SILICONFLOWER.md` ou `AGENTS.md` (na pasta ou acima, nunca em `~`); o conteúdo vira instruções no prompt. Sem o arquivo, a memória de projeto fica desligada (`src/project.ts`).
+- Comando `siliconflower init` (`--agents` para `AGENTS.md`); `show` e a barra de status mostram o projeto ativo.
+
+### Changed
+- Memória sob demanda: o prompt leva só o índice (nome e descrição); o conteúdo é lido com `recall_memory` (`src/services/memory.ts`).
+- Workspace identificado pela raiz do projeto: subpastas compartilham memórias, artefatos e hooks (`src/fs-util.ts`).
+- Contador de tokens inclui instruções do projeto e índice de memórias.
+
 ### Fixed
-- **Log Spam no Streaming (`src/llm.ts`):** cada delta de `tool_call` gerava uma linha INFO; agora o total é agregado em `toolCallChunks` no resumo do step.
-- **`read_skill` Indisponível em Subagentes (`src/services/subagent.ts`):** `run_task` passa a expor e executar `read_skill` igual à TUI principal.
-- **Tipagem de Saída de `execute_command`/Background (`src/tools.ts`, `src/services/background-tasks.ts`):** coerção segura de `stdout`/`stderr` (`string | Buffer`).
+- Descrições de memória com quebra de linha quebravam o frontmatter; linhas `name:` no corpo eram lidas como metadado.
+- Ler memórias criava diretórios; um arquivo ilegível escondia o diretório inteiro.
+
+## [0.2.7] - 2026-10-29
+
+### Fixed
+- `Ctrl+C` fechava o app em vez de cancelar a resposta (Ink `exitOnCtrlC`).
+- Subagentes eram mortos após 60 s pelo timeout genérico de ferramentas.
+- `web_fetch` cortava o HTML bruto em `maxChars` e devolvia só o menu da página.
+- Saída do PowerShell com acentos corrompidos (CP850); comandos carregavam o `$PROFILE` (novo `src/shell.ts`).
+- Kill de comandos deixava processos filhos órfãos.
+- Histórico não era compactado dentro do loop de ferramentas.
+- Modelo esquecia as chamadas de ferramenta entre mensagens.
+- `api.openai.com` rejeitava `max_tokens` em modelos de raciocínio.
+- SSRF via IPv6 com IPv4 embutido (`[::ffff:127.0.0.1]`).
+- `siliconflower config` gravava variáveis de ambiente no `config.json`.
+- `--model` não valia para subagentes; ferramentas de subagentes não eram canceláveis.
+- MCP: sem cancelamento, `isError` ignorado, falhas escritas no stderr por cima da TUI.
+- Hook `onCommand` nunca lia `hooks.json`.
+- `edit_file`/`apply_patch` misturavam LF em arquivos CRLF.
+- Artefatos: aspas quebravam metadados; trocar o tipo deixava dois arquivos.
+- `htmlToMarkdown` decodificava entidades duas vezes e corrompia emojis.
+- `grep_content` ignorava pastas `bin/`; `repo_map` gastava vagas com extensões sem extrator.
+- `ask_question` não perguntava ao usuário; agora pausa e espera a resposta na TUI.
+- `enter_worktree` dizia "ativar" sem mudar o cwd; `.worktrees/` aparecia no `git status`.
+- `attrib.exe` rodava a cada mensagem.
+- Falha ao carregar memórias travava a TUI.
+- Limite de 50 passos terminava em silêncio.
+- `run_task`, `save_memory` e `create_artifact` mascaravam erros; `search_files` truncava sem avisar.
+- Valores inválidos de `--reasoning`/`--mode` eram ignorados.
+- `install.ps1` sem BOM mostrava acentos corrompidos no PowerShell 5.1.
+- (de 0.2.6) Spam de log por delta de `tool_call`; `read_skill` indisponível em subagentes; tipagem de `stdout`/`stderr`.
 
 ## [0.2.6] - 2026-10-17
 
@@ -153,11 +197,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - First-run wizard with provider presets for SiliconFlow, OpenRouter,
   OpenAI, and Anthropic.
 
-[Unreleased]: https://github.com/siliconflower/siliconflower/compare/siliconflower-0.2.6...HEAD
-[0.2.6]: https://github.com/siliconflower/siliconflower/compare/0.2.5...siliconflower-0.2.6
-[0.2.5]: https://github.com/siliconflower/siliconflower/compare/0.2.4...0.2.5
-[0.2.4]: https://github.com/siliconflower/siliconflower/compare/0.2.3...0.2.4
-[0.2.3]: https://github.com/siliconflower/siliconflower/compare/0.2.2...0.2.3
-[0.2.2]: https://github.com/siliconflower/siliconflower/compare/0.2.1...0.2.2
-[0.2.1]: https://github.com/siliconflower/siliconflower/compare/0.1.0...0.2.1
-[0.1.0]: https://github.com/siliconflower/siliconflower/releases/tag/0.1.0
+[Unreleased]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.2.6...HEAD
+[0.2.6]: https://github.com/1155dosilicon/siliconflower/compare/0.2.5...siliconflower-0.2.6
+[0.2.5]: https://github.com/1155dosilicon/siliconflower/compare/0.2.4...0.2.5
+[0.2.4]: https://github.com/1155dosilicon/siliconflower/compare/0.2.3...0.2.4
+[0.2.3]: https://github.com/1155dosilicon/siliconflower/compare/0.2.2...0.2.3
+[0.2.2]: https://github.com/1155dosilicon/siliconflower/compare/0.2.1...0.2.2
+[0.2.1]: https://github.com/1155dosilicon/siliconflower/compare/0.1.0...0.2.1
+[0.1.0]: https://github.com/1155dosilicon/siliconflower/releases/tag/0.1.0
