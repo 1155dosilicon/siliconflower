@@ -1,6 +1,6 @@
 {
   "name": "siliconflower",
-  "version": "0.2.6",
+  "version": "0.2.8",
   "description": "CLI/TUI AI agent for Windows with MCP, reasoning control, skills, and OpenAI-compatible backends.",
   "os": [
     "win32"
@@ -8,13 +8,13 @@
   "type": "module",
   "license": "MIT",
   "author": "siliconflower contributors",
-  "homepage": "https://github.com/siliconflower/siliconflower#readme",
+  "homepage": "https://github.com/1155dosilicon/siliconflower#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/siliconflower/siliconflower.git"
+    "url": "https://github.com/1155dosilicon/siliconflower.git"
   },
   "bugs": {
-    "url": "https://github.com/siliconflower/siliconflower/issues"
+    "url": "https://github.com/1155dosilicon/siliconflower/issues"
   },
   "keywords": [
     "ai",
