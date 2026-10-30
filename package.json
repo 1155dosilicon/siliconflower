@@ -1,6 +1,6 @@
 {
   "name": "siliconflower",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "CLI/TUI AI agent for Windows with MCP, reasoning control, skills, and OpenAI-compatible backends.",
   "os": [
     "win32"
