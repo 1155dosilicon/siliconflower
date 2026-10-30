@@ -6,6 +6,8 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-10-29
+
 ### Fixed
 - Logo quebrava em janelas estreitas: agora escolhe a versão completa, "SILICON/FLOWER" empilhado ou texto simples conforme a largura (`src/ascii.ts`).
 - Redimensionar a janela deixava pedaços de telas antigas (logos empilhados, linhas duplicadas): depois de 150 ms sem redimensionar, a TUI limpa a tela e redesenha o quadro inteiro (`src/App.tsx`). Teste em emulador de terminal: `tests/tui-resize.test.ts`.
@@ -201,7 +203,8 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 - First-run wizard with provider presets for SiliconFlow, OpenRouter,
   OpenAI, and Anthropic.
 
-[Unreleased]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.2.6...HEAD
+[Unreleased]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.2.9...HEAD
+[0.2.9]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.2.6...siliconflower-0.2.9
 [0.2.6]: https://github.com/1155dosilicon/siliconflower/compare/0.2.5...siliconflower-0.2.6
 [0.2.5]: https://github.com/1155dosilicon/siliconflower/compare/0.2.4...0.2.5
 [0.2.4]: https://github.com/1155dosilicon/siliconflower/compare/0.2.3...0.2.4
