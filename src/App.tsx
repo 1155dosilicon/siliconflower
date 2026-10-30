@@ -15,7 +15,7 @@ import { log, logFile } from "./logger.js";
 import type { AppConfig, ChatMessage, McpTool, ReasoningLevel, StreamEvent, TodoItem } from "./types.js";
 import { isToolAllowedInMode } from "./tool-policy.js";
 import { runHook } from "./core/hooks.js";
-import { clearScreen, restoreTerminal } from "./terminal.js";
+import { clearScreen, restoreTerminal, ANSI_CLEAR_SCREEN } from "./terminal.js";
 import { reasoningLabel, reasoningOptions } from "./reasoning.js";
 import { findProject } from "./project.js";
 import { basename } from "node:path";
@@ -38,9 +38,11 @@ interface PendingQuestion {
   reject: (err: Error) => void;
 }
 
-const App: React.FC<AppProps> = ({ config, overrides }) => {
+const RESIZE_SETTLE_MS = 150;
+
+export const App: React.FC<AppProps> = ({ config, overrides }) => {
   const { exit } = useApp();
-  const { stdout } = useStdout();
+  const { stdout, write: writeToStdout } = useStdout();
 
   const [model] = useState(overrides.model ?? config.model);
   const [reasoning, setReasoning] = useState<ReasoningLevel>(overrides.reasoning ?? config.reasoning);
@@ -76,14 +78,37 @@ const App: React.FC<AppProps> = ({ config, overrides }) => {
     return onTodosChange((updated) => setTodosState([...updated]));
   }, []);
 
-  const { art, color } = renderLogo();
+  // Re-picked on every resize (cols state), so the logo never wraps in narrow windows.
+  const { art, color } = renderLogo(cols);
 
+  // Ink only erases "the N lines of the previous frame" on resize, but the terminal has
+  // already reflowed those lines into a different number of rows, so fragments of old
+  // frames pile up (e.g. a stacked logo under the full one). Once resizing settles, wipe
+  // the screen and repaint the whole frame.
+  const [repaintTick, setRepaintTick] = useState(0);
   useEffect(() => {
     if (!stdout) return;
-    const handler = () => setCols(stdout.columns);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const handler = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        setCols(stdout.columns);
+        setRepaintTick((t) => t + 1);
+      }, RESIZE_SETTLE_MS);
+    };
     stdout.on("resize", handler);
-    return () => { stdout.off("resize", handler); };
+    return () => {
+      if (timer) clearTimeout(timer);
+      stdout.off("resize", handler);
+    };
   }, [stdout]);
+
+  useEffect(() => {
+    if (repaintTick === 0) return;
+    // Ink's write(): resets its frame bookkeeping, writes our data (clear screen + scrollback,
+    // cursor home) and then redraws the full current frame from scratch.
+    writeToStdout(ANSI_CLEAR_SCREEN);
+  }, [repaintTick, writeToStdout]);
 
   useEffect(() => {
     const mcp = new McpManager();

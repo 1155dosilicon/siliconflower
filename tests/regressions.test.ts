@@ -11,6 +11,7 @@ import { smartEditFile } from "../src/services/smart-edit.js";
 import { runBuiltin } from "../src/tools.js";
 import { extractSymbols, generateRepoMap } from "../src/services/repomap.js";
 import { searchContent } from "../src/grep.js";
+import { renderLogo } from "../src/ascii.js";
 import type { AppConfig, ChatMessage } from "../src/types.js";
 
 const tmp = join(tmpdir(), `sf_regressions_${Date.now()}`);
@@ -175,6 +176,22 @@ describe("ask_question", () => {
   test("tells the model to relay the question when there is no UI", async () => {
     const res = await runBuiltin("ask_question", { question: "Qual?" });
     expect(res.result).toContain("SEM INTERFACE INTERATIVA");
+  });
+});
+
+describe("logo", () => {
+  test("never wider than the terminal (wrapping breaks the block art)", () => {
+    for (const cols of [200, 101, 100, 80, 60, 52, 51, 40, 20]) {
+      const { art } = renderLogo(cols);
+      const widest = Math.max(...art.split("\n").map((l) => [...l].length));
+      expect(widest).toBeLessThan(cols);
+    }
+  });
+
+  test("uses the full logo, then SILICON/FLOWER stacked, then plain text", () => {
+    expect(renderLogo(120).art.split("\n").length).toBe(6);
+    expect(renderLogo(80).art.split("\n").length).toBe(12);
+    expect(renderLogo(30).art).toBe("SILICONFLOWER");
   });
 });
 
