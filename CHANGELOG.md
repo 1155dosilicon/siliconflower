@@ -6,6 +6,10 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Fixed
+- Logo quebrava em janelas estreitas: agora escolhe a versão completa, "SILICON/FLOWER" empilhado ou texto simples conforme a largura (`src/ascii.ts`).
+- Redimensionar a janela deixava pedaços de telas antigas (logos empilhados, linhas duplicadas): depois de 150 ms sem redimensionar, a TUI limpa a tela e redesenha o quadro inteiro (`src/App.tsx`). Teste em emulador de terminal: `tests/tui-resize.test.ts`.
+
 ### Changed
 - Documentação reorganizada: novo `AGENTS.md` curto (carregado automaticamente por agentes; `CLAUDE.md` aponta para ele), `LLMS.md` virou `docs/ARCHITECTURE.md` (enxuto, sem repetir README e schemas), `WINDOWS_BACKPORT.md` removido (já aplicado e desatualizado), `CONTRIBUTING.md` e `SECURITY.md` em pt-BR.
 - `SECURITY.md`: corrigida a descrição da proteção de caminhos em buscas recursivas e o canal de reporte; adicionado o risco de *prompt injection* via `SILICONFLOWER.md`/`AGENTS.md` de repositórios de terceiros.

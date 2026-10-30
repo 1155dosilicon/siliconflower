@@ -29,6 +29,8 @@ Saídas de ferramenta acima de 32 mil caracteres são truncadas (início e fim).
 
 Com o agente ocioso, `Ctrl+C` sai.
 
+**Redimensionamento**: o Ink 5 apaga "as N linhas do quadro anterior", mas o terminal já refez a quebra dessas linhas em outra quantidade de linhas, e sobram fragmentos. Por isso, 150 ms depois do último `resize`, a `App` chama `useStdout().write(ANSI_CLEAR_SCREEN)`. Esse `write` do Ink zera a contabilidade do quadro, limpa a tela e o scrollback e redesenha o quadro inteiro. O logo (`ascii.ts`) escolhe a variante pela largura: completo, empilhado ou texto.
+
 ## Provedores e raciocínio
 
 Todos os provedores usam Chat Completions compatível com OpenAI (`llm.ts`):
