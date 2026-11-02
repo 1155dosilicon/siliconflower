@@ -18,7 +18,7 @@ export async function* streamChat(opts: ChatOptions): AsyncGenerator<StreamEvent
     yield* streamOpenAI(opts);
   } catch (err) {
     if (isAbortError(err)) throw err;
-    void log("error", `streamChat: ${err instanceof Error ? err.message : String(err)}`);
+    void log("error", `streamChat: ${describeApiError(err)}`);
     yield { type: "error", message: enrichError(err, opts.config) };
   }
 }
@@ -141,6 +141,22 @@ export function isOfficialOpenAIEndpoint(baseURL: string): boolean {
 const MAX_OUTPUT_TOKENS = 16384;
 export const MAX_STEPS = 50;
 
+const GENERIC_RETRY_DELAY_MS = 1000;
+
+/**
+ * Xiaomi MiMo sometimes answers a valid request with HTTP 400 and only "Request failed"
+ * (the same request works right after). Any 400 that explains itself is a real error.
+ */
+function isGenericRejection(err: unknown): boolean {
+  const e = err as { status?: number; error?: { message?: string } };
+  return e?.status === 400 && /^request failed\.?$/i.test(e.error?.message?.trim() ?? "");
+}
+
+function describeApiError(err: unknown): string {
+  const e = err as { status?: number; error?: unknown; message?: string };
+  return `HTTP ${e?.status}: ${JSON.stringify(e?.error ?? e?.message ?? String(err)).slice(0, 500)}`;
+}
+
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("Abortado", "AbortError");
 }
@@ -207,12 +223,19 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
     void log("info", `LLM step ${step}: conectando (timeout=${STREAM_CONNECT_TIMEOUT_MS / 1000}s)`);
     // Providers differ in which optional parameters they accept. Each rejected parameter
     // is adjusted at most once and remembered for the following steps.
+    let retriedGeneric = false;
     for (let attempt = 0; !stream; attempt++) {
       try {
         stream = await withConnectTimeout(makeRequest(supportsEffort), signal, () => requestController?.abort());
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        if (attempt < 3 && supportsEffort && effort && /reasoning/i.test(msg)) {
+        if (!retriedGeneric && isGenericRejection(err)) {
+          // Refused before any output, so repeating it costs nothing and runs no tool.
+          retriedGeneric = true;
+          void log("warn", `Provedor recusou o pedido sem explicar; repetindo uma vez: ${describeApiError(err)}`);
+          await new Promise((resolve) => setTimeout(resolve, GENERIC_RETRY_DELAY_MS));
+          throwIfAborted(signal);
+        } else if (attempt < 3 && supportsEffort && effort && /reasoning/i.test(msg)) {
           supportsEffort = false;
           void log("warn", "Provedor rejeitou reasoning_effort; repetindo sem ele");
         } else if (attempt < 3 && tokenParam === "max_tokens" && /max_tokens/.test(msg) && /max_completion_tokens/.test(msg)) {
