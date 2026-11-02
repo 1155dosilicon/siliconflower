@@ -123,7 +123,8 @@ function startFailureMessage(error: unknown): string {
   if (error instanceof AgentStartError) {
     switch (error.failure) {
       case "config_required":
-        return "O provedor de IA ainda não foi configurado.\n\nAbra um terminal, rode \"siliconflower config\" e tente de novo.";
+        // By its full path: installing the app does not put the command on the PATH.
+        return `O provedor de IA ainda não foi configurado.\n\nAbra um terminal, rode o comando abaixo e tente de novo:\n"${agentExe()}" config`;
       case "spawn_failed":
         return `Não consegui iniciar o agente em:\n${agentExe()}\n\n${error.detail}`;
       case "timeout":

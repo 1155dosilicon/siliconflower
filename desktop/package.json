@@ -5,11 +5,13 @@
   "description": "Janela de desktop do Siliconflower.",
   "private": true,
   "license": "MIT",
+  "author": "siliconflower contributors",
   "main": "build/main.cjs",
   "scripts": {
     "postinstall": "install-electron",
     "build": "bun run build.ts",
     "start": "bun run build.ts && electron .",
+    "dist": "bun run build.ts && electron-builder --win nsis --x64",
     "typecheck": "tsc --noEmit"
   },
   "trustedDependencies": [
@@ -18,6 +20,7 @@
   "devDependencies": {
     "@types/node": "^26.6.6",
     "electron": "^45.2.1",
+    "electron-builder": "^26.18.0",
     "typescript": "^7.0.2"
   }
 }

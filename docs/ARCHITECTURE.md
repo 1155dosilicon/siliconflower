@@ -46,6 +46,8 @@ Com o agente ocioso, `Ctrl+C` sai.
 
 Protocolo de `--managed` (`gui/managed.ts`), uma linha JSON no stdout: `{"event":"ready","url":...}` ou `{"event":"error","code":"config_required"}`. Nesse modo não há assistente nem navegador, e o encerramento por falta de página é desligado: quem decide é o app. Ele fecha o stdin para pedir a saída limpa, com hooks e MCP, e usa `taskkill /T /F` se o agente não sair em 8 s. Como o stdin também fecha quando o app morre, o agente não fica órfão nesse caso. Se o agente morrer, a janela pergunta se deve reabrir; a conversa se perde.
 
+**Instalador** (`desktop/electron-builder.yml`): NSIS por usuário, em `%LOCALAPPDATA%\Programs\siliconflower-desktop`, pasta que vem do `name` em `desktop/package.json`. Ela precisa ser diferente de `Programs\siliconflower`, usada pelo CLI (`scripts/install.ps1`), senão desinstalar o app apagaria o CLI. O agente vai em `resources\`, fora do asar, porque o Windows não executa arquivos de dentro dele. O ícone é gerado por `desktop/scripts/make-icon.ts`.
+
 As proteções de acesso estão no [SECURITY.md](../SECURITY.md). O Markdown do modelo vira uma árvore de nós em `client/markdown.js` e só depois DOM, com `textContent` e tags fixas; a página nunca usa `innerHTML`.
 
 ## Provedores e raciocínio

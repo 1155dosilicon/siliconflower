@@ -128,18 +128,23 @@ As opções `--model`, `--reasoning`, `--mode`, `--base-url` e `--api-key` tamb�
 
 Enquanto o modelo raciocina, a página mostra só um aviso **Pensando...**, sem o texto do raciocínio. Recarregar a página mantém a conversa. Fechar a aba encerra o agente depois de cerca de 15 segundos, e a conversa se perde, como ao sair da TUI; `Ctrl+C` no terminal encerra na hora. A URL traz um token de acesso: não a compartilhe (veja [SECURITY.md](SECURITY.md)).
 
-### App de Desktop (em desenvolvimento)
-A mesma interface em janela própria, sem terminal nem navegador. Ainda não há instalador; por enquanto, rode a partir do código-fonte:
+### App de Desktop
+A mesma interface em janela própria, sem terminal nem navegador. Para gerar o instalador a partir do código-fonte:
 
 ```powershell
-bun run build                  # gera o agente (dist/siliconflower.exe)
 bun install --cwd desktop      # só na primeira vez: baixa o Electron
-bun run desktop
+bun run desktop:dist           # gera dist-desktop\Siliconflower-Setup-<versão>.exe
 ```
+
+Execute o instalador com dois cliques. Ele instala só para o seu usuário, sem pedir administrador, e cria atalhos no menu Iniciar e na área de trabalho. O app ocupa cerca de 420 MB, porque traz o agente e o Electron, e não coloca `siliconflower` no `PATH`: o modo terminal continua sendo instalado à parte, com `npm run install:bin`. Para remover, use **Configurações > Aplicativos**; seus projetos recentes e sua configuração continuam guardados.
+
+O instalador ainda não é assinado, então o Windows SmartScreen pode avisar na primeira execução: clique em **Mais informações** e em **Executar assim mesmo**.
+
+Para desenvolver sem instalar: `bun run build` uma vez e depois `bun run desktop`.
 
 Na tela inicial, escolha a pasta do projeto. Cada projeto abre em sua própria janela, com seu agente e sua conversa; `Ctrl+O` abre outra pasta e `Ctrl+Shift+O` mostra os recentes. Fechar a janela encerra o agente e os comandos em background daquele projeto, e a conversa se perde.
 
-- **Configuração:** ainda é feita no terminal, com `siliconflower config`. Sem ela, o app avisa e não abre o projeto.
+- **Configuração:** ainda é feita no terminal. Sem ela, o app avisa, mostra o comando a rodar e não abre o projeto.
 - **Variáveis de ambiente:** aberto por atalho, o app herda o ambiente do Windows, não o de um terminal. Variáveis definidas só numa sessão (`SILICONFLOWER_API_KEY`, ou um `PATH` usado por MCP e hooks) não chegam ao agente; defina-as nas variáveis de ambiente do usuário.
 
 ### Modos de Trabalho

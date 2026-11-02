@@ -26,7 +26,7 @@ Antes de dar uma tarefa por concluída: `bun run typecheck` e `bun test`.
 - `src/shell.ts`: toda execução de PowerShell. `project.ts`: detecção de projeto (`SILICONFLOWER.md`/`AGENTS.md`).
 - `src/services/`: memória, subagentes, tarefas em background, web, artefatos, worktrees, repomap, smart-edit.
 - `src/core/hooks.ts`: hooks. `mcp.ts`: cliente MCP.
-- `desktop/`: app Electron, projeto à parte (`bun install --cwd desktop`, `bun run desktop`, `bun run typecheck:desktop`). `main.ts`: janelas e segurança. `agent-process.ts`: ciclo de vida do `siliconflower.exe gui --managed`, um por projeto.
+- `desktop/`: app Electron, projeto à parte (`bun install --cwd desktop`, `bun run desktop`, `bun run typecheck:desktop`). `main.ts`: janelas e segurança. `agent-process.ts`: ciclo de vida do `siliconflower.exe gui --managed`, um por projeto. `bun run desktop:dist` gera o instalador em `dist-desktop/`.
 
 ## Regras (cada uma já causou bug)
 
