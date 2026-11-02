@@ -99,7 +99,6 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.waiting { color: var(--muted); font-style: italic; }
 
 .jump {
   position: sticky;
@@ -142,9 +141,8 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
 .markdown th { background: var(--surface-2); }
 
 /* Thinking */
-.thinking { margin-bottom: 10px; color: var(--muted); font-size: 14px; }
-.thinking summary { cursor: pointer; }
-.thinking-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow-y: auto; margin-top: 6px; padding-left: 12px; border-left: 2px solid var(--border); }
+.thinking { display: inline-flex; align-items: center; gap: 10px; padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--muted); font-size: 14px; }
+.thinking-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1s ease-in-out infinite alternate; }
 
 /* Tools */
 .tool { margin-bottom: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 13px; }
@@ -160,7 +158,7 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
 .tool pre { margin: 0; padding: 4px 12px 10px; font-family: var(--mono); max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 @keyframes pulse { to { opacity: .3; } }
-@media (prefers-reduced-motion: reduce) { .tool.running .tool-dot { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .tool.running .tool-dot, .thinking-dot { animation: none; } }
 
 /* Question */
 .question { margin-bottom: 20px; padding: 14px 16px; border: 1px solid var(--accent); border-radius: 10px; background: var(--surface); }

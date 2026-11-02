@@ -157,10 +157,34 @@ describe("GUI protocol", () => {
 
     const tool = await client.waitFor((m) => m.type === "tool" && m.activity.result !== undefined);
     expect(tool.activity).toMatchObject({ id: "c1", name: "read_file", result: "conteudo", afterMessage: 1 });
-    await client.waitFor((m) => m.type === "thinking" && m.text === "hum");
     const end = await client.waitFor((m) => m.type === "state" && m.changes.streaming === false);
     expect(end.changes.messages.map((x: any) => x.content)).toEqual(["oi\nmundo", "pronto"]);
     client.ws.close();
+  });
+
+  test("the model's reasoning text never reaches the page", async () => {
+    const secretThought = "pensamento-que-nao-aparece";
+    const { server, base } = setup([
+      async function* () {
+        yield { type: "thinking", text: secretThought };
+        yield { type: "text", text: "pronto" };
+        yield { type: "done", content: "pronto", reasoning: secretThought, messages: [{ role: "assistant", content: "pronto" }] };
+      },
+    ]);
+    const cookie = await login(server);
+    const client = await connect(base, cookie);
+    await client.waitFor((m) => m.type === "hello");
+    client.ws.send(JSON.stringify({ type: "send", text: "oi" }));
+    await client.waitFor((m) => m.type === "state" && m.changes.streaming === false);
+    expect(JSON.stringify(client.received)).not.toContain(secretThought);
+    client.ws.close();
+
+    // A page opened afterwards gets the history through hello.
+    const late = await connect(base, cookie);
+    const hello = await late.waitFor((m) => m.type === "hello");
+    expect(hello.state.messages).toHaveLength(2);
+    expect(JSON.stringify(hello)).not.toContain(secretThought);
+    late.ws.close();
   });
 
   test("calls with a repeated provider id stay separate", async () => {

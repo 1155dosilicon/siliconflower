@@ -9,7 +9,6 @@ let socket = null;
 let reconnectAttempts = 0;
 let state = null;
 let activities = [];
-let thinking = "";
 let renderedMessages = 0;
 let renderScheduled = false;
 let forceScroll = false;
@@ -126,17 +125,9 @@ function messageNode(message) {
     node.append(el("div", "bubble", message.content));
     return node;
   }
-  if (message.reasoning) node.append(thinkingNode(message.reasoning, false));
   const body = node.appendChild(el("div", "markdown"));
   markdownInto(body, message.content);
   return node;
-}
-
-function thinkingNode(text, open) {
-  const details = el("details", "thinking");
-  details.open = open;
-  details.append(el("summary", "", open ? "Pensando..." : "Raciocínio"), el("div", "thinking-text", text));
-  return details;
 }
 
 function toolPreview(activity) {
@@ -206,22 +197,22 @@ function appendNewMessages() {
 
 function renderLive() {
   const live = $("live");
-  const previous = live.querySelector(".thinking");
-  const keepClosed = previous && !previous.open;
+  // A pending question means the agent is waiting for the user, not thinking.
+  const thinking = state.streaming && !state.liveText && !state.question;
+  // Rebuilding the box at every update would restart its animation.
+  if (thinking && live.querySelector(".thinking")) return;
   live.replaceChildren();
-  if (!state.streaming) return;
+  if (!state.streaming || (!thinking && !state.liveText)) return;
   const wrapper = live.appendChild(el("article", "message assistant"));
-  if (thinking) {
-    const node = thinkingNode(thinking, !keepClosed);
-    wrapper.append(node);
-    const text = node.querySelector(".thinking-text");
-    text.scrollTop = text.scrollHeight;
-  }
-  if (state.liveText) {
-    markdownInto(wrapper.appendChild(el("div", "markdown")), state.liveText);
-  } else if (!thinking) {
-    wrapper.append(el("div", "waiting", "Pensando..."));
-  }
+  if (thinking) wrapper.append(thinkingBox());
+  else markdownInto(wrapper.appendChild(el("div", "markdown")), state.liveText);
+}
+
+function thinkingBox() {
+  const box = el("div", "thinking");
+  box.setAttribute("role", "status");
+  box.append(el("span", "thinking-dot"), el("span", "", "Pensando..."));
+  return box;
 }
 
 /* ---------------------------------- Page state ---------------------------------- */
@@ -276,7 +267,8 @@ function renderChrome() {
   reasoning.value = state.reasoning;
   reasoning.disabled = state.streaming;
 
-  $("status").textContent = state.status;
+  // The thinking box already says it, right above.
+  $("status").textContent = state.status.includes("pensando") ? "" : state.status;
   $("status").classList.toggle("busy", state.streaming);
   const tokens = Math.max(state.estimatedTokens, state.apiTokens);
   $("stats").textContent = `${state.model} · ${state.toolCount} ferramentas · ${state.skillCount} skills · ${formatTokens(tokens)} tokens`;
@@ -356,7 +348,6 @@ function fillSelect(select, options) {
 function handleHello(message) {
   state = message.state;
   activities = message.activities;
-  thinking = message.thinking;
   questionShown = null;
   const { meta } = message;
   fillSelect($("mode"), meta.modes.map((value) => ({ value, label: value })));
@@ -396,11 +387,7 @@ function connect() {
         return;
       case "state":
         if (!state) return;
-        if (message.changes.streaming === true) thinking = "";
         state = { ...state, ...message.changes };
-        break;
-      case "thinking":
-        thinking += message.text;
         break;
       case "tool":
         handleTool(message.activity);
