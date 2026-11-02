@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Siliconflower</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span aria-hidden="true">🌸</span> Siliconflower</div>
+    <div id="project" class="project"></div>
+    <div id="connection" class="connection" role="status"></div>
+  </header>
+
+  <div class="layout">
+    <main id="scroller" class="scroller">
+      <div class="column">
+        <div id="empty" class="empty">
+          <h1>Como posso ajudar?</h1>
+          <p id="empty-cwd"></p>
+        </div>
+        <div id="timeline"></div>
+        <div id="live"></div>
+        <form id="question" class="question" hidden>
+          <div class="question-title">Pergunta da IA</div>
+          <div id="question-text" class="markdown"></div>
+          <div id="question-options" class="question-options"></div>
+          <div class="question-row">
+            <input id="question-input" type="text" autocomplete="off" aria-label="Sua resposta" placeholder="Sua resposta...">
+            <button type="submit" class="primary">Responder</button>
+          </div>
+        </form>
+      </div>
+      <button id="jump" type="button" class="jump" hidden>↓ Ir para o fim</button>
+    </main>
+
+    <aside id="todos" class="todos" hidden aria-label="Tarefas">
+      <h2>Tarefas</h2>
+      <ul id="todo-list"></ul>
+    </aside>
+  </div>
+
+  <footer class="composer">
+    <div class="column">
+      <div id="error" class="error" role="alert" hidden></div>
+      <form id="composer-form" class="input-box">
+        <textarea id="input" rows="1" placeholder="Envie uma mensagem..." aria-label="Mensagem"></textarea>
+        <button id="action" type="submit" class="primary">Enviar</button>
+      </form>
+      <div class="controls">
+        <label>Modo <select id="mode"></select></label>
+        <label>Pensamento <select id="reasoning"></select></label>
+        <span id="status" class="status"></span>
+        <span id="stats" class="stats"></span>
+      </div>
+      <div class="hint">Enter envia · Shift+Enter quebra a linha · Esc cancela a resposta</div>
+    </div>
+  </footer>
+</body>
+</html>

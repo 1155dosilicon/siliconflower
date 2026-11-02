@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>Siliconflower</title>
+  <link rel="stylesheet" href="home.css">
+  <script src="home.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <img src="flower.svg" alt="" width="56" height="56">
+      <h1>Siliconflower</h1>
+      <p>Escolha a pasta em que o agente vai trabalhar.</p>
+    </header>
+    <button id="pick" class="primary" type="button">Abrir pasta...</button>
+    <p id="status" role="status" hidden>Abrindo o projeto...</p>
+    <section aria-labelledby="recents-title">
+      <h2 id="recents-title">Projetos recentes</h2>
+      <p id="empty" hidden>Nenhum projeto aberto ainda.</p>
+      <ul id="recents"></ul>
+    </section>
+  </main>
+</body>
+</html>

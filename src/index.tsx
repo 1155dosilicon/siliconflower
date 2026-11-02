@@ -14,6 +14,7 @@ import { findProject, markerIn, resolveWorkspaceRoot, DEFAULT_MARKER, PROJECT_TE
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { APP_VERSION } from "./version.js";
+import { emitManagedEvent } from "./gui/managed.js";
 
 const program = new Command();
 
@@ -27,29 +28,43 @@ program
   .option("--base-url <url>", "override the API base URL")
   .option("--api-key <key>", "override the API key")
   .action(async (opts) => {
-    const overrides: { model?: string; reasoning?: ReasoningLevel; mode?: Mode } = {};
-    if (opts.model) overrides.model = opts.model;
-    if (opts.reasoning) {
-      overrides.reasoning = normalizeReasoning(opts.reasoning);
-      if (!overrides.reasoning) throw new Error(`--reasoning inválido: "${opts.reasoning}". Use: ${REASONING_LEVELS.join(", ")}`);
-    }
-    if (opts.mode) {
-      overrides.mode = normalizeMode(opts.mode);
-      if (!overrides.mode) throw new Error(`--mode inválido: "${opts.mode}". Use: ${MODES.join(", ")}`);
-    }
-
-    // The wizard always works on (and saves) the stored file; environment overrides are
-    // applied on top only for this run and never written back to config.json.
-    let config: AppConfig | null = (await configExists()) ? await loadConfig() : null;
-    if (!config) {
-      config = applyEnvOverrides(await runSetup(null));
-    } else if (!isValid(config) && !(opts.baseUrl || opts.apiKey)) {
-      config = applyEnvOverrides(await runSetup(await loadStoredConfig()));
-    }
-    if (opts.baseUrl) config.baseURL = opts.baseUrl;
-    if (opts.apiKey) config.apiKey = opts.apiKey;
+    const { config, overrides } = await resolveRun(opts);
     await log("info", "=== siliconflower iniciado por CLI ===");
     await startApp(config, overrides);
+  });
+
+program
+  .command("gui")
+  .description("Open the graphical interface in the browser (accepts the same options as the main command)")
+  .option("--port <n>", "local port (default: a free port)")
+  .option("--no-open", "do not open the browser, only print the URL")
+  .option("--managed", "controlled by another program (desktop app): JSON events on stdout, exits when stdin closes")
+  .action(async (_opts, cmd: Command) => {
+    const opts = cmd.optsWithGlobals();
+    if (!process.versions.bun) {
+      throw new Error("siliconflower gui requer o Bun ou o executável compilado (siliconflower.exe).");
+    }
+    const port = opts.port === undefined ? 0 : Number(opts.port);
+    if (!Number.isInteger(port) || port < 0 || port > 65535) {
+      throw new Error(`--port inválida: "${opts.port}". Use um número de 0 a 65535.`);
+    }
+    const managed = Boolean(opts.managed);
+    let resolved: Awaited<ReturnType<typeof resolveRun>>;
+    try {
+      // Without a terminal, the wizard would wait forever for an answer nobody can give.
+      resolved = await resolveRun(opts, { interactive: !managed && Boolean(process.stdin.isTTY) });
+    } catch (e) {
+      if (managed && e instanceof ConfigRequiredError) {
+        emitManagedEvent({ event: "error", code: "config_required" });
+        process.exitCode = 1;
+        return;
+      }
+      throw e;
+    }
+    await log("info", "=== siliconflower iniciado por GUI ===");
+    // Imported only here: it depends on Bun, and the TUI also runs on Node + tsx.
+    const { startGui } = await import("./gui/index.js");
+    await startGui(resolved.config, resolved.overrides, { port, open: opts.open && !managed, managed });
   });
 
 program
@@ -180,6 +195,49 @@ program
     const tail = await tailLogs({ lines: n, level: opts.level, search: opts.search });
     console.log(tail);
   });
+
+class ConfigRequiredError extends Error {
+  constructor() {
+    super("Falta configurar o provedor de IA. Rode `siliconflower config` num terminal.");
+  }
+}
+
+/** Applies the run options on top of the effective config, opening the wizard if needed and possible. */
+async function resolveRun(
+  opts: {
+    model?: string;
+    reasoning?: string;
+    mode?: string;
+    baseUrl?: string;
+    apiKey?: string;
+  },
+  { interactive = true }: { interactive?: boolean } = {}
+): Promise<{ config: AppConfig; overrides: { model?: string; reasoning?: ReasoningLevel; mode?: Mode } }> {
+  const overrides: { model?: string; reasoning?: ReasoningLevel; mode?: Mode } = {};
+  if (opts.model) overrides.model = opts.model;
+  if (opts.reasoning) {
+    overrides.reasoning = normalizeReasoning(opts.reasoning);
+    if (!overrides.reasoning) throw new Error(`--reasoning inválido: "${opts.reasoning}". Use: ${REASONING_LEVELS.join(", ")}`);
+  }
+  if (opts.mode) {
+    overrides.mode = normalizeMode(opts.mode);
+    if (!overrides.mode) throw new Error(`--mode inválido: "${opts.mode}". Use: ${MODES.join(", ")}`);
+  }
+
+  // The wizard always works on (and saves) the stored file; environment overrides are
+  // applied on top only for this run and never written back to config.json.
+  let config: AppConfig | null = (await configExists()) ? await loadConfig() : null;
+  if (!config) {
+    if (!interactive) throw new ConfigRequiredError();
+    config = applyEnvOverrides(await runSetup(null));
+  } else if (!isValid(config) && !(opts.baseUrl || opts.apiKey)) {
+    if (!interactive) throw new ConfigRequiredError();
+    config = applyEnvOverrides(await runSetup(await loadStoredConfig()));
+  }
+  if (opts.baseUrl) config.baseURL = opts.baseUrl;
+  if (opts.apiKey) config.apiKey = opts.apiKey;
+  return { config, overrides };
+}
 
 function normalizeReasoning(v: string | undefined): ReasoningLevel | undefined {
   if (!v) return undefined;
