@@ -20,7 +20,6 @@ const STATE_FLUSH_MS = 33;
 const DEFAULT_GRACE_MS = 15_000;
 const MAX_TOOL_ACTIVITIES = 300;
 const MAX_TOOL_TEXT_CHARS = 50_000;
-const MAX_THINKING_CHARS = 200_000;
 
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><g fill="#e77fb3"><circle cx="16" cy="7" r="6"/><circle cx="25" cy="13" r="6"/><circle cx="21" cy="24" r="6"/><circle cx="11" cy="24" r="6"/><circle cx="7" cy="13" r="6"/></g><circle cx="16" cy="16" r="4" fill="#f7d774"/></svg>`;
 
@@ -77,6 +76,16 @@ function readCookie(header: string | null, name: string): string | undefined {
   return undefined;
 }
 
+/** The page only says the model is thinking: the text would clutter it and can be long. */
+function withoutReasoning<T extends { reasoning?: unknown }>(message: T): Omit<T, "reasoning"> {
+  const { reasoning: _reasoning, ...rest } = message;
+  return rest;
+}
+
+function forPage(state: SessionState) {
+  return { ...state, messages: state.messages.map(withoutReasoning) };
+}
+
 /**
  * Serves the web front end of one session, on the loopback interface only. The agent runs
  * commands on this machine and any website can try to reach local ports, so every request
@@ -88,7 +97,6 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
   const graceMs = options.graceMs ?? DEFAULT_GRACE_MS;
   const activities: ToolActivity[] = [];
   let nextActivityKey = 1;
-  let thinking = "";
   let lastSent: SessionState = session.getState();
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
   let graceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -117,21 +125,18 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
       if (current[key] !== lastSent[key]) changes[key] = current[key];
     }
     lastSent = current;
+    if (changes.messages) changes.messages = current.messages.map(withoutReasoning);
     if (Object.keys(changes).length) publish({ type: "state", changes });
   };
 
   const unsubscribeState = session.subscribe((state) => {
-    if (state.streaming && !lastSent.streaming) thinking = "";
     if (state.streaming !== lastSent.streaming) flushState();
     else flushTimer ??= setTimeout(flushState, STATE_FLUSH_MS);
   });
 
   const unsubscribeStream = session.onStreamEvent((event: StreamEvent) => {
     flushState(); // events are placed relative to the messages the page already has
-    if (event.type === "thinking") {
-      thinking = (thinking + event.text).slice(-MAX_THINKING_CHARS);
-      publish({ type: "thinking", text: event.text });
-    } else if (event.type === "tool_call") {
+    if (event.type === "tool_call") {
       const activity: ToolActivity = {
         key: nextActivityKey++,
         id: event.id,
@@ -236,9 +241,8 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
         const { baseURL } = session.config;
         ws.send(JSON.stringify({
           type: "hello",
-          state: session.getState(),
+          state: forPage(session.getState()),
           activities,
-          thinking,
           meta: {
             version: APP_VERSION,
             cwd: process.cwd(),

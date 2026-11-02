@@ -22,7 +22,7 @@ Agente de IA em terminal (CLI/TUI) de alta performance para desenvolvimento de s
 - 🗺️ **RepoMap & Símbolos**: Mapeamento estrutural de código (TS, JS, Python, Go, Rust) com baixo consumo de tokens.
 - ⚡ **Raciocínio & Modos de Operação**: Controle de *reasoning effort* (`Ctrl+E`) e modos de trabalho (`Ctrl+O`: `programação`, `sistema`, `plano`). Na API oficial Xiaomi MiMo, o atalho alterna o pensamento entre ligado e desligado.
 - 🖥️ **TUI com Scroll Livre & Viewport Limpo**: Inicialização com tela limpa e suporte nativo completo à rolagem com a rodinha do mouse em respostas longas e blocos de código (estilo Claude Code).
-- 🌐 **Interface Gráfica no Navegador**: `siliconflower gui` abre o mesmo agente no Firefox ou em outro navegador, mostrando argumentos e resultados das ferramentas, raciocínio completo e tarefas. O terminal continua disponível.
+- 🌐 **Interface Gráfica no Navegador**: `siliconflower gui` abre o mesmo agente no Firefox ou em outro navegador, mostrando argumentos e resultados das ferramentas e tarefas. O terminal continua disponível.
 - 🧩 **Ecossistema MCP & Hooks**: Suporte nativo ao Model Context Protocol e automações disparadas por eventos do ciclo de vida (`preTool`, `postTool`, `onEdit`, `onCommand`, `onSessionStart`, `onSessionEnd`).
 - 📦 **Binário Nativo Standalone**: Compilação para `.exe` único via Bun, sem necessidade de Node.js instalado.
 
@@ -126,7 +126,7 @@ As opções `--model`, `--reasoning`, `--mode`, `--base-url` e `--api-key` tamb�
 | `Esc` ou botão **Parar** | Cancela a resposta (ou a pergunta) em andamento |
 | Seletores **Modo** e **Pensamento** | Equivalem a `Ctrl+O` e `Ctrl+E` |
 
-Recarregar a página mantém a conversa. Fechar a aba encerra o agente depois de cerca de 15 segundos, e a conversa se perde, como ao sair da TUI; `Ctrl+C` no terminal encerra na hora. A URL traz um token de acesso: não a compartilhe (veja [SECURITY.md](SECURITY.md)).
+Enquanto o modelo raciocina, a página mostra só um aviso **Pensando...**, sem o texto do raciocínio. Recarregar a página mantém a conversa. Fechar a aba encerra o agente depois de cerca de 15 segundos, e a conversa se perde, como ao sair da TUI; `Ctrl+C` no terminal encerra na hora. A URL traz um token de acesso: não a compartilhe (veja [SECURITY.md](SECURITY.md)).
 
 ### App de Desktop (em desenvolvimento)
 A mesma interface em janela própria, sem terminal nem navegador. Ainda não há instalador; por enquanto, rode a partir do código-fonte:

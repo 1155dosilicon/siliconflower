@@ -38,7 +38,7 @@ Com o agente ocioso, `Ctrl+C` sai.
 - **TUI** (`App.tsx`): desenha o estado com Ink.
 - **GUI** (`gui/`): `gui/index.ts` controla o ciclo de vida e abre o navegador; `gui/server.ts` serve a página e faz a ponte por WebSocket; `gui/client/` é HTML, CSS e JS puros, sem build, embutidos no `.exe` por `import ... with { type: "text" }`. Usa `Bun.serve`, então só é importada dinamicamente pelo comando `gui`, e a TUI continua rodando em Node + tsx.
 
-**Protocolo do WebSocket** (JSON). Servidor: `hello` (estado, ferramentas e raciocínio do turno, para uma página nova ou recarregada), `state` (só as chaves que mudaram, agrupadas a cada 33 ms), `thinking` e `tool`. Página: `send`, `answer`, `cancel`, `mode`, `reasoning`; valores inválidos são ignorados.
+**Protocolo do WebSocket** (JSON). Servidor: `hello` (estado e ferramentas, para uma página nova ou recarregada), `state` (só as chaves que mudaram, agrupadas a cada 33 ms) e `tool`. O texto do raciocínio não vai para a página. Página: `send`, `answer`, `cancel`, `mode`, `reasoning`; valores inválidos são ignorados.
 
 **Ciclo de vida**: sem nenhuma página conectada por 15 s, o app encerra. A tolerância existe para a página recarregar sem perder a sessão. Cada processo tem uma sessão e uma pasta de trabalho; vários projetos significam vários processos, o que também isola o estado global (`todo.ts`, tarefas em background, subagentes). Ao encerrar, a GUI mata a árvore de processos das tarefas em background; a TUI ainda não faz isso.
 
