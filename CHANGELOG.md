@@ -6,6 +6,20 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Added
+- Comando `siliconflower gui`: interface gráfica no navegador (Firefox ou outro), com ferramentas, raciocínio, tarefas, perguntas e cancelamento (`src/gui/`).
+- App de desktop em Electron (`desktop/`), ainda sem instalador: janela própria por projeto, seletor de pasta, projetos recentes e aviso quando o agente para.
+- Opção `gui --managed`: eventos JSON no stdout e encerramento ao fechar o stdin, para o app de desktop controlar o agente.
+
+### Changed
+- Conversa extraída de `App.tsx` para `AgentSession` (`src/session.ts`), usada pela TUI e pela GUI.
+
+### Fixed
+- Cancelar uma resposta deixava ferramentas já recebidas executarem e guardava o turno como concluído, com status "pronto": agora o turno é interrompido de verdade (`src/llm.ts`).
+- Mudar o modo ou o raciocínio e enviar uma mensagem logo depois fazia o status voltar a "pronto" durante a resposta (`src/session.ts`).
+- Fechar a GUI deixava comandos em background rodando como órfãos: agora a árvore de processos é encerrada antes de sair (`src/gui/index.ts`).
+- `siliconflower gui` sem terminal e sem configuração ficava parado para sempre no assistente: agora mostra um erro claro (`src/index.tsx`).
+
 ## [0.2.9] - 2026-10-29
 
 ### Fixed

@@ -22,6 +22,7 @@ Agente de IA em terminal (CLI/TUI) de alta performance para desenvolvimento de s
 - 🗺️ **RepoMap & Símbolos**: Mapeamento estrutural de código (TS, JS, Python, Go, Rust) com baixo consumo de tokens.
 - ⚡ **Raciocínio & Modos de Operação**: Controle de *reasoning effort* (`Ctrl+E`) e modos de trabalho (`Ctrl+O`: `programação`, `sistema`, `plano`). Na API oficial Xiaomi MiMo, o atalho alterna o pensamento entre ligado e desligado.
 - 🖥️ **TUI com Scroll Livre & Viewport Limpo**: Inicialização com tela limpa e suporte nativo completo à rolagem com a rodinha do mouse em respostas longas e blocos de código (estilo Claude Code).
+- 🌐 **Interface Gráfica no Navegador**: `siliconflower gui` abre o mesmo agente no Firefox ou em outro navegador, mostrando argumentos e resultados das ferramentas, raciocínio completo e tarefas. O terminal continua disponível.
 - 🧩 **Ecossistema MCP & Hooks**: Suporte nativo ao Model Context Protocol e automações disparadas por eventos do ciclo de vida (`preTool`, `postTool`, `onEdit`, `onCommand`, `onSessionStart`, `onSessionEnd`).
 - 📦 **Binário Nativo Standalone**: Compilação para `.exe` único via Bun, sem necessidade de Node.js instalado.
 
@@ -82,6 +83,7 @@ As configurações globais e dados do Siliconflower ficam organizados em `~/.sil
 bun run start -- --help
 bun run start -- --version
 bun run start -- config       # Reabre o assistente de configuração
+bun run start -- gui          # Abre a interface gráfica no navegador padrão (--port <n>, --no-open)
 bun run start -- init         # Cria SILICONFLOWER.md aqui (ativa a memória de projeto; --agents cria AGENTS.md)
 bun run start -- show         # Exibe configuração mascarada, projeto ativo e diretório do workspace
 bun run start -- ensure       # Cria configuração se ainda não existir
@@ -112,6 +114,33 @@ Quando `baseURL` usa `xiaomimimo.com` ou um subdomínio oficial, o Siliconflower
 | `Ctrl+E` | Alterna o nível de raciocínio (`none` ➔ `low` ➔ `medium` ➔ `high`); na API oficial Xiaomi MiMo, alterna pensamento desligado/ligado |
 | `Ctrl+O` | Alterna o modo de operação (`programação` ➔ `sistema` ➔ `plano`) |
 | `Ctrl+C` | Cancela a geração (ou a pergunta de `ask_question`) em andamento; com o agente ocioso, sai |
+
+### Interface Gráfica (`siliconflower gui`)
+Rode o comando **dentro da pasta do projeto**: ela é a pasta de trabalho do agente. A página abre no navegador padrão; com `--no-open`, copie a URL do terminal para o navegador que preferir. Qualquer navegador atual serve, sem exigir Edge. Requer Bun ou o `.exe` compilado (não roda com Node + tsx).
+
+As opções `--model`, `--reasoning`, `--mode`, `--base-url` e `--api-key` também valem aqui. Para vários projetos ao mesmo tempo, rode um `gui` em cada pasta: cada um usa sua própria porta e conversa. A configuração inicial continua no terminal, com `siliconflower config`.
+
+| Na página | Ação |
+| :--- | :--- |
+| `Enter` / `Shift+Enter` | Envia a mensagem / quebra a linha |
+| `Esc` ou botão **Parar** | Cancela a resposta (ou a pergunta) em andamento |
+| Seletores **Modo** e **Pensamento** | Equivalem a `Ctrl+O` e `Ctrl+E` |
+
+Recarregar a página mantém a conversa. Fechar a aba encerra o agente depois de cerca de 15 segundos, e a conversa se perde, como ao sair da TUI; `Ctrl+C` no terminal encerra na hora. A URL traz um token de acesso: não a compartilhe (veja [SECURITY.md](SECURITY.md)).
+
+### App de Desktop (em desenvolvimento)
+A mesma interface em janela própria, sem terminal nem navegador. Ainda não há instalador; por enquanto, rode a partir do código-fonte:
+
+```powershell
+bun run build                  # gera o agente (dist/siliconflower.exe)
+bun install --cwd desktop      # só na primeira vez: baixa o Electron
+bun run desktop
+```
+
+Na tela inicial, escolha a pasta do projeto. Cada projeto abre em sua própria janela, com seu agente e sua conversa; `Ctrl+O` abre outra pasta e `Ctrl+Shift+O` mostra os recentes. Fechar a janela encerra o agente e os comandos em background daquele projeto, e a conversa se perde.
+
+- **Configuração:** ainda é feita no terminal, com `siliconflower config`. Sem ela, o app avisa e não abre o projeto.
+- **Variáveis de ambiente:** aberto por atalho, o app herda o ambiente do Windows, não o de um terminal. Variáveis definidas só numa sessão (`SILICONFLOWER_API_KEY`, ou um `PATH` usado por MCP e hooks) não chegam ao agente; defina-as nas variáveis de ambiente do usuário.
 
 ### Modos de Trabalho
 - **`programação`**: Acesso completo a ferramentas de código, leitura, escrita e testes.

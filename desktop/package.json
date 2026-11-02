@@ -1,0 +1,23 @@
+{
+  "name": "siliconflower-desktop",
+  "productName": "Siliconflower",
+  "version": "0.2.9",
+  "description": "Janela de desktop do Siliconflower.",
+  "private": true,
+  "license": "MIT",
+  "main": "build/main.cjs",
+  "scripts": {
+    "postinstall": "install-electron",
+    "build": "bun run build.ts",
+    "start": "bun run build.ts && electron .",
+    "typecheck": "tsc --noEmit"
+  },
+  "trustedDependencies": [
+    "electron"
+  ],
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "electron": "^45.2.1",
+    "typescript": "^7.0.2"
+  }
+}

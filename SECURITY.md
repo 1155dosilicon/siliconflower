@@ -34,6 +34,32 @@ Depois de configurado, o modelo pode usar ferramentas que:
 - **Modos `programação` e `sistema`** só mudam o foco do prompt (o `sistema` pede para avisar antes de ações destrutivas ou no registro). Nenhum dos dois limita privilégios.
 - **`execute_command`** é, por design, um shell arbitrário. As proteções das ferramentas de arquivo **não** se aplicam a comandos PowerShell.
 
+## Interface gráfica (`siliconflower gui`)
+
+A página controla um agente que executa comandos, e qualquer site aberto no navegador pode tentar acessar portas locais. Por isso:
+
+- o servidor escuta só em `127.0.0.1`;
+- cada execução gera um token aleatório de 256 bits. A URL com o token troca por um cookie `HttpOnly` e `SameSite=Strict` e redireciona, tirando o token da barra de endereços e do histórico;
+- toda requisição precisa do cookie e do cabeçalho `Host` esperado, o que barra *DNS rebinding*. O WebSocket também confere `Origin`, o que barra outros sites;
+- a CSP bloqueia scripts inline e de terceiros, conexões externas, imagens externas e uso em frames;
+- o texto do modelo e das ferramentas nunca vira HTML: tags aparecem como texto, links só aceitam `http`, `https` e `mailto`, e imagens viram links, sem carregar nada;
+- a chave de API não é enviada à página.
+
+**Limitações:** a conexão local não é criptografada, e outro programa rodando na sua conta consegue ler o token (na linha de comando do navegador, nos dados do navegador ou na saída do terminal). A interface não é uma barreira contra software local: ela tem os mesmos privilégios do resto do agente. Não exponha a porta com proxy ou túnel e não compartilhe a URL.
+
+## App de desktop (`desktop/`)
+
+A janela mostra a mesma página, com texto vindo do modelo e de repositórios, e usa as mesmas proteções do servidor, inclusive o token: outros programas e sites continuam podendo tentar acessar a porta local. Além disso:
+
+- as janelas rodam com `sandbox` e `contextIsolation`, sem Node. A janela de um projeto não tem nenhuma ponte com o processo principal; só a tela inicial, página local, tem uma, e o processo principal confere o remetente e os argumentos;
+- a página só pede para abrir um projeto que já está nos recentes. Uma pasta nova só vem do seletor nativo, escolhida pelo usuário;
+- a janela só navega na origem do seu servidor local. Links abrem no navegador padrão, e só `http` e `https`;
+- todas as permissões são negadas, menos escrever na área de transferência (botão **Copiar**), e downloads são cancelados;
+- cada projeto tem sessão própria, em memória, então o cookie de um não chega ao outro;
+- a URL com o token só passa pelo pipe entre o app e o agente e nunca vai para o log.
+
+**Limitação:** o app ainda não é assinado, então o Windows pode avisar ao executá-lo.
+
 ## Instruções de projeto vêm do repositório
 
 `SILICONFLOWER.md` e `AGENTS.md` são enviados ao modelo como instruções do projeto, procurados na pasta atual e nas pastas acima dela. Num repositório clonado de terceiros, esses arquivos podem conter instruções maliciosas (*prompt injection*), por exemplo para rodar comandos ou enviar arquivos para fora. Leia esses arquivos antes de abrir o agente num repositório que você não conhece.

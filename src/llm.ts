@@ -141,6 +141,10 @@ export function isOfficialOpenAIEndpoint(baseURL: string): boolean {
 const MAX_OUTPUT_TOKENS = 16384;
 export const MAX_STEPS = 50;
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException("Abortado", "AbortError");
+}
+
 async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   const { config, messages, tools, reasoning, executeTool, signal } = opts;
   const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey });
@@ -164,7 +168,8 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   void log("info", `LLM request: model=${config.model}, tools=${apiTools.length}, reasoning=${reasoning}`);
 
   for (let step = 0; step < MAX_STEPS; step++) {
-    const working = buildOpenAIMessages(config, compressHistory(history));
+    throwIfAborted(signal);
+    const working =buildOpenAIMessages(config, compressHistory(history));
     let content = "";
     let thinking = "";
     const pendingCalls: {
@@ -294,6 +299,9 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
     } finally {
       detachRequestAbort();
     }
+    // The SDK ends the iteration silently on abort: without this, a cancelled response would
+    // count as finished and the tool calls received so far would still run.
+    throwIfAborted(signal);
 
     void log("info", `LLM step ${step}: finish_reason=${finishReason}, argBuffers=${argBuffers.size}, toolCallChunks=${toolCallChunkCount}`);
 
@@ -336,7 +344,8 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
     void log("info", `LLM step ${step}: executando ${pendingCalls.length} tool(s): ${pendingCalls.map(c => c.name).join(", ")}`);
 
     for (const call of pendingCalls) {
-      void log("info", `LLM step ${step}: -> ${call.name}(${call.args.slice(0, 200)})`);
+      throwIfAborted(signal);
+      void log("info", `LLM step ${step}: ->${call.name}(${call.args.slice(0, 200)})`);
       yield { type: "tool_call", id: call.id, name: call.name, args: call.args };
       let parsed: Record<string, unknown> = {};
       try {

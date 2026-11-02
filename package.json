@@ -38,6 +38,8 @@
     "dev": "bun run src/index.tsx",
     "build": "bun run build.ts",
     "typecheck": "tsc --noEmit",
+    "desktop": "bun run --cwd desktop start",
+    "typecheck:desktop": "bun run --cwd desktop typecheck",
     "install:bin": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1"
   },
   "dependencies": {

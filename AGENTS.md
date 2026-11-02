@@ -19,12 +19,14 @@ Antes de dar uma tarefa por concluída: `bun run typecheck` e `bun test`.
 ## Mapa do código
 
 - `src/index.tsx`: CLI (commander). `config.ts`/`wizard.ts`: configuração.
-- `src/App.tsx`: TUI, histórico da API (`historyRef`), despacho de ferramentas e `ask_question`.
+- `src/session.ts`: `AgentSession`, a conversa sem interface: histórico da API, despacho de ferramentas, cancelamento e `ask_question`.
+- `src/App.tsx`: TUI (Ink). `src/gui/`: interface web (`server.ts` com WebSocket, `client/` em HTML/CSS/JS puros, sem build).
 - `src/llm.ts`: loop de streaming e ferramentas (até 50 passos), compactação por passo, fallbacks de parâmetros. `context.ts`: compactação e truncamento de saídas.
 - `src/tools.ts`: ferramentas nativas (schema + `run`). `read_skill` fica em `skills.ts`. `tool-policy.ts`: allowlist do modo `plano`.
 - `src/shell.ts`: toda execução de PowerShell. `project.ts`: detecção de projeto (`SILICONFLOWER.md`/`AGENTS.md`).
 - `src/services/`: memória, subagentes, tarefas em background, web, artefatos, worktrees, repomap, smart-edit.
 - `src/core/hooks.ts`: hooks. `mcp.ts`: cliente MCP.
+- `desktop/`: app Electron, projeto à parte (`bun install --cwd desktop`, `bun run desktop`, `bun run typecheck:desktop`). `main.ts`: janelas e segurança. `agent-process.ts`: ciclo de vida do `siliconflower.exe gui --managed`, um por projeto.
 
 ## Regras (cada uma já causou bug)
 
@@ -42,7 +44,10 @@ Antes de dar uma tarefa por concluída: `bun run typecheck` e `bun test`.
 - **Argumentos do modelo não são confiáveis**: caminhos passam por `isPathBlockedSafe`, números por clamp.
 - **`render(..., { exitOnCtrlC: false })` em `App.tsx` é intencional**: sem isso, `Ctrl+C` fecha o app em vez de cancelar.
 - **Repaint após redimensionar (`App.tsx`) é intencional**: o Ink sozinho deixa restos de quadros antigos quando o terminal refaz a quebra das linhas. `tests/tui-resize.test.ts` reproduz isso num emulador (xterm headless); mudanças de layout da TUI devem passar nele.
-- **Versão**: `package.json` e `src/version.ts` mudam juntos (`tests/version.test.ts` verifica).
+- **GUI**: a lógica da conversa fica em `session.ts`, não na interface. Texto do modelo nunca vira HTML (sem `innerHTML`; use `textContent`). Não relaxe as checagens de token, `Host`, `Origin` nem a CSP de `gui/server.ts`: o agente executa comandos e qualquer site pode tentar acessar a porta local.
+- **Abortar stream**: o SDK da OpenAI encerra a iteração em silêncio ao abortar. Confira `signal.aborted` depois do stream (`llm.ts`), senão o turno cancelado parece concluído e as ferramentas recebidas executam.
+- **Versão**: `package.json`, `desktop/package.json` e `src/version.ts` mudam juntos (`tests/version.test.ts` verifica).
+- **Desktop**: a URL de `gui --managed` traz o token, nunca a grave em log. Não dê preload às janelas de projeto: elas exibem texto do modelo. No `main.ts`, não use `__dirname` (o bundler o troca pela pasta do código-fonte) nem posições fixas no `argv` (o Chromium reordena os argumentos).
 
 ## Ao mudar comportamento
 
