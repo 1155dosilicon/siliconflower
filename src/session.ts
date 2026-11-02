@@ -4,7 +4,14 @@ import { builtinToolsAsMcp, isBuiltin, runBuiltin } from "./tools.js";
 import { loadSkills, readSkillContent, SKILL_TOOL, type Skill } from "./skills.js";
 import { buildSystemPrompt, nextMode, type Mode } from "./modes.js";
 import { buildMemorySystemPrompt } from "./services/memory.js";
-import { onTodosChange } from "./todo.js";
+import { onTodosChange, setTodos } from "./todo.js";
+import { randomBytes } from "node:crypto";
+import {
+  conversationTitle,
+  type ConversationStore,
+  type ConversationSummary,
+  type ToolActivity,
+} from "./services/conversations.js";
 import { estimateTokens, estimateMessagesTokens } from "./context.js";
 import { log } from "./logger.js";
 import type { AppConfig, ChatMessage, McpTool, ReasoningLevel, StreamEvent, TodoItem } from "./types.js";
@@ -48,14 +55,25 @@ export interface SessionState {
   apiTokens: number;
   /** System prompt + API history + live text. Front ends may add what is being typed. */
   estimatedTokens: number;
+  /** The open conversation; null until its first turn is saved. Only with a store. */
+  conversationId: string | null;
+  conversations: ConversationSummary[];
 }
 
 export interface SessionDeps {
   /** Replaceable in tests, so turns can run without a provider. */
   stream?: typeof streamChat;
+  /** Where conversations are kept. Without it, they end with the session (TUI). */
+  store?: ConversationStore;
 }
 
 const STATUS_FLASH_MS = 1200;
+const MAX_TOOL_ACTIVITIES = 300;
+const MAX_TOOL_TEXT_CHARS = 50_000;
+
+function clip(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}\n\n[... ${text.length - max} caracteres omitidos na interface]` : text;
+}
 
 /**
  * One agent conversation, independent of any UI: API history, tool dispatch, cancellation
@@ -67,6 +85,12 @@ export class AgentSession {
   private state: SessionState;
   private readonly stateListeners = new Set<(state: SessionState) => void>();
   private readonly streamListeners = new Set<(event: StreamEvent) => void>();
+  private readonly activityListeners = new Set<(activity: ToolActivity) => void>();
+  private readonly store: ConversationStore | undefined;
+  private activities: ToolActivity[] = [];
+  private nextActivityKey = 1;
+  /** The running turn, so close() can wait for it to be saved. */
+  private turn: Promise<void> | undefined;
 
   // Full API conversation (including tool calls and tool results), separate from the
   // rendered UI messages, so the model keeps the context of what its tools did.
@@ -84,6 +108,7 @@ export class AgentSession {
   constructor(config: AppConfig, overrides: SessionOverrides = {}, deps: SessionDeps = {}) {
     this.config = config;
     this.stream = deps.stream ?? streamChat;
+    this.store = deps.store;
     const mode = overrides.mode ?? config.mode ?? "programação";
     this.state = {
       model: overrides.model ?? config.model,
@@ -101,6 +126,8 @@ export class AgentSession {
       toolCount: builtinToolsAsMcp().length + 1,
       apiTokens: 0,
       estimatedTokens: 0,
+      conversationId: null,
+      conversations: [],
     };
     this.state.estimatedTokens = this.estimateTokens(this.state);
   }
@@ -119,6 +146,127 @@ export class AgentSession {
   onStreamEvent(listener: (event: StreamEvent) => void): () => void {
     this.streamListeners.add(listener);
     return () => this.streamListeners.delete(listener);
+  }
+
+  /** Tool cards of this conversation, in the order they ran. */
+  getActivities(): ToolActivity[] {
+    return this.activities;
+  }
+
+  /** Called when a tool card appears or gets its result. Returns the unsubscribe function. */
+  onActivity(listener: (activity: ToolActivity) => void): () => void {
+    this.activityListeners.add(listener);
+    return () => this.activityListeners.delete(listener);
+  }
+
+  /** Lists the saved conversations and, on request, reopens the most recent one. */
+  async loadConversations({ resumeLatest = false }: { resumeLatest?: boolean } = {}): Promise<void> {
+    const damaged = await this.refreshConversations();
+    if (damaged) this.patch({ error: `${damaged} conversa(s) danificada(s) foram ignoradas.` });
+    const latest = this.state.conversations[0];
+    if (resumeLatest && latest) await this.resumeConversation(latest.id);
+  }
+
+  private async refreshConversations(): Promise<number> {
+    if (!this.store) return 0;
+    const { items, damaged } = await this.store.list();
+    this.patch({ conversations: items });
+    return damaged;
+  }
+
+  /** Starts an empty conversation. The current one is already saved. */
+  newConversation(): void {
+    if (this.state.streaming || this.closed) return;
+    this.showConversation(null, { history: [], messages: [], activities: [], todos: [] });
+  }
+
+  /** Reopens a saved conversation. A damaged one becomes a message: the app goes on. */
+  async resumeConversation(id: string): Promise<boolean> {
+    if (!this.store || this.state.streaming || this.closed) return false;
+    try {
+      const body = await this.store.load(id);
+      if (this.state.streaming || this.closed) return false; // a turn started meanwhile
+      this.showConversation(id, body);
+      return true;
+    } catch (e) {
+      await log("error", `Conversa ${id} não abriu: ${String(e)}`);
+      this.patch({ error: "Não consegui abrir essa conversa: o arquivo está danificado ou foi apagado." });
+      return false;
+    }
+  }
+
+  /** Deletes a saved conversation; deleting the open one starts an empty one. */
+  async deleteConversation(id: string): Promise<void> {
+    if (!this.store || this.state.streaming || this.closed) return;
+    try {
+      await this.store.remove(id);
+    } catch (e) {
+      await log("error", `Conversa ${id} não foi apagada: ${String(e)}`);
+      this.patch({ error: "Não consegui apagar essa conversa." });
+      return;
+    }
+    if (id === this.state.conversationId) this.newConversation();
+    await this.refreshConversations();
+  }
+
+  private showConversation(id: string | null, body: { history: ChatMessage[]; messages: UIMessage[]; activities: ToolActivity[]; todos: TodoItem[] }): void {
+    this.clearStatusTimer();
+    this.history = body.history;
+    this.activities = body.activities;
+    this.nextActivityKey = Math.max(0, ...body.activities.map((a) => a.key)) + 1;
+    setTodos(body.todos); // global: another conversation's tasks must not stay on screen
+    this.patch({
+      conversationId: id,
+      messages: body.messages,
+      todos: body.todos,
+      apiTokens: 0,
+      error: null,
+      liveText: "",
+      status: "pronto",
+    });
+  }
+
+  /** Only complete turns reach this point: see commitTurn. A failure must not end the turn. */
+  private async saveConversation(): Promise<void> {
+    if (!this.store || !this.history.length) return;
+    const id = this.state.conversationId ?? `${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
+    const first = this.state.messages.find((m) => m.role === "user")?.content ?? "";
+    try {
+      await this.store.save(
+        { id, title: conversationTitle(first), updatedAt: new Date().toISOString(), messageCount: this.state.messages.length },
+        { history: this.history, messages: this.state.messages, activities: this.activities, todos: this.state.todos }
+      );
+      this.patch({ conversationId: id });
+      await this.refreshConversations();
+    } catch (e) {
+      await log("error", `Conversa não foi salva: ${String(e)}`);
+      this.patch({ error: "Não consegui salvar esta conversa no disco." });
+    }
+  }
+
+  /** Keeps the cards of the timeline up to date. Returns the card that changed. */
+  private trackActivity(event: StreamEvent): ToolActivity | undefined {
+    if (event.type === "tool_call") {
+      const activity: ToolActivity = {
+        key: this.nextActivityKey++,
+        id: event.id,
+        name: event.name,
+        args: clip(event.args, MAX_TOOL_TEXT_CHARS),
+        afterMessage: this.state.messages.length,
+      };
+      this.activities = [...this.activities, activity].slice(-MAX_TOOL_ACTIVITIES);
+      return activity;
+    }
+    if (event.type === "tool_result") {
+      // Some providers reuse call ids across steps: the latest unanswered call is the one.
+      const activity = [...this.activities].reverse().find((a) => a.id === event.id && a.result === undefined);
+      if (activity) {
+        activity.result = clip(event.result, MAX_TOOL_TEXT_CHARS);
+        activity.isError = event.isError;
+      }
+      return activity;
+    }
+    return undefined;
   }
 
   /** Loads skills and memory, runs the session hook and connects the MCP servers. */
@@ -168,6 +316,7 @@ export class AgentSession {
     this.unsubscribeTodos?.();
     this.abort?.abort();
     const pendingWork: Promise<unknown>[] = [];
+    if (this.turn) pendingWork.push(this.turn); // what the aborted turn did must still be saved
     if (this.config.hooks) pendingWork.push(runHook("onSessionEnd", this.config.hooks, { cwd: process.cwd() }));
     if (this.mcp) pendingWork.push(this.mcp.close());
     await Promise.allSettled(pendingWork);
@@ -225,6 +374,12 @@ export class AgentSession {
     // Line breaks and tabs are content (the web front end has a multi-line input).
     const cleanText = text.replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0B-\x1F\x7F]/g, "").trim();
     if (!cleanText || this.state.streaming || this.closed) return;
+    const turn = this.runTurn(cleanText);
+    this.turn = turn;
+    await turn;
+  }
+
+  private async runTurn(cleanText: string): Promise<void> {
     this.clearStatusTimer();
     this.patch({
       error: null,
@@ -265,7 +420,9 @@ export class AgentSession {
       });
 
       for await (const ev of gen as AsyncIterable<StreamEvent>) {
+        const activity = this.trackActivity(ev);
         for (const listener of this.streamListeners) listener(ev);
+        if (activity) for (const listener of this.activityListeners) listener(activity);
         switch (ev.type) {
           case "thinking":
             accThinking += ev.text;
@@ -337,6 +494,7 @@ export class AgentSession {
       this.abort = null;
       this.patch({ question: null, streaming: false, liveText: "" });
     }
+    await this.saveConversation();
   }
 
   private allTools(): McpTool[] {

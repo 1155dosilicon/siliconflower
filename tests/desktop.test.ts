@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { AgentStartError, childEnv, startAgentProcess } from "../desktop/src/agent-process.js";
 import { addRecent, folderKey, loadRecents, MAX_RECENTS, removeRecent } from "../desktop/src/projects.js";
+import { applyInput, maskKey, parseInput, parseMcp, testConnection, type SettingsInput } from "../desktop/src/settings.js";
 
 const ENTRY = resolve(import.meta.dir, "..", "src", "index.tsx");
 const AGENT_ARGS = ["run", ENTRY, "gui", "--managed"];
@@ -39,6 +40,79 @@ describe("recent projects", () => {
     addRecent(file, "C:\\novo");
     expect(readdirSync(dir)).toEqual(["projects.json"]);
     expect(JSON.parse(readFileSync(file, "utf8"))).toHaveLength(2);
+  });
+});
+
+describe("settings", () => {
+  const stored = { baseURL: "https://a.example/v1", apiKey: "chave-salva-muito-longa-1234", model: "m", reasoning: "high" as const, mode: "plano" as const, hooks: { onEdit: "echo" }, mcpServers: {} };
+  const form = (changes: Partial<SettingsInput> = {}): SettingsInput => ({ baseURL: "https://b.example/v1", apiKey: "", model: "n", reasoning: "low", system: "", mcp: "", ...changes });
+
+  test("only the end of the key reaches the page, and short keys not even that", () => {
+    expect(maskKey("chave-salva-muito-longa-1234")).toBe("***1234");
+    expect(maskKey("curta1234")).toBe("***");
+    expect(maskKey("")).toBe("");
+  });
+
+  test("a blank key keeps the saved one, and a new one replaces it", () => {
+    expect(applyInput(stored, form()).config?.apiKey).toBe(stored.apiKey);
+    expect(applyInput(stored, form({ apiKey: "  nova  " })).config?.apiKey).toBe("nova");
+  });
+
+  test("keeps what the form does not show", () => {
+    expect(applyInput(stored, form()).config).toMatchObject({ mode: "plano", hooks: { onEdit: "echo" } });
+  });
+
+  test("first use with an empty form points at each field", () => {
+    const { errors } = applyInput(null, { baseURL: "ftp://x", apiKey: "", model: " ", reasoning: "high", system: "", mcp: "{" });
+    expect(Object.keys(errors ?? {}).sort()).toEqual(["apiKey", "baseURL", "mcp", "model"]);
+  });
+
+  test("a level the provider does not offer falls back to one it does", () => {
+    expect(applyInput(stored, form({ baseURL: "https://api.xiaomimimo.com/v1", reasoning: "low" })).config?.reasoning).toBe("high");
+  });
+
+  test("MCP accepts the two usual shapes and explains what is wrong", () => {
+    const server = { arquivos: { command: "npx", args: ["-y", "x"] } };
+    expect(parseMcp(JSON.stringify(server)).servers).toEqual(server);
+    expect(parseMcp(JSON.stringify({ mcpServers: server })).servers).toEqual(server);
+    expect(parseMcp("").servers).toEqual({});
+    expect(parseMcp("{ quebrado").error).toContain("inválido");
+    expect(parseMcp("[1]").error).toBeTruthy();
+    expect(parseMcp(`{"a":{"args":[]}}`).error).toContain('"a"');
+    expect(parseMcp(`{"a":{"command":"x","args":"y"}}`).error).toContain("args");
+    expect(parseMcp(`{"a":{"command":"x","env":{"K":1}}}`).error).toContain("env");
+  });
+
+  test("the page cannot send anything but limited text", () => {
+    expect(parseInput(null)).toBeNull();
+    expect(parseInput({ baseURL: 1 })).toBeNull();
+    expect(parseInput({ baseURL: "x".repeat(3000) })).toBeNull();
+    expect(parseInput({ model: "m" })).toMatchObject({ model: "m", apiKey: "" });
+  });
+
+  test("the connection test never shows the key, even if the provider echoes it", async () => {
+    const key = "chave-secreta-do-formulario";
+    const echo = (async () => new Response(JSON.stringify({ error: { message: `chave ${key} recusada` } }), { status: 401 })) as unknown as typeof fetch;
+    const { ok, message } = await testConnection(form({ apiKey: key }), echo);
+    expect(ok).toBe(false);
+    expect(message).toContain("401");
+    expect(message).not.toContain(key);
+  });
+
+  test("the connection test retries with the newer token limit", async () => {
+    const bodies: any[] = [];
+    const picky = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      bodies.push(body);
+      return body.max_tokens ? new Response(`{"error":{"message":"use max_completion_tokens instead of max_tokens"}}`, { status: 400 }) : new Response("{}");
+    }) as unknown as typeof fetch;
+    expect((await testConnection(form({ apiKey: "k" }), picky)).ok).toBe(true);
+    expect(bodies[1].max_completion_tokens).toBe(16);
+  });
+
+  test("a provider that cannot be reached is a message, not a crash", async () => {
+    const down = (async () => { throw new Error("recusada"); }) as unknown as typeof fetch;
+    expect((await testConnection(form({ apiKey: "k" }), down)).message).toContain("recusada");
   });
 });
 

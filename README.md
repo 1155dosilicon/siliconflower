@@ -126,7 +126,7 @@ As opções `--model`, `--reasoning`, `--mode`, `--base-url` e `--api-key` tamb�
 | `Esc` ou botão **Parar** | Cancela a resposta (ou a pergunta) em andamento |
 | Seletores **Modo** e **Pensamento** | Equivalem a `Ctrl+O` e `Ctrl+E` |
 
-Enquanto o modelo raciocina, a página mostra só um aviso **Pensando...**, sem o texto do raciocínio. Recarregar a página mantém a conversa. Fechar a aba encerra o agente depois de cerca de 15 segundos, e a conversa se perde, como ao sair da TUI; `Ctrl+C` no terminal encerra na hora. A URL traz um token de acesso: não a compartilhe (veja [SECURITY.md](SECURITY.md)).
+Enquanto o modelo raciocina, a página mostra só um aviso **Pensando...**, sem o texto do raciocínio. As conversas ficam salvas por projeto, na lateral: **+ Nova conversa** começa outra, clicar em uma retoma de onde parou e **×** apaga. Na TUI, a conversa continua terminando ao sair. Fechar a aba encerra o agente depois de cerca de 15 segundos; `Ctrl+C` no terminal encerra na hora. Uma resposta só é salva ao terminar ou ser interrompida: se o agente cair no meio dela, ela se perde. A URL traz um token de acesso: não a compartilhe (veja [SECURITY.md](SECURITY.md)).
 
 ### App de Desktop
 A mesma interface em janela própria, sem terminal nem navegador. Para gerar o instalador a partir do código-fonte:
@@ -142,9 +142,9 @@ O instalador ainda não é assinado, então o Windows SmartScreen pode avisar na
 
 Para desenvolver sem instalar: `bun run build` uma vez e depois `bun run desktop`.
 
-Na tela inicial, escolha a pasta do projeto. Cada projeto abre em sua própria janela, com seu agente e sua conversa; `Ctrl+O` abre outra pasta e `Ctrl+Shift+O` mostra os recentes. Fechar a janela encerra o agente e os comandos em background daquele projeto, e a conversa se perde.
+Na tela inicial, escolha a pasta do projeto. Cada projeto abre em sua própria janela, com seu agente e suas conversas; `Ctrl+O` abre outra pasta e `Ctrl+Shift+O` mostra os recentes. Fechar a janela encerra o agente e os comandos em background daquele projeto, e as conversas continuam salvas. Abrir o projeto de novo começa com uma conversa vazia, para não gastar tokens com contexto antigo; a anterior está na lateral.
 
-- **Configuração:** ainda é feita no terminal. Sem ela, o app avisa, mostra o comando a rodar e não abre o projeto.
+- **Configuração:** na primeira vez, o app pede provedor, chave e modelo, e **Testar conexão** confere se funcionam. Depois, use **Arquivo > Configurações** (`Ctrl+,`). A chave nunca volta para a tela: em branco, mantém a salva. Projetos abertos podem reiniciar na hora para usar a mudança, sem perder a conversa.
 - **Variáveis de ambiente:** aberto por atalho, o app herda o ambiente do Windows, não o de um terminal. Variáveis definidas só numa sessão (`SILICONFLOWER_API_KEY`, ou um `PATH` usado por MCP e hooks) não chegam ao agente; defina-as nas variáveis de ambiente do usuário.
 
 ### Modos de Trabalho

@@ -63,4 +63,5 @@ function render(recents) {
 }
 
 pick.addEventListener("click", () => void run(() => api.pickFolder()));
+document.getElementById("settings").addEventListener("click", () => void api.openSettings());
 void api.listRecents().then(render);

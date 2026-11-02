@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { readFile, writeFile, access } from "node:fs/promises";
+import { readFile, rename, writeFile, access } from "node:fs/promises";
 import { ensureDir, getGlobalDataDir } from "./fs-util.js";
 import type { AppConfig, McpServerConfig, Mode } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
@@ -69,7 +69,10 @@ export function applyEnvOverrides(config: AppConfig): AppConfig {
 
 export async function saveConfig(config: AppConfig): Promise<void> {
   await ensureDir(CONFIG_DIR);
-  await writeFile(CONFIG_FILE, JSON.stringify(config, null, 2), "utf8");
+  // Atomic: a crash in the middle of a save must not cost the user the API key.
+  const temp = `${CONFIG_FILE}.${process.pid}.tmp`;
+  await writeFile(temp, JSON.stringify(config, null, 2), "utf8");
+  await rename(temp, CONFIG_FILE);
 }
 
 export function normalize(data: Partial<AppConfig>, opts: { applyEnv?: boolean } = {}): AppConfig {

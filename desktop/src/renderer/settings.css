@@ -1,0 +1,36 @@
+html, body { height: auto; min-height: 100%; }
+
+.settings { display: flex; flex-direction: column; max-width: 560px; margin: 0 auto; padding: 24px; }
+.settings h1 { margin-bottom: 8px; font-size: 20px; }
+.settings > p { margin: 0 0 8px; color: var(--muted); }
+
+label { margin: 12px 0 4px; font-size: 13px; font-weight: 600; }
+details label { display: block; }
+
+input, select, textarea {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+textarea { display: block; resize: vertical; }
+.mono { font: 13px/1.4 "Cascadia Code", Consolas, monospace; }
+
+.settings > .help, details .help { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.settings > .field-error, details .field-error { margin: 4px 0 0; color: var(--danger); font-size: 12px; }
+.settings > .note { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+
+details { margin-top: 16px; }
+summary { color: var(--muted); font-size: 13px; cursor: pointer; }
+
+#result { margin: 16px 0 0; overflow-wrap: anywhere; }
+#result[data-ok="true"] { color: var(--accent); }
+#result[data-ok="false"] { color: var(--danger); }
+
+.actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.actions button { padding: 8px 20px; border-radius: 6px; }
+.actions button:not(.primary) { border: 1px solid var(--border); background: var(--surface); color: var(--text); }

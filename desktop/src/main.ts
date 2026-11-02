@@ -15,6 +15,7 @@ import { statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { AgentStartError, startAgentProcess, type AgentExit, type AgentProcess } from "./agent-process.js";
 import { addRecent, folderKey, loadRecents, removeRecent } from "./projects.js";
+import { isConfigured, parseInput, readSettings, reasoningChoices, testConnection, writeSettings } from "./settings.js";
 
 const BACKGROUND = "#15141a";
 
@@ -31,6 +32,8 @@ const stopping = new Set<Promise<void>>();
 /** The only origin each window may show. A window that is not here navigates nowhere. */
 const allowedOrigins = new WeakMap<WebContents, string>();
 let home: BrowserWindow | undefined;
+let settings: BrowserWindow | undefined;
+let settingsThen: (() => void) | undefined;
 let quitting = false;
 let nextPartition = 1;
 
@@ -123,8 +126,7 @@ function startFailureMessage(error: unknown): string {
   if (error instanceof AgentStartError) {
     switch (error.failure) {
       case "config_required":
-        // By its full path: installing the app does not put the command on the PATH.
-        return `O provedor de IA ainda não foi configurado.\n\nAbra um terminal, rode o comando abaixo e tente de novo:\n"${agentExe()}" config`;
+        return "O provedor de IA não está configurado. Abra Arquivo > Configurações.";
       case "spawn_failed":
         return `Não consegui iniciar o agente em:\n${agentExe()}\n\n${error.detail}`;
       case "timeout":
@@ -137,8 +139,9 @@ function startFailureMessage(error: unknown): string {
 }
 
 /** Starts the project's agent and shows it in the window. Throws if it cannot start. */
-async function connect(project: Project): Promise<void> {
-  const agent = startAgentProcess({ exe: agentExe(), cwd: project.folder });
+async function connect(project: Project, { resume = false }: { resume?: boolean } = {}): Promise<void> {
+  const args = ["gui", "--managed", ...(resume ? ["--resume-latest"] : [])];
+  const agent = startAgentProcess({ exe: agentExe(), cwd: project.folder, args });
   project.agent = agent;
   try {
     const url = await agent.ready;
@@ -158,7 +161,7 @@ async function handleAgentExit(project: Project, agent: AgentProcess, info: Agen
     type: "error",
     title: "Siliconflower",
     message: `O agente de ${basename(project.folder)} parou de funcionar.`,
-    detail: `A conversa desta janela foi perdida.\n\n${info.stderr || `Código de saída: ${info.code}`}`.trim(),
+    detail: `A conversa está salva, menos a resposta que estava em andamento.\n\n${info.stderr || `Código de saída: ${info.code}`}`.trim(),
     buttons: ["Reabrir", "Fechar"],
     defaultId: 0,
     cancelId: 1,
@@ -168,13 +171,42 @@ async function handleAgentExit(project: Project, agent: AgentProcess, info: Agen
     project.window.close();
     return;
   }
+  await reconnect(project);
+}
+
+/** A new agent for the same window, back in the most recent conversation. */
+async function reconnect(project: Project): Promise<void> {
   try {
-    await connect(project);
+    await connect(project, { resume: true });
   } catch (error) {
     if (project.closing) return;
     await dialog.showMessageBox(project.window, { type: "error", title: "Siliconflower", message: startFailureMessage(error) });
     if (!project.closing) project.window.close();
   }
+}
+
+async function restartProject(project: Project): Promise<void> {
+  const previous = project.agent;
+  project.agent = undefined; // this exit is expected: see handleAgentExit
+  await previous?.stop();
+  if (!project.closing) await reconnect(project);
+}
+
+/** A running agent keeps the config it started with, so applying a change is a restart. */
+async function offerRestart(running: Project[]): Promise<void> {
+  const open = running.filter((project) => !project.closing);
+  if (!open.length) return;
+  const options: Electron.MessageBoxOptions = {
+    type: "question",
+    title: "Siliconflower",
+    message: open.length === 1 ? `Reiniciar ${basename(open[0]!.folder)} para usar a nova configuração?` : `Reiniciar os ${open.length} projetos abertos para usar a nova configuração?`,
+    detail: "As conversas continuam de onde pararam, mas uma resposta em andamento é interrompida. Se preferir depois, a nova configuração vale quando o projeto for reaberto.",
+    buttons: ["Reiniciar agora", "Depois"],
+    defaultId: 0,
+    cancelId: 1,
+  };
+  const { response } = await dialog.showMessageBox(open[0]!.window, options);
+  if (response === 0) await Promise.all(open.filter((project) => !project.closing).map(restartProject));
 }
 
 async function openProject(folder: string): Promise<boolean> {
@@ -232,6 +264,12 @@ async function openProject(folder: string): Promise<boolean> {
     await connect(project);
   } catch (error) {
     if (project.closing) return false;
+    if (error instanceof AgentStartError && error.failure === "config_required") {
+      // Opened before destroying the window: closing the last one would quit the app.
+      showSettings(() => void openProject(path));
+      window.destroy();
+      return false;
+    }
     showHome();
     await dialog.showMessageBox(home ?? window, { type: "error", title: "Siliconflower", message: startFailureMessage(error) });
     if (!project.closing) window.destroy();
@@ -284,18 +322,87 @@ function showHome(): void {
   void window.loadFile(buildPath("renderer", "home.html"));
 }
 
-/** IPC is only for the start screen: a project window has no bridge, but check anyway. */
-function fromHome(event: IpcMainInvokeEvent): boolean {
-  return Boolean(home && !home.isDestroyed() && event.sender === home.webContents && event.senderFrame === home.webContents.mainFrame);
+// ---- Settings -------------------------------------------------------------------------
+
+/** One window; `then` runs after a successful save, for what was waiting on the config. */
+function showSettings(then?: () => void): void {
+  if (then) settingsThen = then;
+  if (settings && !settings.isDestroyed()) {
+    if (settings.isMinimized()) settings.restore();
+    settings.focus();
+    return;
+  }
+  hardenSession(session.defaultSession);
+  const window = new BrowserWindow({
+    width: 640,
+    height: 680,
+    minWidth: 420,
+    minHeight: 400,
+    show: false,
+    backgroundColor: BACKGROUND,
+    title: "Configurações - Siliconflower",
+    webPreferences: {
+      preload: buildPath("preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webviewTag: false,
+      devTools: !app.isPackaged,
+    },
+  });
+  settings = window;
+  window.on("page-title-updated", (event) => event.preventDefault());
+  window.once("ready-to-show", () => window.show());
+  window.once("closed", () => {
+    if (settings !== window) return;
+    settings = undefined;
+    settingsThen = undefined;
+  });
+  void window.loadFile(buildPath("renderer", "settings.html"));
+}
+
+/** Local pages only: a project window has no bridge, but check anyway. */
+function sentBy(window: BrowserWindow | undefined, event: IpcMainInvokeEvent): boolean {
+  return Boolean(window && !window.isDestroyed() && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame);
 }
 
 function registerIpc(): void {
   const handle = (channel: string, listener: (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown) => {
     ipcMain.handle(channel, (event, ...args) => {
-      if (!fromHome(event)) throw new Error("Remetente não autorizado.");
+      if (!sentBy(home, event)) throw new Error("Remetente não autorizado.");
       return listener(event, ...args);
     });
   };
+  const handleSettings = (channel: string, listener: (...args: unknown[]) => unknown) => {
+    ipcMain.handle(channel, (event, ...args) => {
+      if (!sentBy(settings, event)) throw new Error("Remetente não autorizado.");
+      return listener(...args);
+    });
+  };
+  handle("settings:open", () => showSettings());
+  handleSettings("settings:get", () => readSettings());
+  handleSettings("settings:reasoning", (baseURL) => reasoningChoices(typeof baseURL === "string" ? baseURL : ""));
+  handleSettings("settings:test", (raw) => {
+    const input = parseInput(raw);
+    return input ? testConnection(input) : { ok: false, message: "Formulário inválido." };
+  });
+  handleSettings("settings:save", async (raw) => {
+    const input = parseInput(raw);
+    if (!input) return { ok: false, errors: {} };
+    const result = await writeSettings(input);
+    if (!result.ok) return result;
+    // Taken first: what opens below already starts with the new config.
+    const running = [...projects.values()].filter((project) => project.agent);
+    const then = settingsThen;
+    settingsThen = undefined;
+    // Before closing the settings: closing the last window would quit the app.
+    if (then) then();
+    else if (!projects.size && !home) showHome();
+    if (settings && !settings.isDestroyed()) settings.close();
+    if (result.changed) void offerRestart(running);
+    return result;
+  });
+
   const listRecents = () => loadRecents(recentsFile()).map((p) => ({
     path: p.path,
     name: basename(p.path) || p.path,
@@ -325,6 +432,7 @@ function buildMenu(): void {
       submenu: [
         { label: "Abrir pasta...", accelerator: "CmdOrCtrl+O", click: () => void pickAndOpen(focused()) },
         { label: "Projetos recentes", accelerator: "CmdOrCtrl+Shift+O", click: () => showHome() },
+        { label: "Configurações...", accelerator: "CmdOrCtrl+,", click: () => showSettings() },
         { type: "separator" },
         { role: "close", label: "Fechar janela" },
         { role: "quit", label: "Sair" },
@@ -373,6 +481,13 @@ function openFromArgs(argv: string[], workingDirectory: string): void {
   else showHome();
 }
 
+/** On first use, the settings form comes first and what was asked for follows it. */
+async function startApp(): Promise<void> {
+  const open = () => openFromArgs(process.argv, process.cwd());
+  if (await isConfigured()) open();
+  else showSettings(open);
+}
+
 app.setName("Siliconflower");
 app.enableSandbox();
 
@@ -385,7 +500,7 @@ if (!app.requestSingleInstanceLock()) {
     app.setAppUserModelId("com.siliconflower.desktop");
     buildMenu();
     registerIpc();
-    openFromArgs(process.argv, process.cwd());
+    return startApp();
   });
 
   app.on("window-all-closed", () => app.quit());

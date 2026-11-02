@@ -47,11 +47,16 @@ A página controla um agente que executa comandos, e qualquer site aberto no nav
 
 **Limitações:** a conexão local não é criptografada, e outro programa rodando na sua conta consegue ler o token (na linha de comando do navegador, nos dados do navegador ou na saída do terminal). A interface não é uma barreira contra software local: ela tem os mesmos privilégios do resto do agente. Não exponha a porta com proxy ou túnel e não compartilhe a URL.
 
+## Conversas salvas
+
+A GUI e o app guardam as conversas em `~/.siliconflower/workspaces/<projeto>/sessions/`, **em texto puro**. Isso inclui suas mensagens e a saída das ferramentas: um arquivo `.env` que o agente tenha lido, por exemplo, fica nelas. A chave de API do provedor não é gravada, mas um segredo que passe pela conversa é. As permissões são as da sua conta no Windows. Apague pelo **×** na lateral o que não deve ficar guardado.
+
 ## App de desktop (`desktop/`)
 
 A janela mostra a mesma página, com texto vindo do modelo e de repositórios, e usa as mesmas proteções do servidor, inclusive o token: outros programas e sites continuam podendo tentar acessar a porta local. Além disso:
 
 - as janelas rodam com `sandbox` e `contextIsolation`, sem Node. A janela de um projeto não tem nenhuma ponte com o processo principal; só a tela inicial, página local, tem uma, e o processo principal confere o remetente e os argumentos;
+- a chave de API não vai para a tela de configurações, que recebe no máximo `***1234`. **Testar conexão** envia a chave ao endereço escrito no formulário, e a resposta do provedor é filtrada para não exibi-la;
 - a página só pede para abrir um projeto que já está nos recentes. Uma pasta nova só vem do seletor nativo, escolhida pelo usuário;
 - a janela só navega na origem do seu servidor local. Links abrem no navegador padrão, e só `http` e `https`;
 - todas as permissões são negadas, menos escrever na área de transferência (botão **Copiar**), e downloads são cancelados;

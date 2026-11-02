@@ -6,7 +6,13 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-02
+
 ### Added
+- Conversas salvas por projeto na GUI e no app: lateral com a lista, nova conversa, retomar e apagar (`src/services/conversations.ts`).
+- Tela de configurações no app, com teste de conexão: provedor, endereço, chave, modelo, pensamento, prompt de sistema e MCP (`desktop/src/settings.ts`).
+- Primeira execução do app sem terminal: o formulário substitui o assistente.
+- Opção `gui --resume-latest`: reabre a conversa mais recente do projeto.
 - Comando `siliconflower gui`: interface gráfica no navegador (Firefox ou outro), com ferramentas, tarefas, perguntas e cancelamento (`src/gui/`).
 - App de desktop em Electron (`desktop/`): janela própria por projeto, seletor de pasta, projetos recentes e aviso quando o agente para.
 - Instalador para Windows (`bun run desktop:dist`): atalhos no menu Iniciar e na área de trabalho, sem pedir administrador, e desinstalação pelo Windows.
@@ -14,6 +20,7 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ### Changed
 - Conversa extraída de `App.tsx` para `AgentSession` (`src/session.ts`), usada pela TUI e pela GUI.
+- Gravação de `config.json` agora é atômica: uma queda no meio não perde a chave de API (`src/config.ts`).
 
 ### Fixed
 - Cancelar uma resposta deixava ferramentas já recebidas executarem e guardava o turno como concluído, com status "pronto": agora o turno é interrompido de verdade (`src/llm.ts`).
