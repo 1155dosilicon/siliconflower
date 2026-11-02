@@ -1,0 +1,37 @@
+appId: com.siliconflower.desktop
+productName: Siliconflower
+directories:
+  # Not the default "build": that is where desktop/build.ts writes the bundle.
+  buildResources: resources
+  output: ../dist-desktop
+files:
+  - build/**/*
+  - package.json
+# Outside the asar: Windows cannot run an executable from inside an archive.
+extraResources:
+  - from: ../dist/siliconflower.exe
+    to: siliconflower.exe
+electronLanguages:
+  - pt-BR
+  - en-US
+# Turns off what would let someone use the installed app to run other code.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true
+win:
+  target: nsis
+  icon: resources/icon.ico
+nsis:
+  # One click, no administrator: installs for the current user only.
+  oneClick: true
+  perMachine: false
+  runAfterFinish: true
+  createStartMenuShortcut: true
+  createDesktopShortcut: true
+  shortcutName: Siliconflower
+  artifactName: Siliconflower-Setup-${version}.${ext}
+  # Recent projects stay, as a later reinstall expects.
+  deleteAppDataOnUninstall: false

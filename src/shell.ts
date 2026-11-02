@@ -48,17 +48,21 @@ export function decodeClixml(stderr: string): string {
 /**
  * Kills a process and all of its descendants (Windows `taskkill /T`). The tree must be
  * killed before the parent dies, otherwise the children are orphaned and keep running.
+ * Resolves when taskkill ends: await it if this process is about to exit.
  */
-export function killProcessTree(child: ChildProcess): void {
+export function killProcessTree(child: ChildProcess): Promise<void> {
   const pid = child.pid;
-  if (!pid || child.exitCode !== null) return;
+  if (!pid || child.exitCode !== null) return Promise.resolve();
   if (process.platform === "win32") {
-    execFile("taskkill.exe", ["/pid", String(pid), "/T", "/F"], { windowsHide: true }, () => {
-      try { child.kill(); } catch { /* already gone */ }
+    return new Promise((resolve) => {
+      execFile("taskkill.exe", ["/pid", String(pid), "/T", "/F"], { windowsHide: true }, () => {
+        try { child.kill(); } catch { /* already gone */ }
+        resolve();
+      });
     });
-  } else {
-    try { child.kill("SIGTERM"); } catch { /* already gone */ }
   }
+  try { child.kill("SIGTERM"); } catch { /* already gone */ }
+  return Promise.resolve();
 }
 
 export interface PowerShellOptions {

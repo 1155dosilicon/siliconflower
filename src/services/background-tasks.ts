@@ -119,6 +119,27 @@ export function getBackgroundTask(id: string): Omit<BackgroundTaskRecord, "proce
   return rest;
 }
 
+/**
+ * Ends every running task, for a front end that is closing: `process.exit` would otherwise
+ * leave the commands running as orphans. Resolves when their process trees are gone.
+ */
+export async function killAllBackgroundTasks(): Promise<void> {
+  const kills: Promise<void>[] = [];
+  for (const task of backgroundTasks.values()) {
+    if (task.status !== "running") continue;
+    if (task.processRef) kills.push(killProcessTree(task.processRef));
+    try {
+      task.cancel?.();
+    } catch {
+      // Best effort cancellation
+    }
+    task.status = "killed";
+    task.completedAt = new Date().toISOString();
+    task.result = "(Processo em background interrompido ao fechar o aplicativo)";
+  }
+  await Promise.allSettled(kills);
+}
+
 export function killBackgroundTask(id: string): { success: boolean; message: string } {
   const task = backgroundTasks.get(id);
   if (!task) {

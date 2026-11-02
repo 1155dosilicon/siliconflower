@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runPowerShell, decodeClixml } from "../src/shell.js";
 import { htmlToMarkdown, isPrivateAddress, webFetch } from "../src/services/web.js";
-import { buildOpenAIMessages, isOfficialOpenAIEndpoint } from "../src/llm.js";
+import { buildOpenAIMessages, isOfficialOpenAIEndpoint, streamChat } from "../src/llm.js";
 import { normalize } from "../src/config.js";
 import { createArtifact, readArtifact, listArtifacts, deleteArtifact, getArtifactsDir } from "../src/services/artifact.js";
 import { smartEditFile } from "../src/services/smart-edit.js";
@@ -12,6 +12,7 @@ import { runBuiltin } from "../src/tools.js";
 import { extractSymbols, generateRepoMap } from "../src/services/repomap.js";
 import { searchContent } from "../src/grep.js";
 import { renderLogo } from "../src/ascii.js";
+import { getBackgroundTask, killAllBackgroundTasks, startBackgroundCommand } from "../src/services/background-tasks.js";
 import type { AppConfig, ChatMessage } from "../src/types.js";
 
 const tmp = join(tmpdir(), `sf_regressions_${Date.now()}`);
@@ -48,6 +49,80 @@ describe("PowerShell runner", () => {
   });
 });
 
+describe("a provider that refuses a valid request without explaining", () => {
+  const config: AppConfig = { baseURL: "", apiKey: "k", model: "m", reasoning: "none", mcpServers: {} };
+  const chunk = `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", model: "m", choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`;
+
+  async function run(responses: (() => Response)[]) {
+    let calls = 0;
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () => (responses[calls++] ?? responses.at(-1)!)(),
+    });
+    const events: { type: string; content?: string; message?: string }[] = [];
+    try {
+      const stream = streamChat({
+        config: { ...config, baseURL: `http://127.0.0.1:${server.port}/v1` },
+        messages: [{ role: "user", content: "oi" }],
+        tools: [],
+        reasoning: "none",
+        executeTool: async () => ({ result: "", isError: false }),
+      });
+      for await (const event of stream) events.push(event);
+    } finally {
+      server.stop(true);
+    }
+    return { calls, events };
+  }
+  const refuse = (message: string) => () => Response.json({ error: { message } }, { status: 400 });
+  const ok = () => new Response(chunk, { headers: { "Content-Type": "text/event-stream" } });
+
+  test("repeats the request once, and the conversation never sees the error", async () => {
+    const { calls, events } = await run([refuse("Request failed"), ok]);
+    expect(calls).toBe(2);
+    expect(events.some((e) => e.type === "error")).toBe(false);
+    expect(events.find((e) => e.type === "done")?.content).toBe("ok");
+  });
+
+  test("does not insist if it happens again", async () => {
+    const { calls, events } = await run([refuse("Request failed")]);
+    expect(calls).toBe(2);
+    expect(events.find((e) => e.type === "error")?.message).toContain("Request failed");
+  });
+
+  test("a 400 that explains itself is a real error, shown at once", async () => {
+    const { calls, events } = await run([refuse("model not found")]);
+    expect(calls).toBe(1);
+    expect(events.find((e) => e.type === "error")?.message).toContain("model not found");
+  });
+});
+
+describe("closing the app", () => {
+  test("background commands and what they started do not survive as orphans", async () => {
+    const marker = `sf-orphan-${process.pid}-${Date.now()}`;
+    const countSleepers = async () => {
+      const res = await runPowerShell(
+        `@(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -match '${marker}' }).Count`
+      );
+      return Number(res.stdout.trim());
+    };
+    // The grandchild is another PowerShell: only killing the whole tree reaches it.
+    const id = startBackgroundCommand(
+      `powershell.exe -NoProfile -Command "Start-Sleep 60 # ${marker}"`,
+      process.cwd(),
+      120_000
+    );
+    for (let i = 0; i < 50 && (await countSleepers()) === 0; i++) await Bun.sleep(100);
+    expect(await countSleepers()).toBeGreaterThan(0);
+
+    await killAllBackgroundTasks();
+
+    expect(await countSleepers()).toBe(0);
+    expect(getBackgroundTask(id)?.status).toBe("killed");
+  }, 30_000);
+});
+
 describe("web", () => {
   test("blocks IPv4-mapped IPv6 loopback in hex form (as serialized by URL)", () => {
     const host = new URL("http://[::ffff:127.0.0.1]/").hostname.replace(/^\[|\]$/g, "");
@@ -78,6 +153,107 @@ describe("web", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe("cancelling a stream", () => {
+  // The OpenAI SDK ends the iteration silently on abort, which used to look like a normal end
+  // of response: the turn was stored as complete and buffered tool calls still ran.
+  function serveChunks(deltas: unknown[], afterSent: () => void) {
+    const encoder = new TextEncoder();
+    return Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      idleTimeout: 0,
+      fetch() {
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              for (const delta of deltas) {
+                const chunk = { id: "x", object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason: null }] };
+                c.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+              }
+              afterSent();
+              // Never closes: the response is still running when it gets cancelled.
+            },
+          }),
+          { headers: { "Content-Type": "text/event-stream" } }
+        );
+      },
+    });
+  }
+
+  const toolCall = { tool_calls: [{ index: 0, id: "c1", type: "function", function: { name: "write_file", arguments: '{"path":"x.txt"}' } }] };
+
+  test("raises AbortError instead of finishing the turn or running buffered tools", async () => {
+    const controller = new AbortController();
+    const server = serveChunks([{ content: "parcial" }, toolCall], () => setTimeout(() => controller.abort(), 50));
+    const executed: string[] = [];
+    const events: string[] = [];
+    let thrown: unknown;
+    try {
+      for await (const ev of streamChat({
+        config: { baseURL: `http://127.0.0.1:${server.port}/v1`, apiKey: "k", model: "m", reasoning: "none" },
+        messages: [{ role: "user", content: "oi" }],
+        tools: [],
+        reasoning: "none",
+        signal: controller.signal,
+        executeTool: async (name) => {
+          executed.push(name);
+          return { result: "ok", isError: false };
+        },
+      })) {
+        events.push(ev.type);
+      }
+    } catch (e) {
+      thrown = e;
+    } finally {
+      server.stop(true);
+    }
+    expect((thrown as Error)?.name).toBe("AbortError");
+    expect(executed).toEqual([]);
+    expect(events).not.toContain("done");
+  });
+
+  test("does not start the remaining tools of a step after a cancel", async () => {
+    const encoder = new TextEncoder();
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      idleTimeout: 0,
+      fetch() {
+        const calls = ["a", "b"].map((name, index) => ({
+          id: "x",
+          object: "chat.completion.chunk",
+          choices: [{ index: 0, finish_reason: null, delta: { tool_calls: [{ index, id: name, type: "function", function: { name, arguments: "{}" } }] } }],
+        }));
+        const body = [...calls.map((c) => `data: ${JSON.stringify(c)}\n\n`), "data: [DONE]\n\n"].join("");
+        return new Response(encoder.encode(body), { headers: { "Content-Type": "text/event-stream" } });
+      },
+    });
+    const controller = new AbortController();
+    const executed: string[] = [];
+    let thrown: unknown;
+    try {
+      for await (const _ of streamChat({
+        config: { baseURL: `http://127.0.0.1:${server.port}/v1`, apiKey: "k", model: "m", reasoning: "none" },
+        messages: [{ role: "user", content: "oi" }],
+        tools: [],
+        reasoning: "none",
+        signal: controller.signal,
+        executeTool: async (name) => {
+          executed.push(name);
+          controller.abort();
+          return { result: "cancelado", isError: true };
+        },
+      })) { /* consume */ }
+    } catch (e) {
+      thrown = e;
+    } finally {
+      server.stop(true);
+    }
+    expect((thrown as Error)?.name).toBe("AbortError");
+    expect(executed).toEqual(["a"]);
   });
 });
 
