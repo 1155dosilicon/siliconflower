@@ -49,6 +49,55 @@ describe("PowerShell runner", () => {
   });
 });
 
+describe("a provider that refuses a valid request without explaining", () => {
+  const config: AppConfig = { baseURL: "", apiKey: "k", model: "m", reasoning: "none", mcpServers: {} };
+  const chunk = `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", model: "m", choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`;
+
+  async function run(responses: (() => Response)[]) {
+    let calls = 0;
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () => (responses[calls++] ?? responses.at(-1)!)(),
+    });
+    const events: { type: string; content?: string; message?: string }[] = [];
+    try {
+      const stream = streamChat({
+        config: { ...config, baseURL: `http://127.0.0.1:${server.port}/v1` },
+        messages: [{ role: "user", content: "oi" }],
+        tools: [],
+        reasoning: "none",
+        executeTool: async () => ({ result: "", isError: false }),
+      });
+      for await (const event of stream) events.push(event);
+    } finally {
+      server.stop(true);
+    }
+    return { calls, events };
+  }
+  const refuse = (message: string) => () => Response.json({ error: { message } }, { status: 400 });
+  const ok = () => new Response(chunk, { headers: { "Content-Type": "text/event-stream" } });
+
+  test("repeats the request once, and the conversation never sees the error", async () => {
+    const { calls, events } = await run([refuse("Request failed"), ok]);
+    expect(calls).toBe(2);
+    expect(events.some((e) => e.type === "error")).toBe(false);
+    expect(events.find((e) => e.type === "done")?.content).toBe("ok");
+  });
+
+  test("does not insist if it happens again", async () => {
+    const { calls, events } = await run([refuse("Request failed")]);
+    expect(calls).toBe(2);
+    expect(events.find((e) => e.type === "error")?.message).toContain("Request failed");
+  });
+
+  test("a 400 that explains itself is a real error, shown at once", async () => {
+    const { calls, events } = await run([refuse("model not found")]);
+    expect(calls).toBe(1);
+    expect(events.find((e) => e.type === "error")?.message).toContain("model not found");
+  });
+});
+
 describe("closing the app", () => {
   test("background commands and what they started do not survive as orphans", async () => {
     const marker = `sf-orphan-${process.pid}-${Date.now()}`;

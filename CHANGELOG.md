@@ -25,6 +25,7 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 ### Fixed
 - Cancelar uma resposta deixava ferramentas já recebidas executarem e guardava o turno como concluído, com status "pronto": agora o turno é interrompido de verdade (`src/llm.ts`).
 - Mudar o modo ou o raciocínio e enviar uma mensagem logo depois fazia o status voltar a "pronto" durante a resposta (`src/session.ts`).
+- HTTP 400 só com "Request failed", que o Xiaomi MiMo devolve às vezes para pedidos válidos, agora é repetido uma vez em vez de virar erro na conversa (`src/llm.ts`).
 - Fechar a GUI deixava comandos em background rodando como órfãos: agora a árvore de processos é encerrada antes de sair (`src/gui/index.ts`).
 - `siliconflower gui` sem terminal e sem configuração ficava parado para sempre no assistente: agora mostra um erro claro (`src/index.tsx`).
 
