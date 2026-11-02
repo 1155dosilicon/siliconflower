@@ -19,6 +19,16 @@ bun run dev
 
 Requisitos: Windows, Bun >= 1.3 (recomendado) ou Node >= 20 com `tsx`.
 
+Para mexer no app de desktop (`desktop/`, projeto à parte):
+
+```powershell
+bun install --cwd desktop
+bun run typecheck:desktop
+bun run build          # uma vez, ou quando o agente mudar: o app usa dist/siliconflower.exe
+bun run desktop
+bun run desktop:dist   # gera o instalador em dist-desktop/
+```
+
 O mapa do código, os comandos e as regras que já evitaram bugs estão em [AGENTS.md](AGENTS.md). A arquitetura detalhada está em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Estilo

@@ -1,12 +1,12 @@
 # 🌸 SILICONFLOWER
 
-![Version](https://img.shields.io/badge/version-0.2.9-blue.svg)
+![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20PowerShell-0078D6.svg)
 ![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black.svg)
 ![Node](https://img.shields.io/badge/Node.js-%3E%3D20-green.svg)
 
-Agente de IA em terminal (CLI/TUI) de alta performance para desenvolvimento de software no Windows. Integra **34 ferramentas nativas**, **Subagentes & Background Tasks**, **Memória Persistente**, **Git Worktrees**, **RepoMap**, **Busca Web** e **Protocolo MCP**, compatível com **SiliconFlow, OpenRouter, OpenAI** e demais backends compatíveis com a API da OpenAI.
+Agente de IA de alta performance para desenvolvimento de software no Windows, como **app de desktop** ou no **terminal (CLI/TUI)**. Integra **34 ferramentas nativas**, **Subagentes & Background Tasks**, **Memória Persistente**, **Git Worktrees**, **RepoMap**, **Busca Web** e **Protocolo MCP**, compatível com **SiliconFlow, OpenRouter, OpenAI** e demais backends compatíveis com a API da OpenAI.
 
 <p align="center">
   <img src="assets/preview.png" alt="SiliconFlower TUI Preview" width="100%" />
@@ -22,7 +22,8 @@ Agente de IA em terminal (CLI/TUI) de alta performance para desenvolvimento de s
 - 🗺️ **RepoMap & Símbolos**: Mapeamento estrutural de código (TS, JS, Python, Go, Rust) com baixo consumo de tokens.
 - ⚡ **Raciocínio & Modos de Operação**: Controle de *reasoning effort* (`Ctrl+E`) e modos de trabalho (`Ctrl+O`: `programação`, `sistema`, `plano`). Na API oficial Xiaomi MiMo, o atalho alterna o pensamento entre ligado e desligado.
 - 🖥️ **TUI com Scroll Livre & Viewport Limpo**: Inicialização com tela limpa e suporte nativo completo à rolagem com a rodinha do mouse em respostas longas e blocos de código (estilo Claude Code).
-- 🌐 **Interface Gráfica no Navegador**: `siliconflower gui` abre o mesmo agente no Firefox ou em outro navegador, mostrando argumentos e resultados das ferramentas e tarefas. O terminal continua disponível.
+- 🪟 **App de Desktop**: instalador sem administrador, janela própria por projeto, configuração sem terminal e conversas salvas que você retoma depois.
+- 🌐 **Interface no Navegador**: `siliconflower gui` abre a mesma interface no Firefox ou em outro navegador, mostrando argumentos e resultados das ferramentas e tarefas.
 - 🧩 **Ecossistema MCP & Hooks**: Suporte nativo ao Model Context Protocol e automações disparadas por eventos do ciclo de vida (`preTool`, `postTool`, `onEdit`, `onCommand`, `onSessionStart`, `onSessionEnd`).
 - 📦 **Binário Nativo Standalone**: Compilação para `.exe` único via Bun, sem necessidade de Node.js instalado.
 
@@ -30,7 +31,19 @@ Agente de IA em terminal (CLI/TUI) de alta performance para desenvolvimento de s
 
 ## 🚀 Início Rápido
 
-### Pré-requisitos
+### App de desktop (recomendado)
+1. Baixe `Siliconflower-Setup-<versão>.exe` na [última versão](https://github.com/1155dosilicon/siliconflower/releases/latest).
+2. Execute com dois cliques. Não pede administrador e não exige Bun nem Node. O instalador não é assinado, então o Windows SmartScreen pode avisar: clique em **Mais informações** e em **Executar assim mesmo**.
+3. Informe provedor, chave e modelo, e escolha a pasta do projeto.
+
+Mais detalhes em [App de Desktop](#app-de-desktop).
+
+### Modo terminal, sem compilar
+Baixe `siliconflower.exe` na [última versão](https://github.com/1155dosilicon/siliconflower/releases/latest) e rode dentro da pasta do projeto. Para usar de qualquer pasta, coloque-o em uma pasta do `PATH`. Só é necessário se você quer o terminal: o app já traz o próprio agente.
+
+### A partir do código-fonte
+
+**Pré-requisitos:**
 - Windows com PowerShell.
 - [Bun >= 1.3](https://bun.sh) para instalar dependências, executar a partir do código-fonte e compilar o `.exe`.
 - Como alternativa ao Bun, Node.js >= 20 com npm pode executar o launcher local após `npm install` (`node bin/siliconflower.js`). O comando `bun run start` requer Bun.
@@ -45,7 +58,7 @@ bun install
 bun run start
 ```
 
-### Compilar e Instalar no PATH do Windows
+**Compilar e instalar no PATH do Windows:**
 ```powershell
 bun run build          # Gera dist/siliconflower.exe
 npm run install:bin    # Adiciona ao PATH do usuário
@@ -65,6 +78,7 @@ As configurações globais e dados do Siliconflower ficam organizados em `~/.sil
 - **Memórias Globais:** `~/.siliconflower/memory/`
 - **Artefatos Globais:** `~/.siliconflower/artifacts/`
 - **Workspaces Isolados:** `~/.siliconflower/workspaces/<workspace-id>/` (armazena memórias, artefatos e hooks do projeto sem poluir o repositório local; o id vem da pasta que contém `SILICONFLOWER.md`/`AGENTS.md`)
+- **Conversas da GUI e do app:** `~/.siliconflower/workspaces/<workspace-id>/sessions/`, em texto puro (veja [SECURITY.md](SECURITY.md))
 - **Logs:** `~/.siliconflower/logs/`
 - **Saídas Truncadas:** `~/.siliconflower/outputs/`
 
@@ -129,18 +143,18 @@ As opções `--model`, `--reasoning`, `--mode`, `--base-url` e `--api-key` tamb�
 Enquanto o modelo raciocina, a página mostra só um aviso **Pensando...**, sem o texto do raciocínio. As conversas ficam salvas por projeto, na lateral: **+ Nova conversa** começa outra, clicar em uma retoma de onde parou e **×** apaga. Na TUI, a conversa continua terminando ao sair. Fechar a aba encerra o agente depois de cerca de 15 segundos; `Ctrl+C` no terminal encerra na hora. Uma resposta só é salva ao terminar ou ser interrompida: se o agente cair no meio dela, ela se perde. A URL traz um token de acesso: não a compartilhe (veja [SECURITY.md](SECURITY.md)).
 
 ### App de Desktop
-A mesma interface em janela própria, sem terminal nem navegador. Para gerar o instalador a partir do código-fonte:
+A mesma interface em janela própria, sem terminal nem navegador. O instalador está na [última versão](https://github.com/1155dosilicon/siliconflower/releases/latest). Ele instala só para o seu usuário, sem pedir administrador, e cria atalhos no menu Iniciar e na área de trabalho. O app ocupa cerca de 420 MB, porque traz o agente e o Electron, e não coloca `siliconflower` no `PATH`: o modo terminal é instalado à parte. Para atualizar, execute o instalador da versão nova. Para remover, use **Configurações > Aplicativos**; seus projetos recentes, sua configuração e suas conversas continuam guardados.
+
+Para gerar o instalador a partir do código-fonte, ou desenvolver sem instalar:
 
 ```powershell
+bun install                    # só na primeira vez
 bun install --cwd desktop      # só na primeira vez: baixa o Electron
 bun run desktop:dist           # gera dist-desktop\Siliconflower-Setup-<versão>.exe
+
+bun run build                  # ou, sem instalar: compila o agente
+bun run desktop                # e abre o app a partir do código-fonte
 ```
-
-Execute o instalador com dois cliques. Ele instala só para o seu usuário, sem pedir administrador, e cria atalhos no menu Iniciar e na área de trabalho. O app ocupa cerca de 420 MB, porque traz o agente e o Electron, e não coloca `siliconflower` no `PATH`: o modo terminal continua sendo instalado à parte, com `npm run install:bin`. Para remover, use **Configurações > Aplicativos**; seus projetos recentes e sua configuração continuam guardados.
-
-O instalador ainda não é assinado, então o Windows SmartScreen pode avisar na primeira execução: clique em **Mais informações** e em **Executar assim mesmo**.
-
-Para desenvolver sem instalar: `bun run build` uma vez e depois `bun run desktop`.
 
 Na tela inicial, escolha a pasta do projeto. Cada projeto abre em sua própria janela, com seu agente e suas conversas; `Ctrl+O` abre outra pasta e `Ctrl+Shift+O` mostra os recentes. Fechar a janela encerra o agente e os comandos em background daquele projeto, e as conversas continuam salvas. Abrir o projeto de novo começa com uma conversa vazia, para não gastar tokens com contexto antigo; a anterior está na lateral.
 
@@ -214,6 +228,7 @@ Crie arquivos Markdown em `~/.siliconflower/skills/` com instruções especializ
 - **Acentos corrompidos na saída de comandos:** a partir da v0.2.7, `execute_command`, hooks e tarefas em background forçam UTF-8 no PowerShell e rodam com `-NoProfile` (o seu `$PROFILE` não é carregado nesses comandos).
 - **O agente lembra de coisas de outro projeto / não lembra de nada:** a memória de projeto só existe em pastas com `SILICONFLOWER.md` ou `AGENTS.md` (nela ou acima dela). Confira com `siliconflower show` (linha `Project`) ou na barra de status (`Projeto:`). Abra o agente dentro da pasta do projeto, ou rode `siliconflower init` para criar um. Memórias globais (`~/.siliconflower/memory/`) aparecem em qualquer pasta.
 - **Comando não encontrado após instalar o `.exe`:** abra uma nova janela do terminal para carregar o PATH atualizado.
+- **Problema no app de desktop:** o log fica em `~/.siliconflower/logs/siliconflower.log`. Instalar o app não instala o comando `siliconflower`.
 
 ---
 
@@ -222,6 +237,7 @@ Crie arquivos Markdown em `~/.siliconflower/skills/` com instruções especializ
 ```text
 siliconflower/
 ├── src/                  # Código (mapa em AGENTS.md)
+├── desktop/              # App de desktop em Electron e instalador
 ├── tests/                # bun test
 ├── scripts/              # Instalação no PATH do Windows e empacotamento
 ├── docs/ARCHITECTURE.md  # Arquitetura e referência técnica

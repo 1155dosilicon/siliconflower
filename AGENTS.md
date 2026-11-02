@@ -1,6 +1,6 @@
 # Siliconflower — guia para agentes
 
-Agente de IA em CLI/TUI para Windows: TypeScript + Bun + Ink/React, sobre APIs compatíveis com OpenAI.
+Agente de IA para Windows, em CLI/TUI e app de desktop: TypeScript + Bun + Ink/React (Electron no app), sobre APIs compatíveis com OpenAI.
 Textos para o usuário, prompts e docs ficam em pt-BR. Logs e campos de protocolo ficam em ASCII.
 
 ## Comandos

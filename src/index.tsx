@@ -35,7 +35,7 @@ program
 
 program
   .command("gui")
-  .description("Open the graphical interface in the browser (accepts the same options as the main command)")
+  .description("Open the web interface in the browser, with saved conversations (accepts the same options as the main command)")
   .option("--port <n>", "local port (default: a free port)")
   .option("--no-open", "do not open the browser, only print the URL")
   .option("--managed", "controlled by another program (desktop app): JSON events on stdout, exits when stdin closes")
