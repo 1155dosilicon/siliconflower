@@ -40,6 +40,7 @@
     "typecheck": "tsc --noEmit",
     "desktop": "bun run --cwd desktop start",
     "typecheck:desktop": "bun run --cwd desktop typecheck",
+    "desktop:dist": "bun run build && bun run --cwd desktop dist",
     "install:bin": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1"
   },
   "dependencies": {

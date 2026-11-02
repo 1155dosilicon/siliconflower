@@ -8,7 +8,8 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ### Added
 - Comando `siliconflower gui`: interface gráfica no navegador (Firefox ou outro), com ferramentas, tarefas, perguntas e cancelamento (`src/gui/`).
-- App de desktop em Electron (`desktop/`), ainda sem instalador: janela própria por projeto, seletor de pasta, projetos recentes e aviso quando o agente para.
+- App de desktop em Electron (`desktop/`): janela própria por projeto, seletor de pasta, projetos recentes e aviso quando o agente para.
+- Instalador para Windows (`bun run desktop:dist`): atalhos no menu Iniciar e na área de trabalho, sem pedir administrador, e desinstalação pelo Windows.
 - Opção `gui --managed`: eventos JSON no stdout e encerramento ao fechar o stdin, para o app de desktop controlar o agente.
 
 ### Changed

@@ -42,6 +42,35 @@ describe("recent projects", () => {
   });
 });
 
+describe("installer config", () => {
+  const desktop = resolve(import.meta.dir, "..", "desktop");
+  const builder = readFileSync(join(desktop, "electron-builder.yml"), "utf8");
+  const main = readFileSync(join(desktop, "src", "main.ts"), "utf8");
+
+  test("the agent ships where the app looks for it", () => {
+    expect(builder).toContain("to: siliconflower.exe");
+    expect(main).toContain(`join(process.resourcesPath, "siliconflower.exe")`);
+  });
+
+  test("the taskbar groups the app under the id of the installer", () => {
+    const appId = builder.match(/^appId: (.+)$/m)?.[1]?.trim();
+    expect(main).toContain(`app.setAppUserModelId("${appId}")`);
+  });
+
+  test("does not install over the folder of the command line version", () => {
+    // Per-user installs go to Programs\<package name>; scripts/install.ps1 uses Programs\siliconflower.
+    const pkg = JSON.parse(readFileSync(join(desktop, "package.json"), "utf8"));
+    expect(pkg.name).not.toBe("siliconflower");
+    expect(readFileSync(resolve(desktop, "..", "scripts", "install.ps1"), "utf8")).toMatch(/Programs\\siliconflower/i);
+  });
+
+  test("the installed app cannot be used to run other code", () => {
+    for (const fuse of ["runAsNode: false", "enableNodeOptionsEnvironmentVariable: false", "enableNodeCliInspectArguments: false", "onlyLoadAppFromAsar: true"]) {
+      expect(builder).toContain(fuse);
+    }
+  });
+});
+
 test("the agent does not inherit Electron's variables", () => {
   expect(childEnv({ PATH: "x", ELECTRON_RUN_AS_NODE: "1", electron_no_asar: "1" })).toEqual({ PATH: "x" });
 });

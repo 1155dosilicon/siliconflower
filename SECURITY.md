@@ -58,7 +58,9 @@ A janela mostra a mesma página, com texto vindo do modelo e de repositórios, e
 - cada projeto tem sessão própria, em memória, então o cookie de um não chega ao outro;
 - a URL com o token só passa pelo pipe entre o app e o agente e nunca vai para o log.
 
-**Limitação:** o app ainda não é assinado, então o Windows pode avisar ao executá-lo.
+- no app instalado, os *fuses* do Electron desligam o uso do executável como interpretador Node (`ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS`, `--inspect`), e ele só carrega o código de dentro do próprio pacote, com integridade verificada.
+
+**Limitação:** o instalador e o app ainda não são assinados, então não há como conferir a origem do arquivo, e o Windows SmartScreen pode avisar ao executá-lo. Baixe só de uma fonte em que confia.
 
 ## Instruções de projeto vêm do repositório
 
