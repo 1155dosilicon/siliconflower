@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>Configurações</title>
+  <link rel="stylesheet" href="home.css">
+  <link rel="stylesheet" href="settings.css">
+  <script src="settings.js" defer></script>
+</head>
+<body>
+  <form id="form" class="settings" novalidate>
+    <h1 id="title">Configurações</h1>
+    <p id="welcome" hidden>Para começar, conecte o Siliconflower a um provedor de IA compatível com a API da OpenAI.</p>
+    <p id="env-note" class="note" hidden></p>
+
+    <label for="preset">Provedor</label>
+    <select id="preset">
+      <option value="https://api.siliconflow.com/v1">SiliconFlow</option>
+      <option value="https://openrouter.ai/api/v1">OpenRouter</option>
+      <option value="https://api.openai.com/v1">OpenAI</option>
+      <option value="">Outro</option>
+    </select>
+
+    <label for="baseURL">Endereço da API</label>
+    <input id="baseURL" type="url" autocomplete="off" spellcheck="false" placeholder="https://api.exemplo.com/v1">
+    <p class="field-error" data-for="baseURL" role="alert" hidden></p>
+
+    <label for="apiKey">Chave de API</label>
+    <input id="apiKey" type="password" autocomplete="off" spellcheck="false">
+    <p id="key-help" class="help"></p>
+    <p class="field-error" data-for="apiKey" role="alert" hidden></p>
+
+    <label for="model">Modelo</label>
+    <input id="model" type="text" autocomplete="off" spellcheck="false" placeholder="ex.: deepseek-ai/DeepSeek-V4-Pro ou gpt-5.5">
+    <p class="field-error" data-for="model" role="alert" hidden></p>
+
+    <label for="reasoning">Pensamento padrão</label>
+    <select id="reasoning"></select>
+
+    <details id="advanced">
+      <summary>Avançado</summary>
+      <label for="system">Prompt de sistema (opcional)</label>
+      <textarea id="system" rows="4" placeholder="Instruções extras para todas as conversas"></textarea>
+
+      <label for="mcp">Servidores MCP (JSON, opcional)</label>
+      <textarea id="mcp" class="mono" rows="6" spellcheck="false" placeholder='{ "arquivos": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/"] } }'></textarea>
+      <p class="field-error" data-for="mcp" role="alert" hidden></p>
+    </details>
+
+    <p id="result" role="status" hidden></p>
+
+    <div class="actions">
+      <button id="test" type="button">Testar conexão</button>
+      <button id="save" type="submit" class="primary">Salvar</button>
+    </div>
+  </form>
+</body>
+</html>

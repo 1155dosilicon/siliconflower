@@ -24,9 +24,9 @@ Antes de dar uma tarefa por concluída: `bun run typecheck` e `bun test`.
 - `src/llm.ts`: loop de streaming e ferramentas (até 50 passos), compactação por passo, fallbacks de parâmetros. `context.ts`: compactação e truncamento de saídas.
 - `src/tools.ts`: ferramentas nativas (schema + `run`). `read_skill` fica em `skills.ts`. `tool-policy.ts`: allowlist do modo `plano`.
 - `src/shell.ts`: toda execução de PowerShell. `project.ts`: detecção de projeto (`SILICONFLOWER.md`/`AGENTS.md`).
-- `src/services/`: memória, subagentes, tarefas em background, web, artefatos, worktrees, repomap, smart-edit.
+- `src/services/`: memória, subagentes, tarefas em background, conversas salvas, web, artefatos, worktrees, repomap, smart-edit.
 - `src/core/hooks.ts`: hooks. `mcp.ts`: cliente MCP.
-- `desktop/`: app Electron, projeto à parte (`bun install --cwd desktop`, `bun run desktop`, `bun run typecheck:desktop`). `main.ts`: janelas e segurança. `agent-process.ts`: ciclo de vida do `siliconflower.exe gui --managed`, um por projeto. `bun run desktop:dist` gera o instalador em `dist-desktop/`.
+- `desktop/`: app Electron, projeto à parte (`bun install --cwd desktop`, `bun run desktop`, `bun run typecheck:desktop`). `main.ts`: janelas e segurança. `agent-process.ts`: ciclo de vida do `siliconflower.exe gui --managed`, um por projeto. `settings.ts`: formulário de configuração, sem Electron. `bun run desktop:dist` gera o instalador em `dist-desktop/`.
 
 ## Regras (cada uma já causou bug)
 

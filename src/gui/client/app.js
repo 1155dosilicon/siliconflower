@@ -13,6 +13,7 @@ let renderedMessages = 0;
 let renderScheduled = false;
 let forceScroll = false;
 let questionShown = null;
+let workingFolder = "";
 const toolCards = new Map();
 
 /* --------------------------------- DOM helpers --------------------------------- */
@@ -251,14 +252,57 @@ function renderTodos() {
   }
 }
 
+let sidebarDrawn = null;
+
+function formatDate(iso) {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+}
+
+function renderSidebar() {
+  // Rebuilding the list at every token of an answer would lose hover and focus.
+  const { conversations, conversationId, streaming } = state;
+  if (sidebarDrawn?.conversations === conversations && sidebarDrawn.conversationId === conversationId && sidebarDrawn.streaming === streaming) return;
+  sidebarDrawn = { conversations, conversationId, streaming };
+
+  $("new-conversation").disabled = streaming;
+  $("no-conversations").hidden = conversations.length > 0;
+  $("conversation-list").replaceChildren(...conversations.map((conversation) => {
+    const current = conversation.id === conversationId;
+    const item = el("li", `conversation${current ? " current" : ""}`);
+    const open = el("button", "conversation-open");
+    open.type = "button";
+    open.disabled = streaming;
+    open.title = conversation.title;
+    if (current) open.setAttribute("aria-current", "true");
+    open.append(el("span", "conversation-title", conversation.title), el("span", "conversation-date", formatDate(conversation.updatedAt)));
+    open.addEventListener("click", () => {
+      if (!current) sendToServer({ type: "resume", id: conversation.id });
+    });
+    const remove = el("button", "conversation-delete", "×");
+    remove.type = "button";
+    remove.disabled = streaming;
+    remove.title = "Apagar esta conversa";
+    remove.setAttribute("aria-label", `Apagar a conversa ${conversation.title}`);
+    remove.addEventListener("click", () => {
+      if (window.confirm(`Apagar a conversa "${conversation.title}"? Isso não pode ser desfeito.`)) {
+        sendToServer({ type: "delete", id: conversation.id });
+      }
+    });
+    item.append(open, remove);
+    return item;
+  }));
+}
+
 function formatTokens(n) {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
 function renderChrome() {
-  const projectName = state.project ? state.project.root.split(/[\\/]/).pop() : null;
-  $("project").textContent = projectName ?? "sem projeto (memória de projeto desligada)";
-  $("project").title = state.project?.root ?? "";
+  const root = state.project?.root ?? workingFolder;
+  const folderName = root.split(/[\\/]/).filter(Boolean).pop() ?? root;
+  $("project").textContent = state.project ? folderName : `${folderName} · memória de projeto desligada`;
+  $("project").title = root;
 
   const select = $("mode");
   select.value = state.mode;
@@ -308,6 +352,7 @@ function render() {
   renderLive();
   renderQuestion();
   renderTodos();
+  renderSidebar();
   renderChrome();
   if (stick) scrollToEnd();
   updateJumpButton();
@@ -352,6 +397,7 @@ function handleHello(message) {
   const { meta } = message;
   fillSelect($("mode"), meta.modes.map((value) => ({ value, label: value })));
   fillSelect($("reasoning"), meta.reasoningOptions.map(({ value, label }) => ({ value, label: REASONING_NAMES[label] ?? label })));
+  workingFolder = meta.cwd;
   $("empty-cwd").textContent = `Pasta de trabalho: ${meta.cwd}`;
   document.title = `Siliconflower ${meta.version}`;
   rebuildTimeline();
@@ -398,7 +444,7 @@ function connect() {
   socket.addEventListener("close", () => {
     setComposerEnabled(false);
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      setConnection("sessão encerrada: rode siliconflower gui de novo", "bad");
+      setConnection("sessão encerrada", "bad");
       return;
     }
     reconnectAttempts++;
@@ -452,6 +498,11 @@ $("question").addEventListener("submit", (event) => {
   const input = $("question-input");
   if (input.value.trim()) sendToServer({ type: "answer", text: input.value });
 });
+
+$("new-conversation").addEventListener("click", () => sendToServer({ type: "new" }));
+$("toggle-sidebar").addEventListener("click", () => { $("sidebar").hidden = !$("sidebar").hidden; });
+// Narrow windows start with the room for the conversation itself.
+$("sidebar").hidden = window.matchMedia("(max-width: 760px)").matches;
 
 $("mode").addEventListener("change", (event) => sendToServer({ type: "mode", mode: event.target.value }));
 $("reasoning").addEventListener("change", (event) => sendToServer({ type: "reasoning", level: event.target.value }));

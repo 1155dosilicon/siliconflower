@@ -66,6 +66,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   font-weight: 600;
 }
 
+footer { text-align: center; }
+.link { border: 0; background: transparent; color: var(--muted); font-size: 13px; }
+.link:hover:enabled { color: var(--text); text-decoration: underline; }
+
 section { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 h2 { margin: 8px 0; color: var(--muted); font-size: 13px; font-weight: 600; }
 

@@ -39,6 +39,7 @@ program
   .option("--port <n>", "local port (default: a free port)")
   .option("--no-open", "do not open the browser, only print the URL")
   .option("--managed", "controlled by another program (desktop app): JSON events on stdout, exits when stdin closes")
+  .option("--resume-latest", "reopen the project's most recent conversation")
   .action(async (_opts, cmd: Command) => {
     const opts = cmd.optsWithGlobals();
     if (!process.versions.bun) {
@@ -64,7 +65,12 @@ program
     await log("info", "=== siliconflower iniciado por GUI ===");
     // Imported only here: it depends on Bun, and the TUI also runs on Node + tsx.
     const { startGui } = await import("./gui/index.js");
-    await startGui(resolved.config, resolved.overrides, { port, open: opts.open && !managed, managed });
+    await startGui(resolved.config, resolved.overrides, {
+      port,
+      open: opts.open && !managed,
+      managed,
+      resumeLatest: Boolean(opts.resumeLatest),
+    });
   });
 
 program

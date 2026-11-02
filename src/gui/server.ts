@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { ServerWebSocket } from "bun";
 import type { AgentSession, SessionState } from "../session.js";
-import type { Mode, ReasoningLevel, StreamEvent } from "../types.js";
+import type { Mode, ReasoningLevel } from "../types.js";
 import { REASONING_LEVELS } from "../types.js";
 import { MODES } from "../modes.js";
 import { reasoningLabel, reasoningOptions } from "../reasoning.js";
@@ -18,8 +18,6 @@ const MAX_MESSAGE_BYTES = 1024 * 1024;
 const STATE_FLUSH_MS = 33;
 /** Time for a page reload to reconnect before the app considers itself closed. */
 const DEFAULT_GRACE_MS = 15_000;
-const MAX_TOOL_ACTIVITIES = 300;
-const MAX_TOOL_TEXT_CHARS = 50_000;
 
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><g fill="#e77fb3"><circle cx="16" cy="7" r="6"/><circle cx="25" cy="13" r="6"/><circle cx="21" cy="24" r="6"/><circle cx="11" cy="24" r="6"/><circle cx="7" cy="13" r="6"/><circle cx="16" cy="16" r="8"/></g><circle cx="16" cy="16" r="4" fill="#f7d774"/></svg>`;
 
@@ -30,18 +28,6 @@ const ASSETS: Record<string, { body: string; type: string }> = {
   "/markdown.js": { body: markdownJs, type: "text/javascript; charset=utf-8" },
   "/favicon.svg": { body: FAVICON, type: "image/svg+xml" },
 };
-
-export interface ToolActivity {
-  /** Unique in this session, unlike `id`, which comes from the provider. */
-  key: number;
-  id: string;
-  name: string;
-  args: string;
-  result?: string;
-  isError?: boolean;
-  /** Number of messages already shown when the tool ran: places the card in the timeline. */
-  afterMessage: number;
-}
 
 export interface GuiServerOptions {
   /** 0 (default) picks a free port, so several projects can run side by side. */
@@ -56,10 +42,6 @@ export interface GuiServer {
   url: string;
   port: number;
   stop: () => void;
-}
-
-function clip(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max)}\n\n[... ${text.length - max} caracteres omitidos na interface]` : text;
 }
 
 function sameSecret(a: string, b: string): boolean {
@@ -95,8 +77,6 @@ function forPage(state: SessionState) {
 export function startGuiServer(session: AgentSession, options: GuiServerOptions = {}): GuiServer {
   const token = randomBytes(32).toString("hex");
   const graceMs = options.graceMs ?? DEFAULT_GRACE_MS;
-  const activities: ToolActivity[] = [];
-  let nextActivityKey = 1;
   let lastSent: SessionState = session.getState();
   let flushTimer: ReturnType<typeof setTimeout> | undefined;
   let graceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -134,32 +114,37 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
     else flushTimer ??= setTimeout(flushState, STATE_FLUSH_MS);
   });
 
-  const unsubscribeStream = session.onStreamEvent((event: StreamEvent) => {
-    flushState(); // events are placed relative to the messages the page already has
-    if (event.type === "tool_call") {
-      const activity: ToolActivity = {
-        key: nextActivityKey++,
-        id: event.id,
-        name: event.name,
-        args: clip(event.args, MAX_TOOL_TEXT_CHARS),
-        afterMessage: session.getState().messages.length,
-      };
-      activities.push(activity);
-      if (activities.length > MAX_TOOL_ACTIVITIES) activities.shift();
-      publish({ type: "tool", activity });
-    } else if (event.type === "tool_result") {
-      // Some providers reuse call ids across steps: the latest unanswered call is the one.
-      const activity = [...activities].reverse().find((a) => a.id === event.id && a.result === undefined);
-      if (activity) {
-        activity.result = clip(event.result, MAX_TOOL_TEXT_CHARS);
-        activity.isError = event.isError;
-        publish({ type: "tool", activity });
-      }
-    }
+  const unsubscribeActivity = session.onActivity((activity) => {
+    flushState(); // cards are placed relative to the messages the page already has
+    publish({ type: "tool", activity });
   });
 
+  const helloMessage = () => {
+    const { baseURL } = session.config;
+    return {
+      type: "hello",
+      state: forPage(session.getState()),
+      activities: session.getActivities(),
+      meta: {
+        version: APP_VERSION,
+        cwd: process.cwd(),
+        logFile: logFile(),
+        modes: MODES,
+        reasoningOptions: reasoningOptions(baseURL).map((value) => ({ value, label: reasoningLabel(value, baseURL) })),
+      },
+    };
+  };
+
+  /** Another conversation on screen: the pages redraw everything, as after a reload. */
+  const publishConversation = () => {
+    if (flushTimer) clearTimeout(flushTimer);
+    flushTimer = undefined;
+    lastSent = session.getState();
+    publish(helloMessage());
+  };
+
   const handleMessage = (raw: string | Buffer) => {
-    let msg: { type?: unknown; text?: unknown; mode?: unknown; level?: unknown };
+    let msg: { type?: unknown; text?: unknown; mode?: unknown; level?: unknown; id?: unknown };
     try {
       msg = JSON.parse(String(raw));
     } catch {
@@ -183,6 +168,22 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
         break;
       case "reasoning":
         if ((REASONING_LEVELS as unknown[]).includes(msg.level)) session.setReasoning(msg.level as ReasoningLevel);
+        break;
+      case "new":
+        if (!session.getState().streaming) {
+          session.newConversation();
+          publishConversation();
+        }
+        break;
+      case "resume":
+        if (typeof msg.id === "string") {
+          void session.resumeConversation(msg.id).then((resumed) => { if (resumed) publishConversation(); });
+        }
+        break;
+      case "delete":
+        if (typeof msg.id === "string") {
+          void session.deleteConversation(msg.id).then(publishConversation);
+        }
         break;
     }
   };
@@ -238,19 +239,7 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
         clients++;
         if (graceTimer) clearTimeout(graceTimer);
         flushState();
-        const { baseURL } = session.config;
-        ws.send(JSON.stringify({
-          type: "hello",
-          state: forPage(session.getState()),
-          activities,
-          meta: {
-            version: APP_VERSION,
-            cwd: process.cwd(),
-            logFile: logFile(),
-            modes: MODES,
-            reasoningOptions: reasoningOptions(baseURL).map((value) => ({ value, label: reasoningLabel(value, baseURL) })),
-          },
-        }));
+        ws.send(JSON.stringify(helloMessage()));
         ws.subscribe(TOPIC);
       },
       message(_ws, raw) {
@@ -273,7 +262,7 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
       if (flushTimer) clearTimeout(flushTimer);
       if (graceTimer) clearTimeout(graceTimer);
       unsubscribeState();
-      unsubscribeStream();
+      unsubscribeActivity();
       void server.stop(true);
     },
   };

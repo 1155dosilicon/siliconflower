@@ -1,6 +1,9 @@
 import { AgentSession, type SessionOverrides } from "../session.js";
 import { runPowerShell, describeFailure } from "../shell.js";
 import { killAllBackgroundTasks } from "../services/background-tasks.js";
+import { ConversationStore } from "../services/conversations.js";
+import { getWorkspaceDataDir } from "../fs-util.js";
+import { join } from "node:path";
 import { log } from "../logger.js";
 import type { AppConfig } from "../types.js";
 import { startGuiServer } from "./server.js";
@@ -13,11 +16,16 @@ export interface GuiOptions {
   open: boolean;
   /** Controlled by another program: see managed.ts. The parent decides when to close. */
   managed?: boolean;
+  /** Reopens the project's most recent conversation instead of starting an empty one. */
+  resumeLatest?: boolean;
 }
 
 /** Runs the web front end until the page is closed or the terminal is interrupted. */
 export async function startGui(config: AppConfig, overrides: SessionOverrides, options: GuiOptions): Promise<void> {
-  const session = new AgentSession(config, overrides);
+  const store = new ConversationStore(join(getWorkspaceDataDir(process.cwd()), "sessions"));
+  const session = new AgentSession(config, overrides, { store });
+  // Before the server: the first page must already see the conversation.
+  await session.loadConversations({ resumeLatest: options.resumeLatest });
   const managed = options.managed ?? false;
   let shuttingDown = false;
   let finish = () => {};

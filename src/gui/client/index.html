@@ -10,12 +10,19 @@
 </head>
 <body>
   <header class="topbar">
+    <button id="toggle-sidebar" type="button" class="icon-button" title="Mostrar ou esconder as conversas" aria-label="Mostrar ou esconder as conversas" aria-controls="sidebar">☰</button>
     <div class="brand"><span aria-hidden="true">🌸</span> Siliconflower</div>
     <div id="project" class="project"></div>
     <div id="connection" class="connection" role="status"></div>
   </header>
 
   <div class="layout">
+    <nav id="sidebar" class="sidebar" aria-label="Conversas">
+      <button id="new-conversation" type="button">+ Nova conversa</button>
+      <ul id="conversation-list"></ul>
+      <p id="no-conversations" class="sidebar-empty">As conversas deste projeto ficam aqui.</p>
+    </nav>
+
     <main id="scroller" class="scroller">
       <div class="column">
         <div id="empty" class="empty">
