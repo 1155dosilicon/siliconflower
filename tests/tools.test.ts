@@ -63,6 +63,74 @@ describe("tools", () => {
     expect(res.result).toContain("oldText não pode ser vazio");
   });
 
+  test("memory and artifact check the fields of each action", async () => {
+    for (const [name, args, expected] of [
+      ["memory", { action: "save", name: "x" }, "type, description, content"],
+      ["memory", { action: "forget" }, "name"],
+      ["memory", { action: "apagar" }, "action inválida"],
+      ["memory", {}, "action inválida"],
+      ["artifact", { action: "create", id: "x" }, "title, type, content, summary"],
+      ["artifact", { action: "read" }, "id"],
+      ["artifact", { action: "delete" }, "id"],
+      ["artifact", {}, "action inválida"],
+    ] as const) {
+      const res = await runBuiltin(name, args);
+      expect(res.isError).toBe(true);
+      expect(res.result).toContain(expected);
+    }
+  });
+
+  test("artifact goes through its whole cycle in one tool", async () => {
+    const id = `teste_${Date.now()}`;
+    const fields = { id, title: "T", type: "markdown", content: "corpo do artefato", summary: "S", scope: "global" };
+    expect((await runBuiltin("artifact", { action: "create", ...fields })).isError).toBe(false);
+    expect((await runBuiltin("artifact", { action: "read", id })).result).toContain("corpo do artefato");
+    expect((await runBuiltin("artifact", { action: "list" })).result).toContain(id);
+    expect((await runBuiltin("artifact", { action: "delete", id, scope: "global" })).isError).toBe(false);
+    expect((await runBuiltin("artifact", { action: "read", id })).isError).toBe(true);
+  });
+
+  test("memory goes through its whole cycle in one tool", async () => {
+    const name = `teste_${Date.now()}`;
+    const fields = { name, type: "reference", description: "D", content: "conteudo da memoria", scope: "global" };
+    expect((await runBuiltin("memory", { action: "save", ...fields })).isError).toBe(false);
+    expect((await runBuiltin("memory", { action: "recall", query: name })).result).toContain("conteudo da memoria");
+    expect((await runBuiltin("memory", { action: "forget", name, scope: "global" })).isError).toBe(false);
+    expect((await runBuiltin("memory", { action: "recall", query: name })).result).toContain("Nenhuma memória");
+  });
+
+  describe("onEdit hook", () => {
+    const config = (onEdit: string) => ({ baseURL: "http://x/v1", apiKey: "k", model: "m", reasoning: "none" as const, hooks: { onEdit } });
+    const write = (onEdit: string, mode?: "plano") =>
+      runBuiltin("write_file", { path: join(tmpdir(), `sf-hook-${Date.now()}.txt`), content: "x" }, { config: config(onEdit), mode });
+
+    test("its output reaches the model", async () => {
+      const res = await write("Write-Output 'erro de tipo na linha 3'");
+      expect(res.isError).toBe(false);
+      expect(res.result).toContain("Arquivo escrito");
+      expect(res.result).toContain("--- Hook onEdit ---");
+      expect(res.result).toContain("erro de tipo na linha 3");
+    });
+
+    test("a failing check does not turn the edit into an error", async () => {
+      const res = await write("Write-Output 'falhou aqui'; exit 3");
+      expect(res.isError).toBe(false);
+      expect(res.result).toContain("Hook onEdit falhou");
+      expect(res.result).toContain("falhou aqui");
+    });
+
+    test("a silent check adds nothing", async () => {
+      const res = await write("$null = 1");
+      expect(res.result).not.toContain("Hook onEdit");
+    });
+
+    test("a long output is cut", async () => {
+      const res = await write("'y' * 20000");
+      expect(res.result.length).toBeLessThan(9000);
+      expect(res.result).toContain("TRUNCADA");
+    });
+  });
+
   test("todowrite normalizes status and priority synonyms", async () => {
     const res = await runBuiltin("todowrite", {
       todos: [

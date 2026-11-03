@@ -25,6 +25,21 @@ export interface AppConfig {
   };
 }
 
+export type MediaKind = "image" | "audio" | "video";
+
+export interface MediaAttachment {
+  kind: MediaKind;
+  path: string;
+  mime: string;
+  /** Base64, kept only in memory and only while it may still be sent. */
+  data?: string;
+  /** Video only. */
+  fps?: number;
+  mediaResolution?: "default" | "max";
+  /** The provider refused this file: tells the model it never received the content. */
+  rejected?: boolean;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant" | "tool";
   content: string;
@@ -32,6 +47,14 @@ export interface ChatMessage {
   toolName?: string;
   toolCallId?: string;
   toolCalls?: { id: string; type: "function"; function: { name: string; arguments: string } }[];
+  /** Files sent with a user message: `tool` messages only carry text in these APIs. */
+  media?: MediaAttachment[];
+}
+
+export interface ToolResult {
+  result: string;
+  isError: boolean;
+  media?: MediaAttachment[];
 }
 
 export interface TodoItem {

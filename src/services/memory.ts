@@ -240,7 +240,7 @@ function projectSection(project: ProjectInfo | null, cwd: string): string {
 /**
  * Builds the system prompt segment: the project instructions (marker file contents) plus
  * an *index* of saved memories (name/type/description only). Full memory contents are
- * loaded on demand with `recall_memory`, so old memories don't cost tokens every message.
+ * loaded on demand with the `memory` tool, so old memories don't cost tokens every message.
  */
 export async function buildMemorySystemPrompt(cwd: string = process.cwd()): Promise<string> {
   const project = findProject(cwd);
@@ -261,9 +261,9 @@ export async function buildMemorySystemPrompt(cwd: string = process.cwd()): Prom
     parts.push(
       `## Memórias salvas (índice)\n` +
         `Só nome e descrição. Quando uma delas for relevante para a tarefa atual, leia o conteúdo com ` +
-        `"recall_memory" (query = nome) antes de agir. Ignore as que não tiverem relação com o pedido.\n` +
+        `"memory" (action = "recall", query = nome) antes de agir. Ignore as que não tiverem relação com o pedido.\n` +
         lines.join("\n") +
-        (omitted > 0 ? `\n... (+${omitted} memórias não listadas; use recall_memory com um termo de busca)` : "")
+        (omitted > 0 ? `\n... (+${omitted} memórias não listadas; use memory com action = "recall" e um termo de busca)` : "")
     );
   }
 

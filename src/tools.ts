@@ -15,11 +15,13 @@ import { webFetch, webSearch } from "./services/web.js";
 import { smartEditFile } from "./services/smart-edit.js";
 import { generateRepoMap, findSymbolInRepo } from "./services/repomap.js";
 import { saveMemory, recallMemories, forgetMemory } from "./services/memory.js";
+import { loadMedia } from "./services/media.js";
+import { isXiaomiMimoEndpoint } from "./reasoning.js";
 import { enterWorktree, exitWorktree, listWorktrees } from "./services/worktree.js";
 import { runHook, loadHooksConfig } from "./core/hooks.js";
 import { processToolOutput } from "./context.js";
 import { tailLogs } from "./logger.js";
-import type { AppConfig, McpTool, Mode, TodoItem } from "./types.js";
+import type { AppConfig, McpTool, Mode, TodoItem, ToolResult } from "./types.js";
 import { log } from "./logger.js";
 
 // Builtins that honor the abort signal and are raced against TOOL_TIMEOUT_MS.
@@ -27,6 +29,8 @@ const CANCELLABLE_BUILTINS = new Set(["execute_command", "web_fetch", "web_searc
 // Subagents run their own multi-step LLM loop (each request already has its own connect
 // timeout), so a fixed tool timeout would kill any task longer than a minute. They are
 // still cancelled through the parent abort signal (Ctrl+C).
+
+const MAX_HOOK_OUTPUT_CHARS = 8000;
 
 export interface ToolContext {
   config?: AppConfig;
@@ -41,7 +45,12 @@ export interface BuiltinTool {
   description: string;
   inputSchema: Record<string, unknown>;
   destructive?: boolean;
-  run: (args: Record<string, unknown>, ctx?: ToolContext) => Promise<{ result: string; isError: boolean }>;
+  run: (args: Record<string, unknown>, ctx?: ToolContext) => Promise<ToolResult>;
+}
+
+/** Tools that group several actions have optional fields in the schema: each action checks its own. */
+function missingFields(args: Record<string, unknown>, fields: string[]): string {
+  return fields.filter((field) => args[field] === undefined || args[field] === null || args[field] === "").join(", ");
 }
 
 function toAbs(p: string): string {
@@ -138,6 +147,35 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
         return { result: processed, isError: false };
       } catch (e) {
         return { result: `Erro ao ler ${path}: ${String(e)}`, isError: true };
+      }
+    },
+  },
+  {
+    name: "read_media",
+    description:
+      "Envia um arquivo local de imagem, áudio ou vídeo para você ver ou ouvir, como um print de erro ou uma gravação. Imagem: JPEG, PNG, GIF, WebP, BMP. Áudio: MP3, WAV, FLAC, M4A, OGG. Vídeo: MP4, MOV, AVI, WMV. Até 37 MB. Áudio e vídeo só funcionam na API Xiaomi MiMo. Para arquivos de texto, use read_file.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Caminho do arquivo" },
+        fps: { type: "number", description: "Vídeo: quadros analisados por segundo, de 0.1 a 10 (padrão do provedor: 2)" },
+        mediaResolution: { type: "string", enum: ["default", "max"], description: "Vídeo: resolução da análise" },
+      },
+      required: ["path"],
+    },
+    run: async (a, ctx) => {
+      const path = toAbs(String(a.path));
+      if (await isPathBlockedSafe(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
+      try {
+        const attachment = await loadMedia(path, {
+          allowAudioVideo: isXiaomiMimoEndpoint(ctx?.config?.baseURL ?? ""),
+          fps: a.fps,
+          mediaResolution: a.mediaResolution,
+        });
+        await log("info", `read_media: ${path} (${attachment.mime})`);
+        return { result: `Arquivo anexado para o modelo: ${path} (${attachment.mime}).`, isError: false, media: [attachment] };
+      } catch (e) {
+        return { result: `Erro ao ler ${path}: ${e instanceof Error ? e.message : String(e)}`, isError: true };
       }
     },
   },
@@ -470,83 +508,62 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     },
   },
   {
-    name: "save_memory",
+    name: "memory",
     description:
-      "Salva uma memória persistente (regra de projeto, preferência do usuário ou instrução) para sessões futuras. Só nome e descrição entram no prompt; o conteúdo é lido sob demanda com recall_memory, então escreva uma descrição clara de uma linha. Escopo 'project' só funciona dentro de um projeto ativo (pasta com SILICONFLOWER.md ou AGENTS.md); 'global' vale em qualquer pasta.",
+      "Gerencia memórias persistentes (regras de projeto, preferências do usuário, instruções) entre sessões. action='save' salva: só nome e descrição entram no prompt, então escreva uma descrição clara de uma linha; escopo 'project' só funciona dentro de um projeto ativo (pasta com SILICONFLOWER.md ou AGENTS.md) e 'global' vale em qualquer pasta. action='recall' lê o conteúdo completo: use o nome do índice do prompt como query, ou deixe vazio para todas. action='forget' remove uma memória antiga ou desatualizada.",
     inputSchema: {
       type: "object",
       properties: {
-        name: { type: "string", description: "Identificador curto da memória" },
+        action: { type: "string", enum: ["save", "recall", "forget"], description: "Operação a executar" },
+        name: { type: "string", description: "Identificador curto da memória (save, forget)" },
         type: {
           type: "string",
           enum: ["user", "feedback", "project", "reference"],
-          description: "Tipo de memória",
+          description: "Tipo de memória (save)",
         },
-        description: { type: "string", description: "Descrição em uma linha do objetivo da memória" },
-        content: { type: "string", description: "Conteúdo detalhado da regra ou aprendizado" },
-        scope: {
-          type: "string",
-          enum: ["project", "global"],
-          default: "project",
-          description: "Escopo: 'project' (apenas neste repositório) ou 'global' (para todos os projetos)",
-        },
-      },
-      required: ["name", "type", "description", "content"],
-    },
-    run: async (a) => {
-      try {
-        const res = await saveMemory({
-          name: String(a.name),
-          type: a.type as any,
-          description: String(a.description),
-          content: String(a.content),
-          scope: a.scope === "global" ? "global" : "project",
-        });
-        return { result: res.message, isError: false };
-      } catch (e) {
-        return { result: `Erro ao salvar memória: ${e instanceof Error ? e.message : String(e)}`, isError: true };
-      }
-    },
-  },
-  {
-    name: "recall_memory",
-    description:
-      "Lê o conteúdo completo de memórias persistentes (o prompt traz apenas o índice com nome e descrição). Use o nome da memória do índice como query.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "Nome da memória ou termo de busca (vazio = todas)" },
-      },
-    },
-    run: async (a) => {
-      const query = a.query ? String(a.query) : undefined;
-      const mems = await recallMemories(query, process.cwd());
-      if (mems.length === 0) {
-        return { result: "Nenhuma memória encontrada.", isError: false };
-      }
-      return { result: JSON.stringify(mems, null, 2), isError: false };
-    },
-  },
-  {
-    name: "forget_memory",
-    description: "Remove uma memória persistente antiga ou desatualizada.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        name: { type: "string", description: "Nome da memória a remover" },
+        description: { type: "string", description: "Descrição em uma linha do objetivo da memória (save)" },
+        content: { type: "string", description: "Conteúdo detalhado da regra ou aprendizado (save)" },
+        query: { type: "string", description: "Nome da memória ou termo de busca (recall)" },
         scope: {
           type: "string",
           enum: ["project", "global", "all"],
           default: "project",
-          description: "Escopo a remover; use 'all' somente quando explicitamente necessário",
+          description: "'project' (este repositório) ou 'global' (todos os projetos). 'all' só em forget, quando explicitamente necessário",
         },
       },
-      required: ["name"],
+      required: ["action"],
     },
     run: async (a) => {
-      const scope = a.scope === "global" || a.scope === "all" ? a.scope : "project";
-      const res = await forgetMemory(String(a.name), process.cwd(), scope);
-      return { result: res.message, isError: res.isError };
+      if (a.action === "save") {
+        const missing = missingFields(a, ["name", "type", "description", "content"]);
+        if (missing) return { result: `memory save exige: ${missing}`, isError: true };
+        try {
+          const res = await saveMemory({
+            name: String(a.name),
+            type: a.type as any,
+            description: String(a.description),
+            content: String(a.content),
+            scope: a.scope === "global" ? "global" : "project",
+          });
+          return { result: res.message, isError: false };
+        } catch (e) {
+          return { result: `Erro ao salvar memória: ${e instanceof Error ? e.message : String(e)}`, isError: true };
+        }
+      }
+      if (a.action === "recall") {
+        const query = a.query ? String(a.query) : undefined;
+        const mems = await recallMemories(query, process.cwd());
+        if (mems.length === 0) return { result: "Nenhuma memória encontrada.", isError: false };
+        return { result: JSON.stringify(mems, null, 2), isError: false };
+      }
+      if (a.action === "forget") {
+        const missing = missingFields(a, ["name"]);
+        if (missing) return { result: `memory forget exige: ${missing}`, isError: true };
+        const scope = a.scope === "global" || a.scope === "all" ? a.scope : "project";
+        const res = await forgetMemory(String(a.name), process.cwd(), scope);
+        return { result: res.message, isError: res.isError };
+      }
+      return { result: "action inválida. Use: save, recall ou forget.", isError: true };
     },
   },
   {
@@ -872,100 +889,73 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     },
   },
   {
-    name: "create_artifact",
+    name: "artifact",
     description:
-      "Cria ou atualiza um artefato estruturado persistente (relatório, diagrama Mermaid, documento HTML, especificação de arquitetura ou código). Salva o arquivo no diretório isolado do Siliconflower (~/.siliconflower/workspaces/<workspace-id>/artifacts/ ou ~/.siliconflower/artifacts/).",
+      "Gerencia artefatos estruturados persistentes (relatório, diagrama Mermaid, documento HTML, especificação de arquitetura ou código), salvos no diretório isolado do Siliconflower (~/.siliconflower/workspaces/<workspace-id>/artifacts/ ou ~/.siliconflower/artifacts/). action='create' cria ou atualiza; 'read' lê pelo id; 'list' lista os do repositório atual e do escopo global; 'delete' remove pelo id.",
     inputSchema: {
       type: "object",
       properties: {
-        id: { type: "string", description: "Identificador único do artefato (ex: plano_arquitetura)" },
-        title: { type: "string", description: "Título legível do artefato" },
+        action: { type: "string", enum: ["create", "read", "list", "delete"], description: "Operação a executar" },
+        id: { type: "string", description: "Identificador único do artefato, ex: plano_arquitetura (create, read, delete)" },
+        title: { type: "string", description: "Título legível do artefato (create)" },
         type: {
           type: "string",
           enum: ["markdown", "code", "mermaid", "html", "json"],
-          description: "Tipo de artefato: markdown | code | mermaid | html | json",
+          description: "Tipo de artefato (create)",
         },
-        content: { type: "string", description: "Conteúdo completo do artefato" },
-        summary: { type: "string", description: "Resumo explicativo do objetivo do artefato" },
-        scope: {
-          type: "string",
-          enum: ["project", "global"],
-          default: "project",
-          description: "Escopo: 'project' (repositório atual) ou 'global' (pasta do usuário)",
-        },
-      },
-      required: ["id", "title", "type", "content", "summary"],
-    },
-    run: async (a) => {
-      try {
-        const res = await createArtifact({
-          id: String(a.id),
-          title: String(a.title),
-          type: a.type as any,
-          content: String(a.content),
-          summary: String(a.summary ?? ""),
-          scope: a.scope === "global" ? "global" : "project",
-        });
-        return { result: res.message, isError: false };
-      } catch (e) {
-        return { result: `Erro ao criar artefato: ${String(e)}`, isError: true };
-      }
-    },
-  },
-  {
-    name: "read_artifact",
-    description: "Lê o conteúdo e os detalhes de um artefato salvo anteriormente pelo ID.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        id: { type: "string", description: "ID do artefato a ler" },
-      },
-      required: ["id"],
-    },
-    run: async (a) => {
-      const res = await readArtifact(String(a.id));
-      if (!res) return { result: `Artefato '${a.id}' não encontrado.`, isError: true };
-      const processed = await processToolOutput(res.content);
-      return { result: processed, isError: false };
-    },
-  },
-  {
-    name: "list_artifacts",
-    description: "Lista todos os artefatos salvos no repositório atual e no escopo global.",
-    inputSchema: {
-      type: "object",
-      properties: {},
-    },
-    run: async () => {
-      const list = await listArtifacts();
-      if (list.length === 0) return { result: "Nenhum artefato encontrado.", isError: false };
-      return { result: JSON.stringify(list, null, 2), isError: false };
-    },
-  },
-  {
-    name: "delete_artifact",
-    description: "Remove um artefato pelo ID.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        id: { type: "string", description: "ID do artefato a remover" },
+        content: { type: "string", description: "Conteúdo completo do artefato (create)" },
+        summary: { type: "string", description: "Resumo explicativo do objetivo do artefato (create)" },
         scope: {
           type: "string",
           enum: ["project", "global", "all"],
           default: "project",
-          description: "Escopo a remover; use 'all' somente quando explicitamente necessário",
+          description: "'project' (repositório atual) ou 'global' (pasta do usuário). 'all' só em delete, quando explicitamente necessário",
         },
       },
-      required: ["id"],
+      required: ["action"],
     },
     run: async (a) => {
-      const scope = a.scope === "global" || a.scope === "all" ? a.scope : "project";
-      const res = await deleteArtifact(String(a.id), process.cwd(), scope);
-      return { result: res.message, isError: !res.success };
+      if (a.action === "create") {
+        const missing = missingFields(a, ["id", "title", "type", "content", "summary"]);
+        if (missing) return { result: `artifact create exige: ${missing}`, isError: true };
+        try {
+          const res = await createArtifact({
+            id: String(a.id),
+            title: String(a.title),
+            type: a.type as any,
+            content: String(a.content),
+            summary: String(a.summary ?? ""),
+            scope: a.scope === "global" ? "global" : "project",
+          });
+          return { result: res.message, isError: false };
+        } catch (e) {
+          return { result: `Erro ao criar artefato: ${String(e)}`, isError: true };
+        }
+      }
+      if (a.action === "read") {
+        const missing = missingFields(a, ["id"]);
+        if (missing) return { result: `artifact read exige: ${missing}`, isError: true };
+        const res = await readArtifact(String(a.id));
+        if (!res) return { result: `Artefato '${a.id}' não encontrado.`, isError: true };
+        return { result: await processToolOutput(res.content), isError: false };
+      }
+      if (a.action === "list") {
+        const list = await listArtifacts();
+        if (list.length === 0) return { result: "Nenhum artefato encontrado.", isError: false };
+        return { result: JSON.stringify(list, null, 2), isError: false };
+      }
+      if (a.action === "delete") {
+        const missing = missingFields(a, ["id"]);
+        if (missing) return { result: `artifact delete exige: ${missing}`, isError: true };
+        const scope = a.scope === "global" || a.scope === "all" ? a.scope : "project";
+        const res = await deleteArtifact(String(a.id), process.cwd(), scope);
+        return { result: res.message, isError: !res.success };
+      }
+      return { result: "action inválida. Use: create, read, list ou delete.", isError: true };
     },
   },
   {
-    name: "manage_hooks",
+    name: "show_hooks",
     description: "Exibe a configuração atual de hooks ativados no workspace ou no ambiente global.",
     inputSchema: {
       type: "object",
@@ -1050,7 +1040,7 @@ export async function runBuiltin(
   name: string,
   args: Record<string, unknown>,
   ctx?: ToolContext
-): Promise<{ result: string; isError: boolean }> {
+): Promise<ToolResult> {
   const tool = BUILTIN_TOOLS.find((t) => t.name === name);
   if (!tool) return { result: `ferramenta nativa desconhecida: ${name}`, isError: true };
 
@@ -1077,7 +1067,7 @@ export async function runBuiltin(
   let timedOut = false;
   const cancellable = CANCELLABLE_BUILTINS.has(name);
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<{ result: string; isError: boolean }>((resolve) => {
+  const timeoutPromise = new Promise<ToolResult>((resolve) => {
     if (!cancellable) return;
     timer = setTimeout(
       () => {
@@ -1090,12 +1080,18 @@ export async function runBuiltin(
   });
   try {
     const toolPromise = tool.run(args, { ...ctx, signal: controller.signal });
-    const res = cancellable ? await Promise.race([toolPromise, timeoutPromise]) : await toolPromise;
+    let res = cancellable ? await Promise.race([toolPromise, timeoutPromise]) : await toolPromise;
 
     // On-edit and Post-tool hooks
     if (!timedOut && hooksEnabled && ctx?.config?.hooks) {
       if (!res.isError && ["edit_file", "write_file", "apply_patch", "move_path", "delete_path"].includes(name)) {
-        await runHook("onEdit", ctx.config.hooks, hookCtx);
+        const hook = await runHook("onEdit", ctx.config.hooks, hookCtx);
+        // The edit itself worked, so isError stays false; the model reads what the check found.
+        if (hook.error || hook.output) {
+          const title = hook.error ? `Hook onEdit falhou (${hook.error})` : "Hook onEdit";
+          const output = hook.output ? await processToolOutput(hook.output, MAX_HOOK_OUTPUT_CHARS) : "";
+          res = { ...res, result: `${res.result}\n\n--- ${title} ---\n${output}`.trimEnd() };
+        }
       }
       await runHook("postTool", ctx.config.hooks, hookCtx);
     }

@@ -6,6 +6,15 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Added
+- Ferramenta `read_media`: o modelo vê imagens em qualquer provedor e ouve áudios e vê vídeos na API Xiaomi MiMo (`src/services/media.ts`).
+
+### Changed
+- `save_memory`, `recall_memory` e `forget_memory` viraram a ferramenta `memory`, com o parâmetro `action`.
+- `create_artifact`, `read_artifact`, `list_artifacts` e `delete_artifact` viraram a ferramenta `artifact`, com o parâmetro `action`.
+- `manage_hooks` passou a se chamar `show_hooks`: ela só exibe a configuração.
+- A saída do hook `onEdit` agora volta para o modelo junto com o resultado da edição; antes era descartada (`src/tools.ts`).
+
 ## [0.3.0] - 2026-11-02
 
 ### Added

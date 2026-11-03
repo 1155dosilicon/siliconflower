@@ -1,15 +1,16 @@
 import OpenAI from "openai";
 import { log } from "./logger.js";
 import { compressHistory } from "./context.js";
-import type { AppConfig, ChatMessage, McpTool, ReasoningLevel, StreamEvent } from "./types.js";
+import type { AppConfig, ChatMessage, MediaAttachment, McpTool, ReasoningLevel, StreamEvent, ToolResult } from "./types.js";
 import { isXiaomiMimoEndpoint } from "./reasoning.js";
+import { hasMediaData, mediaNote, pruneMedia, rejectMedia, userContent } from "./services/media.js";
 
 export interface ChatOptions {
   config: AppConfig;
   messages: ChatMessage[];
   tools: McpTool[];
   reasoning: ReasoningLevel;
-  executeTool: (name: string, args: Record<string, unknown>) => Promise<{ result: string; isError: boolean }>;
+  executeTool: (name: string, args: Record<string, unknown>) => Promise<ToolResult>;
   signal?: AbortSignal;
 }
 
@@ -56,7 +57,10 @@ export function buildOpenAIMessages(
     if (m.role === "assistant" && m.toolCalls) for (const c of m.toolCalls) knownCallIds.add(c.id);
     if (m.role === "tool" && m.toolCallId && !knownCallIds.has(m.toolCallId)) continue;
     if (m.role === "user") {
-      out.push({ role: "user", content: m.content });
+      out.push({
+        role: "user",
+        content: m.media ? userContent(m, preserveReasoningContent) : m.content,
+      } as OpenAI.Chat.Completions.ChatCompletionUserMessageParam);
     } else if (m.role === "assistant") {
       if (m.toolCalls && m.toolCalls.length > 0) {
         out.push({
@@ -152,6 +156,12 @@ function isGenericRejection(err: unknown): boolean {
   return e?.status === 400 && /^request failed\.?$/i.test(e.error?.message?.trim() ?? "");
 }
 
+/** Statuses a provider uses for a payload it cannot take: unsupported file, too large, invalid. */
+function isPayloadRejection(err: unknown): boolean {
+  const status = (err as { status?: number })?.status;
+  return status === 400 || status === 413 || status === 415 || status === 422;
+}
+
 function describeApiError(err: unknown): string {
   const e = err as { status?: number; error?: unknown; message?: string };
   return `HTTP ${e?.status}: ${JSON.stringify(e?.error ?? e?.message ?? String(err)).slice(0, 500)}`;
@@ -185,7 +195,8 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
 
   for (let step = 0; step < MAX_STEPS; step++) {
     throwIfAborted(signal);
-    const working =buildOpenAIMessages(config, compressHistory(history));
+    const buildRequest = () => buildOpenAIMessages(config, compressHistory(pruneMedia(history)));
+    let working = buildRequest();
     let content = "";
     let thinking = "";
     const pendingCalls: {
@@ -235,6 +246,11 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
           void log("warn", `Provedor recusou o pedido sem explicar; repetindo uma vez: ${describeApiError(err)}`);
           await new Promise((resolve) => setTimeout(resolve, GENERIC_RETRY_DELAY_MS));
           throwIfAborted(signal);
+        } else if (isPayloadRejection(err) && hasMediaData(history)) {
+          // Otherwise the file stays in the history and blocks the rest of the conversation.
+          void log("warn", `Provedor recusou um pedido com mídia; repetindo sem ela: ${describeApiError(err)}`);
+          rejectMedia(history);
+          working = buildRequest();
         } else if (attempt < 3 && supportsEffort && effort && /reasoning/i.test(msg)) {
           supportsEffort = false;
           void log("warn", "Provedor rejeitou reasoning_effort; repetindo sem ele");
@@ -366,6 +382,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
 
     void log("info", `LLM step ${step}: executando ${pendingCalls.length} tool(s): ${pendingCalls.map(c => c.name).join(", ")}`);
 
+    const stepMedia: MediaAttachment[] = [];
     for (const call of pendingCalls) {
       throwIfAborted(signal);
       void log("info", `LLM step ${step}: ->${call.name}(${call.args.slice(0, 200)})`);
@@ -382,6 +399,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
         const r = await executeTool(call.name, parsed);
         result = r.result;
         isError = r.isError;
+        if (r.media) stepMedia.push(...r.media);
       } catch (err) {
         result = String(err);
         isError = true;
@@ -391,6 +409,12 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       const toolMsg: ChatMessage = { role: "tool", toolCallId: call.id, toolName: call.name, content: result };
       history.push(toolMsg);
       turn.push(toolMsg);
+    }
+    // After every result of the step: the API requires them right after the tool calls.
+    if (stepMedia.length) {
+      const mediaMsg: ChatMessage = { role: "user", content: mediaNote(stepMedia), media: stepMedia };
+      history.push(mediaMsg);
+      turn.push(mediaMsg);
     }
     void log("info", `LLM step ${step}: histórico agora: ${history.length} mensagens`);
     // loop continues: model sees tool results and may respond or call again.
