@@ -71,7 +71,7 @@ describe("memory service", () => {
     expect(prompt).toContain("Use tabs. Rode bun test antes de concluir.");
     expect(prompt).toContain("deploy_steps");
     expect(prompt).toContain("Como fazer deploy");
-    expect(prompt).toContain("recall_memory");
+    expect(prompt).toContain('"memory" (action = "recall"');
     // Full content is loaded on demand only.
     expect(prompt).not.toContain("CONTEUDO_LONGO_SECRETO_DO_DEPLOY");
   });
