@@ -25,6 +25,9 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 3.8);
 }
 
+// Rough value per file: the real cost depends on resolution and duration, which are not read here.
+const MEDIA_TOKEN_ESTIMATE = 2000;
+
 /**
  * Estimates token count for a message list.
  */
@@ -33,6 +36,7 @@ export function estimateMessagesTokens(messages: ChatMessage[]): number {
   for (const msg of messages) {
     total += estimateTokens(msg.content);
     if (msg.reasoning) total += estimateTokens(msg.reasoning);
+    if (msg.media) total += msg.media.filter((a) => a.data).length * MEDIA_TOKEN_ESTIMATE;
     if (msg.toolCalls) {
       for (const tc of msg.toolCalls) {
         total += estimateTokens(tc.function.name + tc.function.arguments);

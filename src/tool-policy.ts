@@ -2,10 +2,10 @@ import type { Mode } from "./types.js";
 
 const PLAN_READ_ONLY_TOOLS = new Set([
   "read_file",
+  "read_media",
   "grep_content",
   "repo_map",
   "find_symbol",
-  "recall_memory",
   "list_worktrees",
   "ask_question",
   "read_logs",
@@ -14,9 +14,7 @@ const PLAN_READ_ONLY_TOOLS = new Set([
   "search_files",
   "web_fetch",
   "web_search",
-  "read_artifact",
-  "list_artifacts",
-  "manage_hooks",
+  "show_hooks",
   "read_skill",
   "todowrite",
 ]);
@@ -30,5 +28,7 @@ export function isToolAllowedInMode(
   if (name === "manage_background_task") {
     return args.action === "list" || args.action === "status";
   }
+  if (name === "memory") return args.action === "recall";
+  if (name === "artifact") return args.action === "read" || args.action === "list";
   return PLAN_READ_ONLY_TOOLS.has(name);
 }

@@ -6,7 +6,7 @@
 ![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black.svg)
 ![Node](https://img.shields.io/badge/Node.js-%3E%3D20-green.svg)
 
-Agente de IA de alta performance para desenvolvimento de software no Windows, como **app de desktop** ou no **terminal (CLI/TUI)**. Integra **34 ferramentas nativas**, **Subagentes & Background Tasks**, **Memória Persistente**, **Git Worktrees**, **RepoMap**, **Busca Web** e **Protocolo MCP**, compatível com **SiliconFlow, OpenRouter, OpenAI** e demais backends compatíveis com a API da OpenAI.
+Agente de IA de alta performance para desenvolvimento de software no Windows, como **app de desktop** ou no **terminal (CLI/TUI)**. Integra **30 ferramentas nativas**, **Subagentes & Background Tasks**, **Memória Persistente**, **Git Worktrees**, **RepoMap**, **Busca Web** e **Protocolo MCP**, compatível com **SiliconFlow, OpenRouter, OpenAI** e demais backends compatíveis com a API da OpenAI.
 
 <p align="center">
   <img src="assets/preview.png" alt="SiliconFlower TUI Preview" width="100%" />
@@ -174,12 +174,12 @@ Na tela inicial, escolha a pasta do projeto. Cada projeto abre em sua própria j
 
 O Siliconflower disponibiliza um conjunto completo de ferramentas integradas:
 
-- 📁 **Arquivos & Edição**: `read_file`, `write_file`, `edit_file` (fuzzy/newline matching), `apply_patch`, `list_directory`, `create_directory`, `move_path`, `delete_path`, `file_info`.
+- 📁 **Arquivos & Edição**: `read_file`, `read_media` (imagem em qualquer provedor; áudio e vídeo na API Xiaomi MiMo), `write_file`, `edit_file` (fuzzy/newline matching), `apply_patch`, `list_directory`, `create_directory`, `move_path`, `delete_path`, `file_info`.
 - 🔍 **Busca & Navegação**: `search_files` (glob), `grep_content` (regex), `repo_map`, `find_symbol`.
 - 💻 **Execução & Tarefas**: `execute_command` (PowerShell arbitrário com os privilégios do usuário, saída em UTF-8), `read_logs`, `ask_question` (pausa e espera sua resposta na TUI), `todowrite`, `read_skill`.
 - 🤖 **Subagentes & Async**: `run_task`, `send_subagent_message`, `manage_background_task`.
-- 🧠 **Memória & Worktrees**: `save_memory`, `recall_memory`, `forget_memory`, `enter_worktree`, `exit_worktree`, `list_worktrees`.
-- 📄 **Artefatos & Web**: `create_artifact`, `read_artifact`, `list_artifacts`, `delete_artifact`, `web_fetch` (HTML para Markdown), `web_search`, `manage_hooks`.
+- 🧠 **Memória & Worktrees**: `memory` (`save`, `recall`, `forget`), `enter_worktree`, `exit_worktree`, `list_worktrees`.
+- 📄 **Artefatos & Web**: `artifact` (`create`, `read`, `list`, `delete`), `web_fetch` (HTML para Markdown), `web_search`, `show_hooks`.
 
 > 📖 Arquitetura e detalhes de cada ferramenta: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Vai mexer no código, ou é um agente de IA? Comece por [AGENTS.md](AGENTS.md).
 
@@ -201,6 +201,19 @@ O Siliconflower disponibiliza um conjunto completo de ferramentas integradas:
 
 As ferramentas MCP são anunciadas à LLM com nomes qualificados e estáveis no formato `mcp_<servidor>_<ferramenta>_<hash>`. Isso evita colisões entre servidores ou com ferramentas nativas; o nome original continua sendo usado ao chamar o servidor.
 
+Para o agente abrir páginas, clicar e testar uma interface, use um navegador via MCP. Cada ferramenta do servidor entra em todos os pedidos ao modelo, então só ligue se for usar:
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest"]
+    }
+  }
+}
+```
+
 ### Testes e diretório de dados alternativo
 
 Defina `SILICONFLOWER_DATA_DIR` para redirecionar `config.json`, logs e os demais dados persistentes para outro diretório. A suíte de testes usa essa variável automaticamente e não grava no perfil real do usuário.
@@ -209,11 +222,13 @@ Defina `SILICONFLOWER_DATA_DIR` para redirecionar `config.json`, logs e os demai
 ```json
 {
   "hooks": {
-    "onEdit": "bun x tsc --noEmit",
+    "onEdit": "if (Test-Path tsconfig.json) { bun x tsc --noEmit }",
     "postTool": "git status --short"
   }
 }
 ```
+
+A saída do `onEdit` volta para o modelo junto com o resultado da edição (até 8 mil caracteres), então ele vê os erros que a própria mudança causou. O hook roda a cada edição, com limite de 30 s; use um comando rápido. Hooks ficam em `config.json`, que vale para todas as pastas: por isso o `Test-Path` no exemplo.
 
 ### Habilidades Customizadas (Skills)
 Crie arquivos Markdown em `~/.siliconflower/skills/` com instruções especializadas. O agente as carrega sob demanda com `read_skill`.

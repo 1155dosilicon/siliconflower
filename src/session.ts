@@ -12,9 +12,10 @@ import {
   type ConversationSummary,
   type ToolActivity,
 } from "./services/conversations.js";
+import { pruneMedia, stripMediaData } from "./services/media.js";
 import { estimateTokens, estimateMessagesTokens } from "./context.js";
 import { log } from "./logger.js";
-import type { AppConfig, ChatMessage, McpTool, ReasoningLevel, StreamEvent, TodoItem } from "./types.js";
+import type { AppConfig, ChatMessage, McpTool, ReasoningLevel, StreamEvent, TodoItem, ToolResult } from "./types.js";
 import { isToolAllowedInMode } from "./tool-policy.js";
 import { runHook } from "./core/hooks.js";
 import { reasoningLabel, reasoningOptions } from "./reasoning.js";
@@ -234,7 +235,7 @@ export class AgentSession {
     try {
       await this.store.save(
         { id, title: conversationTitle(first), updatedAt: new Date().toISOString(), messageCount: this.state.messages.length },
-        { history: this.history, messages: this.state.messages, activities: this.activities, todos: this.state.todos }
+        { history: stripMediaData(this.history), messages: this.state.messages, activities: this.activities, todos: this.state.todos }
       );
       this.patch({ conversationId: id });
       await this.refreshConversations();
@@ -402,7 +403,8 @@ export class AgentSession {
     let assistantMsgAdded = false;
     // Commits this turn to the API history exactly once.
     const commitTurn = (turnMessages: ChatMessage[]) => {
-      this.history = [...this.history, userMsg, ...turnMessages];
+      // Files that will not be sent again must not stay in memory for the whole conversation.
+      this.history = pruneMedia([...this.history, userMsg, ...turnMessages]);
     };
 
     try {
@@ -504,7 +506,7 @@ export class AgentSession {
     return list;
   }
 
-  private async executeTool(name: string, args: Record<string, unknown>): Promise<{ result: string; isError: boolean }> {
+  private async executeTool(name: string, args: Record<string, unknown>): Promise<ToolResult> {
     const { mode, model } = this.state;
     if (!isToolAllowedInMode(mode, name, args)) {
       return {

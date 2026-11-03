@@ -86,7 +86,7 @@ Quando o provedor rejeita `reasoning_effort` ou o parâmetro de tokens, a requis
   - o workspace é identificado pela raiz do projeto, então as subpastas compartilham memórias, artefatos e hooks.
 - **Fora de um projeto**:
   - a memória de projeto fica desligada e a leitura não cria diretórios;
-  - `save_memory`/`forget_memory` com escopo `project` devolvem um erro que orienta usar `global` ou `init`.
+  - `memory` com `save` ou `forget` no escopo `project` devolve um erro que orienta usar `global` ou `init`.
 
 **Armazenamento**, sempre fora do repositório:
 
@@ -99,7 +99,7 @@ Quando o provedor rejeita `reasoning_effort` ou o parâmetro de tokens, a requis
 
 `<workspace-id>` = nome da pasta + 8 caracteres do SHA-256 do caminho (`getWorkspaceDataDir`). `SILICONFLOWER_DATA_DIR` substitui `~/.siliconflower`, e a suíte de testes usa isso.
 
-**Memória sob demanda**: o prompt recebe só o **índice** (nome, tipo, escopo e descrição; até 60 entradas e 6 mil caracteres). O modelo lê o conteúdo com `recall_memory` quando for relevante. Tipos: `user`, `feedback`, `project`, `reference`.
+**Memória sob demanda**: o prompt recebe só o **índice** (nome, tipo, escopo e descrição; até 60 entradas e 6 mil caracteres). O modelo lê o conteúdo com `memory` (`action: "recall"`) quando for relevante. Tipos: `user`, `feedback`, `project`, `reference`.
 
 ## Hooks (`core/hooks.ts`)
 
@@ -117,11 +117,11 @@ Os hooks rodam via `shell.ts`, com timeout de 30 s, e recebem estas variáveis:
 - `SILICONFLOWER_COMMAND`;
 - `SILICONFLOWER_FILE_PATH`.
 
-O resultado de um hook não bloqueia a ferramenta. `manage_hooks` mostra a configuração em vigor.
+O resultado de um hook não bloqueia a ferramenta. A saída do `onEdit` é acrescentada ao resultado da edição (até 8 mil caracteres), que continua sem erro mesmo se o hook falhar. `show_hooks` mostra a configuração em vigor.
 
 ## Modo `plano` e MCP
 
-**Modo `plano`**: `tool-policy.ts` define uma allowlist fechada, só com leitura, busca, web, perguntas, `todowrite` e `manage_background_task` restrito a `list`/`status`. Fica bloqueado:
+**Modo `plano`**: `tool-policy.ts` define uma allowlist fechada, só com leitura, busca, web, perguntas e `todowrite`. Ferramentas com `action` entram só nas ações de leitura: `manage_background_task` (`list`, `status`), `memory` (`recall`) e `artifact` (`read`, `list`). Fica bloqueado:
 - qualquer ferramenta fora da lista;
 - MCP;
 - subagentes;
@@ -142,6 +142,7 @@ Os schemas em `src/tools.ts` são a fonte de verdade; esta tabela só indica ond
 | Ferramenta | Implementação | Observações |
 | :--- | :--- | :--- |
 | `read_file`, `write_file`, `list_directory`, `create_directory`, `move_path`, `file_info` | `tools.ts` | Caminhos validados por `isPathBlockedSafe` (System32, `.ssh`, `.aws`, incluindo links) |
+| `read_media` | `tools.ts` + `services/media.ts` | Veja "Mídia" abaixo |
 | `delete_path` | `tools.ts` | Exige `confirm: true`; protege raízes de disco, a pasta do usuário, o cwd e as pastas acima deles |
 | `edit_file` | `services/smart-edit.ts` | Correspondência exata → quebras de linha normalizadas → espaços flexíveis (erro se ambíguo); preserva CRLF |
 | `apply_patch` | `tools.ts` | Vários blocos, gravação única; preserva CRLF |
@@ -153,12 +154,21 @@ Os schemas em `src/tools.ts` são a fonte de verdade; esta tabela só indica ond
 | `run_task`, `send_subagent_message` | `services/subagent.ts` | Sem timeout fixo, cancelável; subagentes não têm `run_task` nem MCP |
 | `ask_question` | `tools.ts` + `session.ts` | Pausa e espera a resposta na interface (TUI ou GUI); sem interface, pede ao modelo que repasse a pergunta |
 | `todowrite` | `todo.ts` | Checklist da sessão |
-| `save_memory`, `recall_memory`, `forget_memory` | `services/memory.ts` | Veja "Projetos e memória" |
-| `create_artifact`, `read_artifact`, `list_artifacts`, `delete_artifact` | `services/artifact.ts` | Mudar o tipo remove o arquivo antigo |
+| `memory` | `services/memory.ts` | `save`, `recall`, `forget`; veja "Projetos e memória" |
+| `artifact` | `services/artifact.ts` | `create`, `read`, `list`, `delete`; mudar o tipo remove o arquivo antigo |
 | `enter_worktree`, `exit_worktree`, `list_worktrees` | `services/worktree.ts` | `<raiz>/.worktrees/<branch>` + `.git/info/exclude`; não muda o cwd |
 | `web_fetch`, `web_search` | `services/web.ts` | Bloqueio de SSRF (inclui IPv6 que embute IPv4); `maxChars` limita o Markdown, não o HTML |
 | `read_logs` | `logger.ts` | Log de 200 KB, mantendo as últimas 500 linhas |
-| `manage_hooks` | `core/hooks.ts` | Somente leitura |
+| `show_hooks` | `core/hooks.ts` | Somente leitura |
 | `read_skill` | `skills.ts` | Skills em `~/.siliconflower/skills/` |
+
+### Mídia
+
+`read_media` lê o arquivo em Base64 (até 37 MB) e devolve o texto do resultado mais um anexo. Mensagens `tool` só levam texto, então `llm.ts` envia os anexos do passo numa mensagem `user` logo depois de todos os resultados, marcada como dado e não como pedido do usuário.
+
+- **Formato** (`services/media.ts`): `image_url` em qualquer provedor. `input_audio` e `video_url` seguem o formato da API Xiaomi MiMo; nos demais provedores a ferramenta recusa áudio e vídeo.
+- **Reenvio**: o histórico vai inteiro a cada passo, então `pruneMedia` mantém só os 4 arquivos mais recentes, até 50 MB em Base64 no total. Os mais antigos viram uma nota com o caminho, e o modelo pode ler de novo.
+- **Conversas salvas**: `stripMediaData` grava só o caminho, nunca o conteúdo.
+- **Recusa do provedor**: um HTTP 400, 413, 415 ou 422 num pedido com mídia faz `rejectMedia` trocar os arquivos por uma nota e repetir o pedido. Sem isso, o arquivo ficaria no histórico e todos os pedidos seguintes da conversa falhariam.
 
 Limites de segurança e o que **não** é protegido (comandos PowerShell, MCP): veja [SECURITY.md](../SECURITY.md).
