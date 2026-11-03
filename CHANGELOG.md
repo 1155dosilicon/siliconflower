@@ -6,6 +6,12 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-02
+
+### Fixed
+- Stream encerrado sem `finish_reason`: a chamada de ferramenta incompleta dizia ao modelo para corrigir o JSON, e agora informa que a resposta foi interrompida; um texto interrompido parecia concluído, e agora termina com um aviso (`src/llm.ts`).
+- `write_file` informava caracteres como se fossem bytes (`src/tools.ts`).
+
 ## [0.4.0] - 2026-11-02
 
 ### Added
@@ -244,7 +250,8 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 - First-run wizard with provider presets for SiliconFlow, OpenRouter,
   OpenAI, and Anthropic.
 
-[Unreleased]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.4.0...HEAD
+[Unreleased]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.4.1...HEAD
+[0.4.1]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.4.0...siliconflower-0.4.1
 [0.4.0]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.3.0...siliconflower-0.4.0
 [0.3.0]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.2.9...siliconflower-0.3.0
 [0.2.9]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.2.6...siliconflower-0.2.9

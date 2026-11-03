@@ -233,8 +233,9 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       try {
         await ensureDir(dirname(path));
         await writeFile(path, a.content, "utf8");
-        await log("info", `write_file: ${path} (${a.content.length} bytes)`);
-        return { result: `Arquivo escrito: ${path} (${a.content.length} bytes)`, isError: false };
+        const bytes = Buffer.byteLength(a.content, "utf8");
+        await log("info", `write_file: ${path} (${bytes} bytes)`);
+        return { result: `Arquivo escrito: ${path} (${bytes} bytes)`, isError: false };
       } catch (e) {
         return { result: `Erro ao escrever ${path}: ${String(e)}`, isError: true };
       }

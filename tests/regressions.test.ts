@@ -118,6 +118,30 @@ describe("a response cut off at the output limit", () => {
     expect(events.some((e) => e.type === "text" && e.text?.includes("Resposta cortada"))).toBe(true);
   });
 
+  test("a stream that ends without finish_reason does not run a partial tool call and says why", async () => {
+    const { executed, events } = await run([
+      sse([chunk({ tool_calls: [{ index: 0, id: "c1", type: "function", function: { name: "write_file", arguments: '{"path":"a.html","content":"<ht' } }] })]),
+      sse([chunk({ content: "refeito" }, "stop")]),
+    ]);
+    expect(executed).toEqual([]);
+    const result = events.find((e) => e.type === "tool_result")!;
+    expect(result.isError).toBe(true);
+    expect(result.result).toContain("interrompida");
+    expect(result.result).not.toContain("Corrija");
+  });
+
+  test("warns when the text of the answer is interrupted, but not when it finished", async () => {
+    const cut = await run([sse([chunk({ content: "metade" })])]);
+    expect(cut.events.find((e) => e.type === "done")!.content).toContain("Resposta interrompida");
+    const whole = await run([sse([chunk({ content: "inteira" }, "stop")])]);
+    expect(whole.events.find((e) => e.type === "done")!.content).toBe("inteira");
+  });
+
+  test("write_file reports bytes, not characters", async () => {
+    const res = await runBuiltin("write_file", { path: join(tmp, "bytes.txt"), content: "ação" });
+    expect(res.result).toContain("(6 bytes)");
+  });
+
   test("a model with a smaller output cap falls back once and keeps the lower limit", async () => {
     const tooLarge = () =>
       new Response(`{"error":{"message":"max_tokens is too large: 32768. This model's maximum for this value is 16384."}}`, {

@@ -190,10 +190,15 @@ function parseToolArgs(raw: string): Record<string, unknown> | null {
   }
 }
 
-function invalidArgsMessage(name: string, cutOffAt: number | null): string {
-  return cutOffAt
-    ? `Nada foi executado: a resposta atingiu o limite de ${cutOffAt} tokens de saída e os argumentos de ${name} foram cortados. Refaça em partes menores: escreva o arquivo com a primeira parte e acrescente o restante em chamadas separadas com edit_file.`
-    : `Nada foi executado: os argumentos de ${name} não são um objeto JSON válido. Corrija e tente de novo.`;
+function invalidArgsMessage(name: string, finishReason: string | null, outputLimit: number): string {
+  if (finishReason === "length") {
+    return `Nada foi executado: a resposta atingiu o limite de ${outputLimit} tokens de saída e os argumentos de ${name} foram cortados. Refaça em partes menores: escreva o arquivo com a primeira parte e acrescente o restante em chamadas separadas com edit_file.`;
+  }
+  // The stream ended without a finish_reason: the arguments may have been correct so far.
+  if (finishReason === null) {
+    return `Nada foi executado: a resposta foi interrompida antes do fim (o provedor ou a conexão encerrou o stream) e os argumentos de ${name} ficaram incompletos. Repita a chamada.`;
+  }
+  return `Nada foi executado: os argumentos de ${name} não são um objeto JSON válido. Corrija e tente de novo.`;
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -399,6 +404,11 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
         const notice = `[Resposta cortada: atingiu o limite de ${outputLimit} tokens de saída. Envie "continue" para prosseguir.]`;
         finalContent += (finalContent ? "\n\n" : "") + notice;
         yield { type: "text", text: notice };
+      } else if (finishReason === null) {
+        void log("warn", `LLM step ${step}: stream encerrado sem finish_reason`);
+        const notice = `[Resposta interrompida: o provedor ou a conexão encerrou o stream antes do fim, e ela pode estar incompleta. Envie "continue" para prosseguir.]`;
+        finalContent += (finalContent ? "\n\n" : "") + notice;
+        yield { type: "text", text: notice };
       }
       yield { type: "done", content: finalContent, reasoning: finalThinking, messages: turn };
       return;
@@ -431,7 +441,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       let result = "";
       let isError = false;
       if (!parsed) {
-        result = invalidArgsMessage(call.name, finishReason === "length" ? outputLimit : null);
+        result = invalidArgsMessage(call.name, finishReason, outputLimit);
         isError = true;
       } else {
         try {

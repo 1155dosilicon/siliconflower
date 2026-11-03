@@ -63,7 +63,7 @@ Todos os provedores usam Chat Completions compatível com OpenAI (`llm.ts`):
   - `reasoning_content` é preservado na mensagem `assistant` que antecede resultados de ferramenta;
   - `Ctrl+E` alterna entre `none` e `high`.
 - **Demais provedores**: `low`/`medium`/`high` vão como `reasoning_effort`, e `Ctrl+E` percorre os quatro níveis.
-- **Limite de saída** (32768 tokens): vai em `max_completion_tokens` para `api.openai.com` e em `max_tokens` nos demais. Se o provedor recusar o valor, a requisição é repetida com 16384. Se a resposta for cortada nele, uma chamada de ferramenta incompleta não executa (o modelo recebe o erro, e o histórico guarda `{}` no lugar do JSON quebrado) e um texto cortado termina com um aviso.
+- **Limite de saída** (32768 tokens): vai em `max_completion_tokens` para `api.openai.com` e em `max_tokens` nos demais. Se o provedor recusar o valor, a requisição é repetida com 16384. Se a resposta for cortada nele, uma chamada de ferramenta incompleta não executa (o modelo recebe o erro, e o histórico guarda `{}` no lugar do JSON quebrado) e um texto cortado termina com um aviso. O mesmo vale para um stream encerrado sem `finish_reason`, tratado como resposta interrompida.
 
 Quando o provedor rejeita `reasoning_effort` ou o parâmetro de tokens, a requisição é repetida com o ajuste. Cada ajuste é feito no máximo uma vez e vale para os passos seguintes.
 
