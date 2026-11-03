@@ -7,12 +7,12 @@ Referência para quem vai mudar o código. Comandos, regras e mapa resumido est�
 1. **`index.tsx`** carrega a configuração efetiva (`config.json` + variáveis de ambiente), aplica as flags da CLI e inicia a TUI ou a GUI. Se a configuração estiver incompleta, abre o assistente.
 2. **`AgentSession`** (`session.ts`), ao iniciar, carrega as skills e conecta os servidores MCP. Uma falha de MCP vai para o log e para a barra de status, sem bloquear as ferramentas nativas.
 3. **A cada mensagem**, monta o prompt de sistema (`modes.ts`):
-   - persona e foco do modo;
-   - instruções do projeto e índice de memórias (`buildMemorySystemPrompt`);
+   - identidade, foco do modo e regras comuns;
+   - instruções do projeto, delimitadas por `<instrucoes_do_projeto>`, e índice de memórias (`buildMemorySystemPrompt`);
    - prompt personalizado do usuário;
-   - lista de skills e diretório atual.
+   - lista de skills e, por último, data e diretório atual.
 4. **`llm.ts`** (`streamChat`) roda o loop:
-   - antes de **cada** requisição, recompacta o histórico (`compressHistory`: acima de 90 mil tokens estimados ou 40 mensagens, reduz o conteúdo antigo e descarta turnos inteiros);
+   - antes de **cada** requisição, recompacta o histórico (`compressHistory`: acima de 90 mil tokens estimados, descontados o prompt de sistema e os schemas, ou de 40 mensagens, reduz o conteúdo antigo e descarta turnos inteiros);
    - faz o streaming e executa as chamadas de ferramenta em sequência;
    - repete até a resposta não ter mais ferramentas ou até `MAX_STEPS` (50). No limite, avisa o usuário.
 5. **O evento `done`** traz em `messages` o que o turno produziu: `assistant` com `toolCalls`, resultados `tool` e a resposta final. A sessão acrescenta isso ao histórico da API, separado das mensagens exibidas. Turnos cancelados ou com erro guardam só o texto visível.
@@ -127,7 +127,7 @@ O resultado de um hook não bloqueia a ferramenta. A saída do `onEdit` é acres
 - subagentes;
 - qualquer mutação.
 
-A checagem é feita em `session.ts` antes de despachar a ferramenta. `programação` e `sistema` só mudam o foco do prompt e não restringem nada.
+A checagem é feita em `session.ts` antes de despachar a ferramenta. `programação` e `sistema` só mudam o foco do prompt e não restringem nada. A mesma política vale para os subagentes `research` e `plan` (`services/subagent.ts`).
 
 **MCP** (`mcp.ts`):
 - os servidores de `mcpServers` sobem via stdio, com timeout de conexão de 20 s;
@@ -147,11 +147,11 @@ Os schemas em `src/tools.ts` são a fonte de verdade; esta tabela só indica ond
 | `edit_file` | `services/smart-edit.ts` | Correspondência exata → quebras de linha normalizadas → espaços flexíveis (erro se ambíguo); preserva CRLF |
 | `apply_patch` | `tools.ts` | Vários blocos, gravação única; preserva CRLF |
 | `search_files` | `glob-util.ts` | No máximo 1000 resultados, 200 exibidos com aviso |
-| `grep_content` | `grep.ts` | Regex sem distinção de maiúsculas; ignora `IGNORED_SOURCE_DIRS`, pastas ocultas e binários |
+| `grep_content` | `grep.ts` | Regex sem distinção de maiúsculas; ignora `IGNORED_SOURCE_DIRS`, pastas ocultas, binários e arquivos acima de 2 MB; para em 200 ocorrências e avisa |
 | `repo_map`, `find_symbol` | `services/repomap.ts` | Extração por regex: TS/JS, Python, Go, Rust |
 | `execute_command` | `tools.ts` + `shell.ts` | Timeout de até 120 s; `runInBackground` cria tarefa com timeout de até 1 h |
 | `manage_background_task` | `services/background-tasks.ts` | `list`, `status`, `kill` |
-| `run_task`, `send_subagent_message` | `services/subagent.ts` | Sem timeout fixo, cancelável; subagentes não têm `run_task` nem MCP |
+| `run_task`, `send_subagent_message` | `services/subagent.ts` | Sem timeout fixo, cancelável; subagentes não têm `run_task` nem MCP, recebem o contexto do projeto (`buildSubagentPrompt`), e `research` e `plan` são somente leitura |
 | `ask_question` | `tools.ts` + `session.ts` | Pausa e espera a resposta na interface (TUI ou GUI); sem interface, pede ao modelo que repasse a pergunta |
 | `todowrite` | `todo.ts` | Checklist da sessão |
 | `memory` | `services/memory.ts` | `save`, `recall`, `forget`; veja "Projetos e memória" |

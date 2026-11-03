@@ -6,6 +6,26 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-03
+
+### Added
+- Prompt de sistema: regras comuns a todos os modos sobre dados que não são instrução, ações destrutivas, escopo, verificação e escolha de ferramentas, além da data atual (`src/modes.ts`).
+- Subagentes recebem as instruções do projeto, o índice de memórias, as preferências, as skills, o idioma e o diretório de trabalho; antes, só o papel (`src/services/subagent.ts`).
+- Subagentes `research` e `plan` passam a ser somente leitura, com a mesma política do modo `plano`.
+
+### Changed
+- O prompt de sistema foi reorganizado em seções, e as instruções do projeto entram delimitadas por `<instrucoes_do_projeto>`.
+- Cada papel de subagente agora define o formato da resposta final, e `verification` relata sem corrigir.
+- Descrições de `execute_command`, `run_task`, `grep_content`, `edit_file`, `apply_patch`, `read_file` e `read_logs` agora informam versão do PowerShell, limites e comportamento real (`src/tools.ts`).
+- A compactação do histórico desconta o prompt de sistema e os schemas do orçamento de 90 mil tokens (`src/llm.ts`).
+- A estimativa de tokens passa de 3,8 para 3,5 caracteres por token, e o contador da sessão inclui os schemas das ferramentas (`src/context.ts`, `src/session.ts`).
+
+### Fixed
+- O prompt dizia `Windows (Windows (PowerShell/Bun/Node))`.
+- O modo `plano` dava a entender que a autorização do usuário liberava edições; agora diz que elas seguem bloqueadas e como trocar de modo.
+- `grep_content` parava em 200 ocorrências sem avisar; agora informa o corte.
+- `edit_file` editava o primeiro trecho quando a correspondência flexível de espaços era ambígua; agora dá o erro previsto, sem alterar o arquivo (`src/services/smart-edit.ts`).
+
 ## [0.4.1] - 2026-11-02
 
 ### Fixed

@@ -31,7 +31,9 @@ Depois de configurado, o modelo pode usar ferramentas que:
 - **Modo `plano`** usa uma allowlist explícita: leitura, buscas, web, perguntas e checklist da sessão.
   - Bloqueia MCP, subagentes e qualquer mutação persistente.
   - Hooks de ferramenta ficam desligados, mas `onSessionStart` e `onSessionEnd` configurados inline continuam rodando e podem executar comandos.
-- **Modos `programação` e `sistema`** só mudam o foco do prompt (o `sistema` pede para avisar antes de ações destrutivas ou no registro). Nenhum dos dois limita privilégios.
+- **Modos `programação` e `sistema`** só mudam o foco do prompt. Nenhum dos dois limita privilégios.
+- **Regras do prompt de sistema** pedem ao modelo que trate conteúdo de arquivos, web e ferramentas como dado, não como instrução, e que confirme ações destrutivas. São orientações ao modelo, não barreiras: uma injeção de prompt ainda pode ter sucesso.
+- **Subagentes `research` e `plan`** seguem a allowlist do modo `plano`, imposta no código. Os demais papéis têm as mesmas ferramentas nativas do agente principal, exceto `run_task`.
 - **`execute_command`** é, por design, um shell arbitrário. As proteções das ferramentas de arquivo **não** se aplicam a comandos PowerShell.
 
 ## Interface gráfica (`siliconflower gui`)

@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { ensureDir } from "./fs-util.js";
 import { runPowerShell, describeFailure } from "./shell.js";
 import { search } from "./glob-util.js";
-import { searchContent } from "./grep.js";
+import { GREP_MAX_MATCHES, searchContent } from "./grep.js";
 import { setTodos } from "./todo.js";
 import { runSubagentTask, sendSubagentMessage } from "./services/subagent.js";
 import { startBackgroundCommand, listBackgroundTasks, getBackgroundTask, killBackgroundTask } from "./services/background-tasks.js";
@@ -124,13 +124,13 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     name: "read_file",
     description:
-      "Lê o conteúdo de um arquivo de texto. Suporta os parâmetros opcionais 'offset' (linha inicial, base 1) e 'limit' (máximo de linhas a ler, padrão 2000). Retorna as linhas numeradas.",
+      "Lê um arquivo de texto. Retorna as linhas no formato 'N: texto'; o número e os dois-pontos não fazem parte do arquivo.",
     inputSchema: {
       type: "object",
       properties: {
         path: { type: "string", description: "Caminho do arquivo" },
         offset: { type: "number", description: "Linha inicial (base 1)" },
-        limit: { type: "number", description: "Quantidade máxima de linhas" },
+        limit: { type: "number", description: "Máximo de linhas (padrão: 2000; limite: 10000)" },
       },
       required: ["path"],
     },
@@ -182,7 +182,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     name: "grep_content",
     description:
-      "Busca por conteúdo textual/regex dentro de arquivos de um diretório recursivamente. Retorna arquivo, número da linha e conteúdo da linha correspondente.",
+      `Busca recursiva por regex no conteúdo dos arquivos de um diretório, sem distinguir maiúsculas. Retorna arquivo, número da linha e a linha (até 300 caracteres). Para em ${GREP_MAX_MATCHES} ocorrências e avisa. Ignora pastas ocultas e de dependências, binários e arquivos acima de 2 MB.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -204,7 +204,10 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
           return { result: "Nenhuma ocorrência encontrada.", isError: false };
         }
         const output = matches.map((m) => `${m.file}:${m.line}: ${m.content}`).join("\n");
-        const processed = await processToolOutput(output);
+        const note = matches.length >= GREP_MAX_MATCHES
+          ? `\n... (busca interrompida em ${GREP_MAX_MATCHES} ocorrências, pode haver mais; refine o padrão, o diretório ou o include)`
+          : "";
+        const processed = await processToolOutput(output + note);
         return { result: processed, isError: false };
       } catch (e) {
         return { result: `Erro na busca por conteúdo: ${String(e)}`, isError: true };
@@ -244,12 +247,12 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     name: "edit_file",
     description:
-      "Edita um arquivo substituindo a primeira ocorrência de oldText por newText. Use replaceAll=true para substituir todas.",
+      "Substitui a primeira ocorrência de oldText por newText; com replaceAll=true, todas. Sem correspondência exata, tenta ignorar diferenças de quebra de linha e de espaços, e dá erro se isso deixar o trecho ambíguo.",
     inputSchema: {
       type: "object",
       properties: {
         path: { type: "string" },
-        oldText: { type: "string", description: "Texto exato a localizar" },
+        oldText: { type: "string", description: "Texto a localizar, sem os números de linha de read_file" },
         newText: { type: "string", description: "Texto substituto" },
         replaceAll: { type: "boolean", default: false },
       },
@@ -270,7 +273,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     name: "apply_patch",
     description:
-      "Aplica múltiplos blocos de substituição de texto (oldText/newText) em um arquivo de forma atômica.",
+      "Aplica vários blocos oldText/newText a um arquivo, em ordem. Cada bloco troca a primeira ocorrência exata (só a quebra de linha é ajustada). Se um bloco falhar, nada é gravado. Não aceita formato diff.",
     inputSchema: {
       type: "object",
       properties: {
@@ -374,16 +377,16 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     name: "run_task",
     description:
-      "Lança um subagente autônomo para executar tarefas complexas, pesquisas, refatorações ou verificações em paralelo ou em background.",
+      "Lança um subagente autônomo para pesquisa, implementação ou verificação. Ele não vê esta conversa, nem usa MCP. Sem runInBackground, o agente espera o fim, e chamadas da mesma resposta rodam uma após a outra. Para trabalho em paralelo, use runInBackground e acompanhe pelo ID com manage_background_task.",
     inputSchema: {
       type: "object",
       properties: {
         description: { type: "string", description: "Resumo curto (3-5 palavras) da tarefa" },
-        prompt: { type: "string", description: "Instruções completas para o subagente" },
+        prompt: { type: "string", description: "Instruções completas, com todo o contexto necessário" },
         role: {
           type: "string",
           enum: ["general", "research", "verification", "plan", "coder", "custom"],
-          description: "Especialidade do subagente: general | research | verification | plan | coder | custom",
+          description: "research e plan são somente leitura; verification relata sem corrigir; coder implementa; custom usa customPrompt. Padrão: general",
         },
         customPrompt: { type: "string", description: "Instrução de persona personalizada quando role='custom'" },
         runInBackground: { type: "boolean", description: "Executar em background sem bloquear o agente principal" },
@@ -666,7 +669,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       type: "object",
       properties: {
         lines: { type: "number", description: "Número de linhas a retornar (padrão: 50, máx: 200)" },
-        level: { type: "string", description: "Filtro de nível: error | warn | info | tool" },
+        level: { type: "string", description: "Filtro de nível: error | warn | info | tool | ok" },
         search: { type: "string", description: "Termo de busca/filtro nos logs" },
       },
     },
@@ -977,14 +980,14 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     name: "execute_command",
     description:
-      "Executa um comando de sistema no terminal PowerShell do Windows. Retorna a saída padrão (stdout) e erros (stderr). Suporta 'runInBackground=true' para iniciar processos em segundo plano.",
+      "Executa um comando no Windows PowerShell 5.1, sem perfil e sem interação (não existem &&, ||, ?: nem ??; use ';' ou if ($?) { ... }). Retorna stdout e stderr. Use runInBackground=true para o que pode passar de 2 minutos.",
     inputSchema: {
       type: "object",
       properties: {
         command: { type: "string", description: "Comando PowerShell a ser executado" },
         cwd: { type: "string", description: "Diretório de execução (padrão: diretório atual)" },
-        timeout: { type: "number", description: "Tempo limite em ms (padrão: 30000ms)" },
-        runInBackground: { type: "boolean", description: "Executar em segundo plano sem aguardar término" },
+        timeout: { type: "number", description: "Tempo limite em ms. Padrão: 30000; máximo: 120000. Em background, padrão: 300000; máximo: 3600000" },
+        runInBackground: { type: "boolean", description: "Não aguarda o término; acompanhe com manage_background_task" },
       },
       required: ["command"],
     },

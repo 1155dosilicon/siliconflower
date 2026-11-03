@@ -1,4 +1,4 @@
-import { streamChat } from "./llm.js";
+import { buildOpenAITools, streamChat } from "./llm.js";
 import { McpManager } from "./mcp.js";
 import { builtinToolsAsMcp, isBuiltin, runBuiltin } from "./tools.js";
 import { loadSkills, readSkillContent, SKILL_TOOL, type Skill } from "./skills.js";
@@ -99,6 +99,7 @@ export class AgentSession {
   private mcp: McpManager | null = null;
   private skills: Skill[] = [];
   private memoryPrompt = "";
+  private schemaTokens?: { toolCount: number; tokens: number };
   private abort: AbortController | null = null;
   private pending: { resolve: (answer: string) => void; reject: (err: Error) => void; options?: string[] } | null = null;
   private statusTimer: ReturnType<typeof setTimeout> | undefined;
@@ -576,9 +577,19 @@ export class AgentSession {
     this.statusTimer = undefined;
   }
 
+  /** Runs on every state change (each stream chunk), so the serialized schemas are cached. */
+  private toolSchemaTokens(): number {
+    const tools = this.allTools();
+    if (this.schemaTokens?.toolCount !== tools.length) {
+      this.schemaTokens = { toolCount: tools.length, tokens: estimateTokens(JSON.stringify(buildOpenAITools(tools))) };
+    }
+    return this.schemaTokens.tokens;
+  }
+
   private estimateTokens(state: SessionState): number {
     return (
       estimateTokens(buildSystemPrompt(state.mode, this.config.system, this.skills, this.memoryPrompt)) +
+      this.toolSchemaTokens() +
       estimateMessagesTokens(this.history) +
       estimateTokens(state.liveText)
     );

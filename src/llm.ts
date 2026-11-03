@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { log } from "./logger.js";
-import { compressHistory } from "./context.js";
+import { CONTEXT_TOKEN_BUDGET, compressHistory, estimateTokens } from "./context.js";
 import type { AppConfig, ChatMessage, MediaAttachment, McpTool, ReasoningLevel, StreamEvent, ToolResult } from "./types.js";
 import { isXiaomiMimoEndpoint } from "./reasoning.js";
 import { hasMediaData, mediaNote, pruneMedia, rejectMedia, userContent } from "./services/media.js";
@@ -148,6 +148,8 @@ const MAX_OUTPUT_TOKENS = 32768;
 // Models and providers with a smaller cap reject the value above instead of clamping it.
 const FALLBACK_OUTPUT_TOKENS = 16384;
 export const MAX_STEPS = 50;
+// Keeps room for the conversation even when many MCP tools fill most of the context budget.
+const MIN_HISTORY_TOKENS = 20_000;
 
 const GENERIC_RETRY_DELAY_MS = 1000;
 
@@ -222,6 +224,11 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   // The history is re-compacted before every request: a long tool loop can otherwise grow
   // far beyond the context budget.
   const history: ChatMessage[] = [...messages];
+  // The system prompt and the tool schemas are sent in every request and use the same budget.
+  const historyBudget = Math.max(
+    MIN_HISTORY_TOKENS,
+    CONTEXT_TOKEN_BUDGET - estimateTokens(config.system ?? "") - estimateTokens(JSON.stringify(apiTools))
+  );
   const turn: ChatMessage[] = [];
   let finalContent = "";
   let finalThinking = "";
@@ -230,7 +237,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
 
   for (let step = 0; step < MAX_STEPS; step++) {
     throwIfAborted(signal);
-    const buildRequest = () => buildOpenAIMessages(config, compressHistory(pruneMedia(history)));
+    const buildRequest = () => buildOpenAIMessages(config, compressHistory(pruneMedia(history), historyBudget));
     let working = buildRequest();
     let content = "";
     let thinking = "";

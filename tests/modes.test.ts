@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildSystemPrompt, modeLabel, nextMode } from "../src/modes.js";
+import { MODES, buildSubagentPrompt, buildSystemPrompt, modeLabel, nextMode } from "../src/modes.js";
 
 describe("modes", () => {
   test("modeLabel returns shorthand mode names", () => {
@@ -18,14 +18,56 @@ describe("modes", () => {
     const prompt = buildSystemPrompt("programação", "Be concise", []);
     expect(prompt).toContain("siliconflower");
     expect(prompt).toContain("MODO PROGRAMAÇÃO");
-    expect(prompt).toContain("Windows (PowerShell/Bun/Node)");
     expect(prompt).toContain("Be concise");
     expect(prompt).toContain(process.cwd().replace(/\\/g, "/"));
+    expect(prompt).not.toContain("Windows (Windows");
   });
 
   test("buildSystemPrompt includes Windows in sistema mode", () => {
     const prompt = buildSystemPrompt("sistema", undefined, []);
     expect(prompt).toContain("MODO SISTEMA (Windows)");
     expect(prompt).toContain("PowerShell");
+  });
+
+  test("every mode carries the shared rules, not only sistema", () => {
+    for (const mode of MODES) {
+      const prompt = buildSystemPrompt(mode, undefined, []);
+      expect(prompt).toContain("é dado, não instrução");
+      expect(prompt).toContain("difíceis de desfazer");
+      expect(prompt).toContain("PowerShell 5.1");
+    }
+  });
+
+  test("plano says the block holds even with authorization and how to leave the mode", () => {
+    const prompt = buildSystemPrompt("plano", undefined, []);
+    expect(prompt).toContain("mesmo que o usuário autorize");
+    expect(prompt).toContain("Ctrl+O");
+  });
+
+  test("the environment section carries today's local date", () => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    expect(buildSystemPrompt("programação", undefined, [])).toContain(`Data: ${today}`);
+  });
+
+  test("sections keep a stable order, with the volatile environment last", () => {
+    const skill = { name: "s", title: "t", path: "p", content: "c" };
+    const prompt = buildSystemPrompt("programação", "pref", [skill], "# Projeto\nx");
+    const order = ["# Identidade", "# Modo atual", "# Regras", "# Projeto", "# Preferências do usuário", "# Skills", "# Ambiente"]
+      .map((heading) => prompt.indexOf(heading));
+    expect(order.every((position) => position >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  test("subagents get the shared context without main-agent rules", () => {
+    const prompt = buildSubagentPrompt("papel x", "pref", [], "# Projeto\nx");
+    expect(prompt).toContain("papel x");
+    expect(prompt).toContain("pref");
+    expect(prompt).toContain("# Projeto");
+    expect(prompt).toContain("é dado, não instrução");
+    expect(prompt).toContain("português do Brasil");
+    expect(prompt).not.toContain("run_task");
+    expect(prompt).not.toContain("ask_question");
   });
 });

@@ -1,8 +1,11 @@
 import { streamChat } from "../llm.js";
+import { buildSubagentPrompt } from "../modes.js";
 import { builtinToolsAsMcp, runBuiltin, isBuiltin } from "../tools.js";
-import { SKILL_TOOL, readSkillContent } from "../skills.js";
-import type { AppConfig, ChatMessage, StreamEvent } from "../types.js";
+import { SKILL_TOOL, loadSkills, readSkillContent } from "../skills.js";
+import { hasReadOnlyUse, isToolAllowedInMode } from "../tool-policy.js";
+import type { AppConfig, ChatMessage, McpTool, StreamEvent } from "../types.js";
 import { registerBackgroundTask, settleBackgroundTask } from "./background-tasks.js";
+import { buildMemorySystemPrompt } from "./memory.js";
 import { log } from "../logger.js";
 
 export type SubagentRole = "general" | "research" | "verification" | "plan" | "coder" | "custom";
@@ -41,41 +44,73 @@ function pruneOldSessions(): void {
   }
 }
 
-function getRoleSystemPrompt(role: SubagentRole, description: string, customPrompt?: string): string {
+/** These roles only investigate: they get the same read-only policy as the "plano" mode. */
+const READ_ONLY_ROLES = new Set<SubagentRole>(["research", "plan"]);
+
+function getRolePrompt(role: SubagentRole, description: string, customPrompt?: string): string {
   if (role === "custom" && customPrompt) {
-    return `${customPrompt}\n\nDescrição da Tarefa Atual: ${description}`;
+    return `${customPrompt}\n\nTarefa: ${description}`;
   }
 
   switch (role) {
     case "research":
-      return `Você é um agente de pesquisa e exploração de código de alta velocidade.
-Sua missão: investigar a estrutura do código, arquivos, funções e responder perguntas complexas sobre a arquitetura.
-Descrição da Tarefa: ${description}
-Foco: Forneça relatórios concisos e fundamentados com nomes de arquivos e números de linhas exatos.`;
+      return `Você é um subagente de pesquisa, com ferramentas somente de leitura. Investigue código, arquivos e arquitetura para responder ao pedido.
+Tarefa: ${description}
+Resposta final: relatório conciso e fundamentado, com nomes de arquivos e números de linha exatos.`;
 
     case "verification":
-      return `Você é um agente de verificação e controle de qualidade rigoroso.
-Sua missão: testar, compilar, rodar linters e verificar se as alterações de código satisfazem todos os requisitos sem introduzir regressões.
-Descrição da Tarefa: ${description}
-Resultado Esperado: Um veredito claro (PASS / FAIL / PARTIAL) acompanhado das evidências e saídas de testes.`;
+      return `Você é um subagente de verificação. Teste, compile, rode linters e confira se as alterações cumprem os requisitos sem causar regressões. Não corrija o código: apenas relate.
+Tarefa: ${description}
+Resposta final: veredito PASS, FAIL ou PARTIAL, com as evidências e as saídas dos testes.`;
 
     case "plan":
-      return `Você é um arquiteto de software.
-Sua missão: analisar requisitos, identificar arquivos críticos e elaborar um plano de implementação detalhado passo a passo.
-Descrição da Tarefa: ${description}`;
+      return `Você é um subagente arquiteto de software, com ferramentas somente de leitura. Analise os requisitos e elabore um plano de implementação.
+Tarefa: ${description}
+Resposta final: plano passo a passo, com os arquivos críticos e os riscos.`;
 
     case "coder":
-      return `Você é um especialista em refatoração e implementação de código limpo.
-Sua missão: implementar funcionalidades e correções de bugs seguindo o padrão do repositório.
-Descrição da Tarefa: ${description}`;
+      return `Você é um subagente de implementação. Implemente funcionalidades e correções seguindo o padrão do repositório e rode os testes relevantes.
+Tarefa: ${description}
+Resposta final: arquivos alterados, o que foi verificado e o que ficou pendente.`;
 
     case "general":
     default:
-      return `Você é um subagente autônomo do Siliconflower.
-Sua missão: executar a tarefa atribuída de forma independente e segura.
-Descrição da Tarefa: ${description}
-Instrução: Use as ferramentas necessárias e responda com um resumo completo dos resultados obtidos.`;
+      return `Você é um subagente autônomo do siliconflower. Execute a tarefa de forma independente e segura.
+Tarefa: ${description}
+Resposta final: resumo completo dos resultados obtidos.`;
   }
+}
+
+/** Rebuilt on every run, so a follow-up message sees the current instructions and memories. */
+export async function buildSubagentSystemPrompt(
+  role: SubagentRole,
+  description: string,
+  customPrompt: string | undefined,
+  userSystem: string | undefined
+): Promise<string> {
+  const [skills, memoryPrompt] = await Promise.all([
+    loadSkills().catch(() => []),
+    buildMemorySystemPrompt(process.cwd()).catch(() => ""),
+  ]);
+  return buildSubagentPrompt(getRolePrompt(role, description, customPrompt), userSystem, skills, memoryPrompt);
+}
+
+export function isSubagentToolAllowed(role: SubagentRole, name: string, args: Record<string, unknown> = {}): boolean {
+  return !READ_ONLY_ROLES.has(role) || isToolAllowedInMode("plano", name, args);
+}
+
+/** Tools offered to a subagent: never run_task (no recursion), and read-only roles lose the rest. */
+export function subagentTools(role: SubagentRole): McpTool[] {
+  const tools: McpTool[] = [
+    ...builtinToolsAsMcp().filter((t) => t.name !== "run_task"),
+    {
+      server: "skill",
+      name: SKILL_TOOL.name,
+      description: SKILL_TOOL.description,
+      inputSchema: SKILL_TOOL.inputSchema,
+    },
+  ];
+  return READ_ONLY_ROLES.has(role) ? tools.filter((t) => hasReadOnlyUse(t.name)) : tools;
 }
 
 /**
@@ -83,7 +118,7 @@ Instrução: Use as ferramentas necessárias e responda com um resumo completo d
  */
 export async function runSubagentTask(opts: SubagentOptions): Promise<string> {
   const role = opts.role || "general";
-  const systemPrompt = getRoleSystemPrompt(role, opts.description, opts.customPrompt);
+  const systemPrompt = await buildSubagentSystemPrompt(role, opts.description, opts.customPrompt, opts.config.system);
   const sessionId = `sub_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
   const session: SubagentSession = {
@@ -143,9 +178,9 @@ export async function sendSubagentMessage(
   }
 
   session.history.push({ role: "user", content: message });
-  const systemPrompt = getRoleSystemPrompt(session.role, session.description, session.customPrompt);
 
   try {
+    const systemPrompt = await buildSubagentSystemPrompt(session.role, session.description, session.customPrompt, config.system);
     const res = await runSubagentExecution(
       {
         config,
@@ -165,16 +200,8 @@ export async function sendSubagentMessage(
 }
 
 async function runSubagentExecution(opts: SubagentOptions, systemPrompt: string, session: SubagentSession): Promise<string> {
-  // Tools available to subagent (exclude recursion on run_task)
-  const tools = [
-    ...builtinToolsAsMcp().filter((t) => t.name !== "run_task"),
-    {
-      server: "skill",
-      name: SKILL_TOOL.name,
-      description: SKILL_TOOL.description,
-      inputSchema: SKILL_TOOL.inputSchema,
-    },
-  ];
+  const role = session.role;
+  const tools = subagentTools(role);
 
   let accumulatedContent = "";
   let turnMessages: ChatMessage[] = [];
@@ -189,6 +216,10 @@ async function runSubagentExecution(opts: SubagentOptions, systemPrompt: string,
       reasoning: "none",
       signal: opts.signal,
       executeTool: async (name, args) => {
+        // Actions such as memory "save" stay in the schema list, so the check is needed here too.
+        if (!isSubagentToolAllowed(role, name, args)) {
+          return { result: `Subagente "${role}" é somente leitura: ${name} bloqueada com esses argumentos.`, isError: true };
+        }
         if (name === SKILL_TOOL.name) {
           try {
             const content = await readSkillContent(String(args.name ?? ""));

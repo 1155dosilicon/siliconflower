@@ -19,6 +19,14 @@ const PLAN_READ_ONLY_TOOLS = new Set([
   "todowrite",
 ]);
 
+/** Tools whose read-only use depends on the `action` argument (see isToolAllowedInMode). */
+const ACTION_GATED_TOOLS = new Set(["manage_background_task", "memory", "artifact"]);
+
+/** Whether a tool has any use under the read-only policy, to leave the others out of the schema list. */
+export function hasReadOnlyUse(name: string): boolean {
+  return PLAN_READ_ONLY_TOOLS.has(name) || ACTION_GATED_TOOLS.has(name);
+}
+
 export function isToolAllowedInMode(
   mode: Mode,
   name: string,

@@ -105,7 +105,6 @@ export async function smartEditFile(options: EditOptions): Promise<EditResult> {
         }
         if (match) {
           foundIndexes.push(i);
-          if (!replaceAll) break;
           i += targetLength - 1; // skip past this block so matches don't overlap
         }
       }

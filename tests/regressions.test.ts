@@ -10,7 +10,7 @@ import { createArtifact, readArtifact, listArtifacts, deleteArtifact, getArtifac
 import { smartEditFile } from "../src/services/smart-edit.js";
 import { runBuiltin } from "../src/tools.js";
 import { extractSymbols, generateRepoMap } from "../src/services/repomap.js";
-import { searchContent } from "../src/grep.js";
+import { GREP_MAX_MATCHES, searchContent } from "../src/grep.js";
 import { renderLogo } from "../src/ascii.js";
 import { getBackgroundTask, killAllBackgroundTasks, startBackgroundCommand } from "../src/services/background-tasks.js";
 import type { AppConfig, ChatMessage } from "../src/types.js";
@@ -516,5 +516,30 @@ describe("repo map and grep", () => {
     await Bun.write(join(dir, "bin", "tool.js"), "const marker = 'agulha';\n");
     const matches = await searchContent({ basePath: dir, pattern: "agulha" });
     expect(matches.length).toBe(1);
+  });
+
+  test("grep_content says when it stopped at the match limit", async () => {
+    const dir = join(tmp, "grep_limit");
+    await Bun.write(join(dir, "many.txt"), "agulha\n".repeat(GREP_MAX_MATCHES + 5));
+    const cut = await runBuiltin("grep_content", { path: dir, pattern: "agulha" });
+    expect(cut.result).toContain("busca interrompida");
+
+    await Bun.write(join(dir, "many.txt"), "agulha\n".repeat(3));
+    const whole = await runBuiltin("grep_content", { path: dir, pattern: "agulha" });
+    expect(whole.result).not.toContain("busca interrompida");
+  });
+
+  test("edit_file refuses a whitespace-flexible match that is ambiguous", async () => {
+    const path = join(tmp, "ambiguous.ts");
+    const original = "  if (x) {\n  }\n    if (x) {\n    }\n";
+    await Bun.write(path, original);
+    const res = await smartEditFile({ path, oldText: "if  (x)  {", newText: "if (y) {" });
+    expect(res.isError).toBe(true);
+    expect(res.result).toContain("ambíguo");
+    expect(await readFile(path, "utf8")).toBe(original);
+
+    const all = await smartEditFile({ path, oldText: "if  (x)  {", newText: "if (y) {", replaceAll: true });
+    expect(all.isError).toBe(false);
+    expect((await readFile(path, "utf8")).match(/if \(y\)/g)?.length).toBe(2);
   });
 });

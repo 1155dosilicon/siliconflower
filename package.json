@@ -1,6 +1,6 @@
 {
   "name": "siliconflower",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "AI agent for Windows, as a desktop app or CLI/TUI, with MCP, reasoning control, skills, and OpenAI-compatible backends.",
   "os": [
     "win32"

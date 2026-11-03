@@ -17,12 +17,18 @@ export function formatTokenCount(count: number): string {
   return `${(count / 1000000).toFixed(2)}M`;
 }
 
+/** Measured on the Portuguese prompts: about 3.4 with cl100k_base, 3.9 with o200k_base. */
+const CHARS_PER_TOKEN = 3.5;
+
+/** Everything sent in one request should fit here: system prompt, tool schemas and history. */
+export const CONTEXT_TOKEN_BUDGET = 90_000;
+
 /**
- * Estimates token count for text (~3.8 chars per token for code/Portuguese text mix).
+ * Estimates token count for text.
  */
 export function estimateTokens(text: string): number {
   if (!text) return 0;
-  return Math.ceil(text.length / 3.8);
+  return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 
 // Rough value per file: the real cost depends on resolution and duration, which are not read here.
@@ -92,7 +98,7 @@ function buildBoundedPreview(output: string, maxChars: number): { header: string
  * Compresses chat history when token threshold is reached or message count is high.
  * Keeps system/recent messages intact, compresses old tool outputs.
  */
-export function compressHistory(messages: ChatMessage[], maxTokens = 90000): ChatMessage[] {
+export function compressHistory(messages: ChatMessage[], maxTokens = CONTEXT_TOKEN_BUDGET): ChatMessage[] {
   const currentTokens = estimateMessagesTokens(messages);
   if (currentTokens <= maxTokens && messages.length <= 40) {
     return messages;
@@ -162,7 +168,7 @@ export function compressHistory(messages: ChatMessage[], maxTokens = 90000): Cha
     const last = result[0];
     last.reasoning = undefined;
     last.toolCalls = undefined;
-    const charBudget = Math.max(0, Math.floor(maxTokens * 3.8));
+    const charBudget = Math.max(0, Math.floor(maxTokens * CHARS_PER_TOKEN));
     last.content = last.content.slice(0, charBudget);
   }
 

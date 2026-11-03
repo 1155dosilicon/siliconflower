@@ -3,6 +3,8 @@ import { join, relative, resolve } from "node:path";
 import { globToRegex } from "./glob-util.js";
 import { IGNORED_SOURCE_DIRS } from "./fs-util.js";
 
+export const GREP_MAX_MATCHES = 200;
+
 interface GrepOptions {
   basePath: string;
   pattern: string;
@@ -26,7 +28,7 @@ function matchesGlob(relPath: string, filename: string, pattern?: string): boole
 }
 
 export async function searchContent(opts: GrepOptions): Promise<GrepMatch[]> {
-  const { basePath, pattern, includePattern, maxMatches = 200 } = opts;
+  const { basePath, pattern, includePattern, maxMatches = GREP_MAX_MATCHES } = opts;
   let regex: RegExp;
   try {
     regex = new RegExp(pattern, "i");

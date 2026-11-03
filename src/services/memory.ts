@@ -225,16 +225,17 @@ export async function forgetMemory(
 function projectSection(project: ProjectInfo | null, cwd: string): string {
   if (!project) {
     return (
-      `## Projeto\nNenhum projeto ativo em ${cwd.replace(/\\/g, "/")} (sem ${PROJECT_MARKERS.join(" ou ")}). ` +
+      `# Projeto\nNenhum projeto ativo em ${cwd.replace(/\\/g, "/")} (sem ${PROJECT_MARKERS.join(" ou ")}). ` +
       `Memórias de projeto estão desativadas aqui: não tente salvá-las. Use memória "global" só para ` +
       `preferências que valham em qualquer pasta.`
     );
   }
   const instructions = readProjectInstructions(project);
   const where = `${project.root.replace(/\\/g, "/")} (${basename(project.markerPath)})`;
+  // Delimited because the file has its own headings, which would mix with this prompt's sections.
   return instructions
-    ? `## Instruções do projeto — ${where}\n${instructions}`
-    : `## Projeto ativo — ${where}\n(arquivo de instruções vazio)`;
+    ? `# Projeto\nProjeto ativo: ${where}\n<instrucoes_do_projeto>\n${instructions}\n</instrucoes_do_projeto>`
+    : `# Projeto\nProjeto ativo: ${where} (arquivo de instruções vazio)`;
 }
 
 /**
@@ -246,7 +247,7 @@ export async function buildMemorySystemPrompt(cwd: string = process.cwd()): Prom
   const project = findProject(cwd);
   const memories = await recallMemories(undefined, cwd);
 
-  const parts = [`# Contexto Persistente`, projectSection(project, cwd)];
+  const parts = [projectSection(project, cwd)];
 
   if (memories.length > 0) {
     const lines: string[] = [];
@@ -259,7 +260,7 @@ export async function buildMemorySystemPrompt(cwd: string = process.cwd()): Prom
     }
     const omitted = memories.length - lines.length;
     parts.push(
-      `## Memórias salvas (índice)\n` +
+      `# Memórias salvas (índice)\n` +
         `Só nome e descrição. Quando uma delas for relevante para a tarefa atual, leia o conteúdo com ` +
         `"memory" (action = "recall", query = nome) antes de agir. Ignore as que não tiverem relação com o pedido.\n` +
         lines.join("\n") +
