@@ -6,6 +6,8 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-02
+
 ### Added
 - Ferramenta `read_media`: o modelo vê imagens em qualquer provedor e ouve áudios e vê vídeos na API Xiaomi MiMo (`src/services/media.ts`).
 
@@ -242,7 +244,8 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 - First-run wizard with provider presets for SiliconFlow, OpenRouter,
   OpenAI, and Anthropic.
 
-[Unreleased]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.3.0...HEAD
+[Unreleased]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.4.0...HEAD
+[0.4.0]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.3.0...siliconflower-0.4.0
 [0.3.0]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.2.9...siliconflower-0.3.0
 [0.2.9]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.2.6...siliconflower-0.2.9
 [0.2.6]: https://github.com/1155dosilicon/siliconflower/compare/0.2.5...siliconflower-0.2.6

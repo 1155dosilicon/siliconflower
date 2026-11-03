@@ -1,6 +1,6 @@
 # 🌸 SILICONFLOWER
 
-![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)
+![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20PowerShell-0078D6.svg)
 ![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black.svg)
@@ -140,7 +140,7 @@ As opções `--model`, `--reasoning`, `--mode`, `--base-url` e `--api-key` tamb�
 | `Esc` ou botão **Parar** | Cancela a resposta (ou a pergunta) em andamento |
 | Seletores **Modo** e **Pensamento** | Equivalem a `Ctrl+O` e `Ctrl+E` |
 
-Enquanto o modelo raciocina, a página mostra só um aviso **Pensando...**, sem o texto do raciocínio. As conversas ficam salvas por projeto, na lateral: **+ Nova conversa** começa outra, clicar em uma retoma de onde parou e **×** apaga. Na TUI, a conversa continua terminando ao sair. Fechar a aba encerra o agente depois de cerca de 15 segundos; `Ctrl+C` no terminal encerra na hora. Uma resposta só é salva ao terminar ou ser interrompida: se o agente cair no meio dela, ela se perde. A URL traz um token de acesso: não a compartilhe (veja [SECURITY.md](SECURITY.md)).
+Enquanto o agente trabalha, a página mostra um aviso **Pensando...** até o fim do turno, sem o texto do raciocínio; durante uma ferramenta, quem mostra a atividade é o cartão dela. As conversas ficam salvas por projeto, na lateral: **+ Nova conversa** começa outra, clicar em uma retoma de onde parou e **×** apaga. Na TUI, a conversa continua terminando ao sair. Fechar a aba encerra o agente depois de cerca de 15 segundos; `Ctrl+C` no terminal encerra na hora. Uma resposta só é salva ao terminar ou ser interrompida: se o agente cair no meio dela, ela se perde. A URL traz um token de acesso: não a compartilhe (veja [SECURITY.md](SECURITY.md)).
 
 ### App de Desktop
 A mesma interface em janela própria, sem terminal nem navegador. O instalador está na [última versão](https://github.com/1155dosilicon/siliconflower/releases/latest). Ele instala só para o seu usuário, sem pedir administrador, e cria atalhos no menu Iniciar e na área de trabalho. O app ocupa cerca de 420 MB, porque traz o agente e o Electron, e não coloca `siliconflower` no `PATH`: o modo terminal é instalado à parte. Para atualizar, execute o instalador da versão nova. Para remover, use **Configurações > Aplicativos**; seus projetos recentes, sua configuração e suas conversas continuam guardados.
@@ -242,6 +242,7 @@ Crie arquivos Markdown em `~/.siliconflower/skills/` com instruções especializ
 - **Servidor MCP indisponível:** confirme `command`, `args` e dependências do servidor. Falhas de conexão aparecem como aviso na barra de status e são gravadas no log; as ferramentas nativas continuam disponíveis. Consulte os detalhes com `bun run start -- logs --level error`.
 - **Acentos corrompidos na saída de comandos:** a partir da v0.2.7, `execute_command`, hooks e tarefas em background forçam UTF-8 no PowerShell e rodam com `-NoProfile` (o seu `$PROFILE` não é carregado nesses comandos).
 - **O agente lembra de coisas de outro projeto / não lembra de nada:** a memória de projeto só existe em pastas com `SILICONFLOWER.md` ou `AGENTS.md` (nela ou acima dela). Confira com `siliconflower show` (linha `Project`) ou na barra de status (`Projeto:`). Abra o agente dentro da pasta do projeto, ou rode `siliconflower init` para criar um. Memórias globais (`~/.siliconflower/memory/`) aparecem em qualquer pasta.
+- **Resposta ou arquivo grande cortado:** cada resposta do modelo tem limite de 32768 tokens de saída, ou 16384 se o provedor recusar esse valor. O raciocínio pode contar nesse limite, conforme o provedor. O modelo é avisado do corte e pode escrever o arquivo em partes; em um texto cortado, envie `continue`.
 - **Comando não encontrado após instalar o `.exe`:** abra uma nova janela do terminal para carregar o PATH atualizado.
 - **Problema no app de desktop:** o log fica em `~/.siliconflower/logs/siliconflower.log`. Instalar o app não instala o comando `siliconflower`.
 
