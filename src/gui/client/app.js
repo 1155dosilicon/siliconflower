@@ -198,15 +198,29 @@ function appendNewMessages() {
 
 function renderLive() {
   const live = $("live");
-  // A pending question means the agent is waiting for the user, not thinking.
-  const thinking = state.streaming && !state.liveText && !state.question;
+  // The turn goes on after its first text. Only a pending question (waiting for the user) or a
+  // running tool (its card and the status bar say it) replace the box.
+  const thinking = state.streaming && !state.question && !state.status.startsWith("🔨");
+  const text = state.streaming ? state.liveText : "";
+  if (!thinking && !text) {
+    live.replaceChildren();
+    return;
+  }
+  const wrapper = live.firstElementChild ?? live.appendChild(el("article", "message assistant"));
+  const textNode = wrapper.querySelector(".markdown");
+  if (text) {
+    const node = textNode ?? wrapper.insertBefore(el("div", "markdown"), wrapper.firstChild);
+    if (node.dataset.source !== text) {
+      node.dataset.source = text;
+      markdownInto(node, text);
+    }
+  } else {
+    textNode?.remove();
+  }
   // Rebuilding the box at every update would restart its animation.
-  if (thinking && live.querySelector(".thinking")) return;
-  live.replaceChildren();
-  if (!state.streaming || (!thinking && !state.liveText)) return;
-  const wrapper = live.appendChild(el("article", "message assistant"));
-  if (thinking) wrapper.append(thinkingBox());
-  else markdownInto(wrapper.appendChild(el("div", "markdown")), state.liveText);
+  const box = wrapper.querySelector(".thinking");
+  if (thinking && !box) wrapper.append(thinkingBox());
+  else if (!thinking) box?.remove();
 }
 
 function thinkingBox() {

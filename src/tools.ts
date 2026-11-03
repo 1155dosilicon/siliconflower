@@ -224,13 +224,17 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       required: ["path", "content"],
     },
     run: async (a) => {
-      const path = toAbs(String(a.path));
+      // Otherwise a missing path becomes a file named "undefined" and missing content empties the file.
+      if (typeof a.path !== "string" || !a.path || typeof a.content !== "string") {
+        return { result: "Nada foi escrito: write_file exige path e content como texto.", isError: true };
+      }
+      const path = toAbs(a.path);
       if (await isPathBlockedSafe(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
       try {
         await ensureDir(dirname(path));
-        await writeFile(path, String(a.content ?? ""), "utf8");
-        await log("info", `write_file: ${path} (${String(a.content ?? "").length} bytes)`);
-        return { result: `Arquivo escrito: ${path} (${String(a.content ?? "").length} bytes)`, isError: false };
+        await writeFile(path, a.content, "utf8");
+        await log("info", `write_file: ${path} (${a.content.length} bytes)`);
+        return { result: `Arquivo escrito: ${path} (${a.content.length} bytes)`, isError: false };
       } catch (e) {
         return { result: `Erro ao escrever ${path}: ${String(e)}`, isError: true };
       }

@@ -49,6 +49,103 @@ describe("PowerShell runner", () => {
   });
 });
 
+describe("a response cut off at the output limit", () => {
+  const sse = (chunks: unknown[]) =>
+    new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n", {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  const chunk = (delta: unknown, finish_reason: string | null = null) => ({
+    id: "x",
+    object: "chat.completion.chunk",
+    model: "m",
+    choices: [{ index: 0, delta, finish_reason }],
+  });
+
+  async function run(responses: Response[]) {
+    const requests: { messages: { role: string; content?: string; tool_calls?: { function: { arguments: string } }[] }[] }[] = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: async (req) => {
+        requests.push((await req.json()) as (typeof requests)[number]);
+        return responses[requests.length - 1]!;
+      },
+    });
+    const executed: string[] = [];
+    const events: { type: string; text?: string; content?: string; isError?: boolean; result?: string }[] = [];
+    try {
+      const stream = streamChat({
+        config: { baseURL: `http://127.0.0.1:${server.port}/v1`, apiKey: "k", model: "m", reasoning: "none", mcpServers: {} },
+        messages: [{ role: "user", content: "oi" }],
+        tools: [],
+        reasoning: "none",
+        executeTool: async (name) => {
+          executed.push(name);
+          return { result: "ok", isError: false };
+        },
+      });
+      for await (const event of stream) events.push(event as (typeof events)[number]);
+    } finally {
+      server.stop(true);
+    }
+    return { requests, executed, events };
+  }
+
+  test("does not run a tool with truncated arguments and tells the model", async () => {
+    const { requests, executed, events } = await run([
+      sse([
+        chunk({ tool_calls: [{ index: 0, id: "c1", type: "function", function: { name: "write_file", arguments: '{"path":"a.html","content":"<html' } }] }),
+        chunk({}, "length"),
+      ]),
+      sse([chunk({ content: "refeito" }, "stop")]),
+    ]);
+    expect(executed).toEqual([]);
+    const result = events.find((e) => e.type === "tool_result")!;
+    expect(result.isError).toBe(true);
+    expect(result.result).toContain("limite de 32768 tokens");
+    // The next request must carry valid JSON, followed by the tool result.
+    const sent = requests[1]!.messages;
+    const assistant = sent.find((m) => m.tool_calls)!;
+    expect(assistant.tool_calls![0]!.function.arguments).toBe("{}");
+    expect(sent[sent.indexOf(assistant) + 1]!.role).toBe("tool");
+  });
+
+  test("warns when the text of the answer is cut off", async () => {
+    const { events } = await run([sse([chunk({ content: "metade" }, "length")])]);
+    const done = events.find((e) => e.type === "done")!;
+    expect(done.content).toContain("metade");
+    expect(done.content).toContain("Resposta cortada");
+    expect(events.some((e) => e.type === "text" && e.text?.includes("Resposta cortada"))).toBe(true);
+  });
+
+  test("a model with a smaller output cap falls back once and keeps the lower limit", async () => {
+    const tooLarge = () =>
+      new Response(`{"error":{"message":"max_tokens is too large: 32768. This model's maximum for this value is 16384."}}`, {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    const { requests, events } = await run([
+      tooLarge(),
+      sse([
+        chunk({ tool_calls: [{ index: 0, id: "c1", type: "function", function: { name: "todowrite", arguments: "{}" } }] }),
+        chunk({}, "tool_calls"),
+      ]),
+      sse([chunk({ content: "pronto" }, "stop")]),
+    ]);
+    const limits = (requests as unknown as { max_tokens: number }[]).map((r) => r.max_tokens);
+    expect(limits).toEqual([32768, 16384, 16384]);
+    expect(events.find((e) => e.type === "done")!.content).toContain("pronto");
+  });
+
+  test("write_file without path or content changes nothing", async () => {
+    const path = join(tmp, "write-file-args.txt");
+    await runBuiltin("write_file", { path, content: "original" });
+    expect((await runBuiltin("write_file", { content: "x" })).isError).toBe(true);
+    expect((await runBuiltin("write_file", { path })).isError).toBe(true);
+    expect(await readFile(path, "utf8")).toBe("original");
+  });
+});
+
 describe("a provider that refuses a valid request without explaining", () => {
   const config: AppConfig = { baseURL: "", apiKey: "k", model: "m", reasoning: "none", mcpServers: {} };
   const chunk = `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", model: "m", choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`;

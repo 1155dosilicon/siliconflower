@@ -14,6 +14,13 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 - `create_artifact`, `read_artifact`, `list_artifacts` e `delete_artifact` viraram a ferramenta `artifact`, com o parâmetro `action`.
 - `manage_hooks` passou a se chamar `show_hooks`: ela só exibe a configuração.
 - A saída do hook `onEdit` agora volta para o modelo junto com o resultado da edição; antes era descartada (`src/tools.ts`).
+- O limite de saída por resposta subiu de 16384 para 32768 tokens; se o provedor recusar o valor, a requisição é repetida com 16384.
+
+### Fixed
+- GUI: o indicador "Pensando..." sumia depois do primeiro texto do turno e a tela ficava sem sinal de atividade; agora fica até o fim do turno, exceto durante ferramentas e perguntas.
+- Chamada de ferramenta cortada no limite de tokens de saída não executa mais: o modelo recebe o erro e o motivo. Antes, `write_file` criava um arquivo vazio chamado `undefined` e relatava sucesso.
+- `write_file` recusa chamadas sem `path` ou `content`; sem `content`, esvaziava o arquivo existente.
+- Resposta de texto cortada no limite de tokens de saída agora avisa o usuário; antes terminava sem nenhum sinal.
 
 ## [0.3.0] - 2026-11-02
 

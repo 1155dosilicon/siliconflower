@@ -142,7 +142,11 @@ export function isOfficialOpenAIEndpoint(baseURL: string): boolean {
   }
 }
 
-const MAX_OUTPUT_TOKENS = 16384;
+// Enough for a large file in one call, even with reasoning on. A higher value only makes a
+// runaway response cost more: 16k tokens already took 4.5 minutes on MiMo.
+const MAX_OUTPUT_TOKENS = 32768;
+// Models and providers with a smaller cap reject the value above instead of clamping it.
+const FALLBACK_OUTPUT_TOKENS = 16384;
 export const MAX_STEPS = 50;
 
 const GENERIC_RETRY_DELAY_MS = 1000;
@@ -162,9 +166,34 @@ function isPayloadRejection(err: unknown): boolean {
   return status === 400 || status === 413 || status === 415 || status === 422;
 }
 
+/** The token parameter was understood but its value is above what the model accepts. */
+function isOutputLimitRejection(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return isPayloadRejection(err)
+    && /max_(completion_)?tokens/i.test(msg)
+    && /too large|exceed|maximum|less than|at most|range|between/i.test(msg);
+}
+
 function describeApiError(err: unknown): string {
   const e = err as { status?: number; error?: unknown; message?: string };
   return `HTTP ${e?.status}: ${JSON.stringify(e?.error ?? e?.message ?? String(err)).slice(0, 500)}`;
+}
+
+/** Null when the arguments are not a JSON object: usually a response cut off mid tool call. */
+function parseToolArgs(raw: string): Record<string, unknown> | null {
+  if (!raw) return {};
+  try {
+    const value: unknown = JSON.parse(raw);
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function invalidArgsMessage(name: string, cutOffAt: number | null): string {
+  return cutOffAt
+    ? `Nada foi executado: a resposta atingiu o limite de ${cutOffAt} tokens de saída e os argumentos de ${name} foram cortados. Refaça em partes menores: escreva o arquivo com a primeira parte e acrescente o restante em chamadas separadas com edit_file.`
+    : `Nada foi executado: os argumentos de ${name} não são um objeto JSON válido. Corrija e tente de novo.`;
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -178,6 +207,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   const isXiaomiMimo = isXiaomiMimoEndpoint(config.baseURL);
   const effort = !isXiaomiMimo && reasoning !== "none" ? reasoning : undefined;
   let supportsEffort = true;
+  let outputLimit = MAX_OUTPUT_TOKENS;
   let tokenParam: "max_tokens" | "max_completion_tokens" = isOfficialOpenAIEndpoint(config.baseURL)
     ? "max_completion_tokens"
     : "max_tokens";
@@ -220,7 +250,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
           model: config.model,
           messages: working,
           stream: true,
-          [tokenParam]: MAX_OUTPUT_TOKENS,
+          [tokenParam]: outputLimit,
           stream_options: { include_usage: true },
           ...(withEffort && effort ? { reasoning_effort: effort } : {}),
           ...(isXiaomiMimo ? { thinking: { type: reasoning === "none" ? "disabled" : "enabled" } } : {}),
@@ -246,6 +276,10 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
           void log("warn", `Provedor recusou o pedido sem explicar; repetindo uma vez: ${describeApiError(err)}`);
           await new Promise((resolve) => setTimeout(resolve, GENERIC_RETRY_DELAY_MS));
           throwIfAborted(signal);
+        } else if (outputLimit > FALLBACK_OUTPUT_TOKENS && isOutputLimitRejection(err)) {
+          // Before the checks below: they would blame the media or the parameter name.
+          outputLimit = FALLBACK_OUTPUT_TOKENS;
+          void log("warn", `Provedor recusou o limite de saída; repetindo com ${outputLimit}: ${describeApiError(err)}`);
         } else if (isPayloadRejection(err) && hasMediaData(history)) {
           // Otherwise the file stays in the history and blocks the rest of the conversation.
           void log("warn", `Provedor recusou um pedido com mídia; repetindo sem ela: ${describeApiError(err)}`);
@@ -361,6 +395,11 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       if (content || thinking) {
         turn.push({ role: "assistant", content, ...(thinking ? { reasoning: thinking } : {}) });
       }
+      if (finishReason === "length") {
+        const notice = `[Resposta cortada: atingiu o limite de ${outputLimit} tokens de saída. Envie "continue" para prosseguir.]`;
+        finalContent += (finalContent ? "\n\n" : "") + notice;
+        yield { type: "text", text: notice };
+      }
       yield { type: "done", content: finalContent, reasoning: finalThinking, messages: turn };
       return;
     }
@@ -372,7 +411,8 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       toolCalls: pendingCalls.map((c) => ({
         id: c.id,
         type: "function" as const,
-        function: { name: c.name, arguments: c.args },
+        // Broken JSON in the history can make a provider refuse every later request.
+        function: { name: c.name, arguments: parseToolArgs(c.args) ? c.args : "{}" },
       })),
       // MiMo requires reasoning_content on the assistant message preceding tool results.
       ...(isXiaomiMimo ? { reasoning: thinking } : {}),
@@ -387,22 +427,22 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       throwIfAborted(signal);
       void log("info", `LLM step ${step}: ->${call.name}(${call.args.slice(0, 200)})`);
       yield { type: "tool_call", id: call.id, name: call.name, args: call.args };
-      let parsed: Record<string, unknown> = {};
-      try {
-        parsed = call.args ? (JSON.parse(call.args) as Record<string, unknown>) : {};
-      } catch {
-        parsed = { _raw: call.args };
-      }
+      const parsed = parseToolArgs(call.args);
       let result = "";
       let isError = false;
-      try {
-        const r = await executeTool(call.name, parsed);
-        result = r.result;
-        isError = r.isError;
-        if (r.media) stepMedia.push(...r.media);
-      } catch (err) {
-        result = String(err);
+      if (!parsed) {
+        result = invalidArgsMessage(call.name, finishReason === "length" ? outputLimit : null);
         isError = true;
+      } else {
+        try {
+          const r = await executeTool(call.name, parsed);
+          result = r.result;
+          isError = r.isError;
+          if (r.media) stepMedia.push(...r.media);
+        } catch (err) {
+          result = String(err);
+          isError = true;
+        }
       }
       void log(isError ? "warn" : "info", `LLM step ${step}: <- ${call.name} isError=${isError} result=${result.slice(0, 200)}`);
       yield { type: "tool_result", id: call.id, name: call.name, result, isError };
