@@ -1,12 +1,12 @@
 # 🌸 SILICONFLOWER
 
-![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)
+![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20PowerShell-0078D6.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-0078D6.svg)
 ![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black.svg)
 ![Node](https://img.shields.io/badge/Node.js-%3E%3D20-green.svg)
 
-Agente de IA de alta performance para desenvolvimento de software no Windows, como **app de desktop** ou no **terminal (CLI/TUI)**. Integra **30 ferramentas nativas**, **Subagentes & Background Tasks**, **Memória Persistente**, **Git Worktrees**, **RepoMap**, **Busca Web** e **Protocolo MCP**, compatível com **SiliconFlow, OpenRouter, OpenAI** e demais backends compatíveis com a API da OpenAI.
+Agente de IA de alta performance para desenvolvimento de software em **Windows, Linux e macOS/Unix**, como **app de desktop** ou no **terminal (CLI/TUI)**. Integra **30 ferramentas nativas**, **Subagentes & Background Tasks**, **Memória Persistente**, **Git Worktrees**, **RepoMap**, **Busca Web** e **Protocolo MCP**, compatível com **SiliconFlow, OpenRouter, OpenAI** e demais backends compatíveis com a API da OpenAI.
 
 <p align="center">
   <img src="assets/preview.png" alt="SiliconFlower TUI Preview" width="100%" />
@@ -22,33 +22,34 @@ Agente de IA de alta performance para desenvolvimento de software no Windows, co
 - 🗺️ **RepoMap & Símbolos**: Mapeamento estrutural de código (TS, JS, Python, Go, Rust) com baixo consumo de tokens.
 - ⚡ **Raciocínio & Modos de Operação**: Controle de *reasoning effort* (`Ctrl+E`) e modos de trabalho (`Ctrl+O`: `programação`, `sistema`, `plano`). Na API oficial Xiaomi MiMo, o atalho alterna o pensamento entre ligado e desligado.
 - 🖥️ **TUI com Scroll Livre & Viewport Limpo**: Inicialização com tela limpa e suporte nativo completo à rolagem com a rodinha do mouse em respostas longas e blocos de código (estilo Claude Code).
-- 🪟 **App de Desktop**: instalador sem administrador, janela própria por projeto, configuração sem terminal e conversas salvas que você retoma depois.
+- 🪟 **App de Desktop**: janela própria por projeto (Electron, AppImage no Linux), configuração sem terminal e conversas salvas que você retoma depois.
 - 🌐 **Interface no Navegador**: `siliconflower gui` abre a mesma interface no Firefox ou em outro navegador, mostrando argumentos e resultados das ferramentas e tarefas.
 - 🧩 **Ecossistema MCP & Hooks**: Suporte nativo ao Model Context Protocol e automações disparadas por eventos do ciclo de vida (`preTool`, `postTool`, `onEdit`, `onCommand`, `onSessionStart`, `onSessionEnd`).
-- 📦 **Binário Nativo Standalone**: Compilação para `.exe` único via Bun, sem necessidade de Node.js instalado.
+- 📦 **Binário Nativo Standalone**: Compilação para binário único via Bun (`.exe` no Windows, `siliconflower` em Linux/Unix), sem necessidade de Node.js instalado.
 
 ---
 
 ## 🚀 Início Rápido
 
-### App de desktop (recomendado)
-1. Baixe `Siliconflower-Setup-<versão>.exe` na [última versão](https://github.com/1155dosilicon/siliconflower/releases/latest).
-2. Execute com dois cliques. Não pede administrador e não exige Bun nem Node. O instalador não é assinado, então o Windows SmartScreen pode avisar: clique em **Mais informações** e em **Executar assim mesmo**.
-3. Informe provedor, chave e modelo, e escolha a pasta do projeto.
+Um único código para Windows, Linux e macOS. O que muda entre os sistemas está em [docs/PLATAFORMAS.md](docs/PLATAFORMAS.md).
 
-Mais detalhes em [App de Desktop](#app-de-desktop).
+### App de desktop (recomendado)
+1. Baixe na [última versão](https://github.com/1155dosilicon/siliconflower/releases/latest):
+   - **Windows:** `Siliconflower-Setup-<versão>.exe`. Execute com dois cliques; não pede administrador. O instalador não é assinado, então o SmartScreen pode avisar: clique em **Mais informações** e em **Executar assim mesmo**.
+   - **Linux:** `Siliconflower-<versão>-x86_64.AppImage`. Dê permissão de execução (`chmod +x Siliconflower-*.AppImage`) e abra.
+2. Informe provedor, chave e modelo, e escolha a pasta do projeto. Não exige Bun nem Node.
 
 ### Modo terminal, sem compilar
-Baixe `siliconflower.exe` na [última versão](https://github.com/1155dosilicon/siliconflower/releases/latest) e rode dentro da pasta do projeto. Para usar de qualquer pasta, coloque-o em uma pasta do `PATH`. Só é necessário se você quer o terminal: o app já traz o próprio agente.
+Baixe na [última versão](https://github.com/1155dosilicon/siliconflower/releases/latest) o binário `siliconflower.exe` (Windows) ou `siliconflower-linux-x64` (Linux) e rode dentro da pasta do projeto. Para usar de qualquer pasta, coloque-o numa pasta do `PATH` (no Linux, renomeie para `siliconflower` e use `~/.local/bin`). Só é necessário se você quer o terminal: o app já traz o próprio agente.
 
 ### A partir do código-fonte
 
 **Pré-requisitos:**
-- Windows com PowerShell.
-- [Bun >= 1.3](https://bun.sh) para instalar dependências, executar a partir do código-fonte e compilar o `.exe`.
+- Windows (PowerShell), Linux ou macOS/Unix (bash/sh).
+- [Bun >= 1.3](https://bun.sh) para instalar dependências, executar a partir do código-fonte e compilar o binário.
 - Como alternativa ao Bun, Node.js >= 20 com npm pode executar o launcher local após `npm install` (`node bin/siliconflower.js`). O comando `bun run start` requer Bun.
 
-```powershell
+```bash
 # 1. Clonar e instalar dependências
 git clone https://github.com/1155dosilicon/siliconflower.git
 cd siliconflower
@@ -58,7 +59,16 @@ bun install
 bun run start
 ```
 
-**Compilar e instalar no PATH do Windows:**
+#### Compilar e Instalar no PATH
+
+**Linux / macOS:**
+```bash
+bun run build          # Gera dist/siliconflower
+npm run install:bin    # Copia para ~/.local/bin
+siliconflower          # Executa a partir de qualquer pasta
+```
+
+**Windows:**
 ```powershell
 bun run build          # Gera dist/siliconflower.exe
 npm run install:bin    # Adiciona ao PATH do usuário
@@ -93,11 +103,11 @@ As configurações globais e dados do Siliconflower ficam organizados em `~/.sil
 ```
 
 ### Comandos de Gerenciamento & Flags CLI
-```powershell
+```bash
 bun run start -- --help
 bun run start -- --version
-bun run start -- config       # Reabre o assistente de configuração
 bun run start -- gui          # Abre a interface gráfica no navegador padrão (--port <n>, --no-open)
+bun run start -- config       # Reabre o assistente de configuração
 bun run start -- init         # Cria SILICONFLOWER.md aqui (ativa a memória de projeto; --agents cria AGENTS.md)
 bun run start -- show         # Exibe configuração mascarada, projeto ativo e diretório do workspace
 bun run start -- ensure       # Cria configuração se ainda não existir
@@ -130,7 +140,7 @@ Quando `baseURL` usa `xiaomimimo.com` ou um subdomínio oficial, o Siliconflower
 | `Ctrl+C` | Cancela a geração (ou a pergunta de `ask_question`) em andamento; com o agente ocioso, sai |
 
 ### Interface Gráfica (`siliconflower gui`)
-Rode o comando **dentro da pasta do projeto**: ela é a pasta de trabalho do agente. A página abre no navegador padrão; com `--no-open`, copie a URL do terminal para o navegador que preferir. Qualquer navegador atual serve, sem exigir Edge. Requer Bun ou o `.exe` compilado (não roda com Node + tsx).
+Rode o comando **dentro da pasta do projeto**: ela é a pasta de trabalho do agente. A página abre no navegador padrão (`xdg-open` no Linux, `open` no macOS, `Start-Process` no Windows); com `--no-open`, copie a URL do terminal para o navegador que preferir. Requer Bun ou o binário compilado (não roda com Node + tsx).
 
 As opções `--model`, `--reasoning`, `--mode`, `--base-url` e `--api-key` também valem aqui. Para vários projetos ao mesmo tempo, rode um `gui` em cada pasta: cada um usa sua própria porta e conversa. A configuração inicial continua no terminal, com `siliconflower config`.
 
@@ -143,27 +153,27 @@ As opções `--model`, `--reasoning`, `--mode`, `--base-url` e `--api-key` tamb�
 Enquanto o agente trabalha, a página mostra um aviso **Pensando...** até o fim do turno, sem o texto do raciocínio; durante uma ferramenta, quem mostra a atividade é o cartão dela. As conversas ficam salvas por projeto, na lateral: **+ Nova conversa** começa outra, clicar em uma retoma de onde parou e **×** apaga. Na TUI, a conversa continua terminando ao sair. Fechar a aba encerra o agente depois de cerca de 15 segundos; `Ctrl+C` no terminal encerra na hora. Uma resposta só é salva ao terminar ou ser interrompida: se o agente cair no meio dela, ela se perde. A URL traz um token de acesso: não a compartilhe (veja [SECURITY.md](SECURITY.md)).
 
 ### App de Desktop
-A mesma interface em janela própria, sem terminal nem navegador. O instalador está na [última versão](https://github.com/1155dosilicon/siliconflower/releases/latest). Ele instala só para o seu usuário, sem pedir administrador, e cria atalhos no menu Iniciar e na área de trabalho. O app ocupa cerca de 420 MB, porque traz o agente e o Electron, e não coloca `siliconflower` no `PATH`: o modo terminal é instalado à parte. Para atualizar, execute o instalador da versão nova. Para remover, use **Configurações > Aplicativos**; seus projetos recentes, sua configuração e suas conversas continuam guardados.
+A mesma interface em janela própria, sem terminal nem navegador. No Linux, o pacote é um AppImage (`Siliconflower-<versão>-x86_64.AppImage`): dê permissão de execução (`chmod +x`) e abra. No Windows, é um instalador por usuário, sem administrador. O app traz o agente e o Electron e não coloca `siliconflower` no `PATH`: o modo terminal é instalado à parte.
 
-Para gerar o instalador a partir do código-fonte, ou desenvolver sem instalar:
+Para gerar o pacote a partir do código-fonte, ou desenvolver sem empacotar:
 
-```powershell
+```bash
 bun install                    # só na primeira vez
 bun install --cwd desktop      # só na primeira vez: baixa o Electron
-bun run desktop:dist           # gera dist-desktop\Siliconflower-Setup-<versão>.exe
+bun run desktop:dist           # gera em dist-desktop/ o pacote da plataforma atual (AppImage no Linux, instalador .exe no Windows)
 
-bun run build                  # ou, sem instalar: compila o agente
+bun run build                  # ou, sem empacotar: compila o agente
 bun run desktop                # e abre o app a partir do código-fonte
 ```
 
 Na tela inicial, escolha a pasta do projeto. Cada projeto abre em sua própria janela, com seu agente e suas conversas; `Ctrl+O` abre outra pasta e `Ctrl+Shift+O` mostra os recentes. Fechar a janela encerra o agente e os comandos em background daquele projeto, e as conversas continuam salvas. Abrir o projeto de novo começa com uma conversa vazia, para não gastar tokens com contexto antigo; a anterior está na lateral.
 
 - **Configuração:** na primeira vez, o app pede provedor, chave e modelo, e **Testar conexão** confere se funcionam. Depois, use **Arquivo > Configurações** (`Ctrl+,`). A chave nunca volta para a tela: em branco, mantém a salva. Projetos abertos podem reiniciar na hora para usar a mudança, sem perder a conversa.
-- **Variáveis de ambiente:** aberto por atalho, o app herda o ambiente do Windows, não o de um terminal. Variáveis definidas só numa sessão (`SILICONFLOWER_API_KEY`, ou um `PATH` usado por MCP e hooks) não chegam ao agente; defina-as nas variáveis de ambiente do usuário.
+- **Variáveis de ambiente:** aberto pelo menu de aplicativos, o app herda o ambiente da sessão gráfica, não o de um terminal. Variáveis definidas só no `.bashrc`/`.zshrc` (`SILICONFLOWER_API_KEY`, ou um `PATH` usado por MCP e hooks) podem não chegar ao agente; defina-as em `~/.profile` ou `~/.config/environment.d/` (Linux) ou nas variáveis de ambiente do usuário (Windows).
 
 ### Modos de Trabalho
 - **`programação`**: Acesso completo a ferramentas de código, leitura, escrita e testes.
-- **`sistema`**: Focado em administração de SO, processos e scripts PowerShell.
+- **`sistema`**: Focado em administração de SO, processos e scripts de shell (PowerShell no Windows, bash/sh em Linux/Unix).
 - **`plano`**: Modo de planejamento com allowlist de leitura, perguntas e checklist da sessão — bloqueia edições de arquivo, comandos e ferramentas MCP.
 
 `programação` e `sistema` mudam o foco do prompt, mas não isolam o agente nem limitam seus privilégios. O modo `plano` aplica uma allowlist explícita; ferramentas MCP e ferramentas não reconhecidas são bloqueadas por padrão. Hooks `onSessionStart` e `onSessionEnd` configurados inline ainda podem executar comandos nesse modo. Consulte [SECURITY.md](SECURITY.md) antes de conceder acesso ao computador.
@@ -176,7 +186,7 @@ O Siliconflower disponibiliza um conjunto completo de ferramentas integradas:
 
 - 📁 **Arquivos & Edição**: `read_file`, `read_media` (imagem em qualquer provedor; áudio e vídeo na API Xiaomi MiMo), `write_file`, `edit_file` (fuzzy/newline matching), `apply_patch`, `list_directory`, `create_directory`, `move_path`, `delete_path`, `file_info`.
 - 🔍 **Busca & Navegação**: `search_files` (glob), `grep_content` (regex), `repo_map`, `find_symbol`.
-- 💻 **Execução & Tarefas**: `execute_command` (PowerShell arbitrário com os privilégios do usuário, saída em UTF-8), `read_logs`, `ask_question` (pausa e espera sua resposta na TUI), `todowrite`, `read_skill`.
+- 💻 **Execução & Tarefas**: `execute_command` (shell arbitrário com os privilégios do usuário — PowerShell no Windows com saída em UTF-8, `$SHELL` em Linux/Unix), `read_logs`, `ask_question` (pausa e espera sua resposta na TUI), `todowrite`, `read_skill`.
 - 🤖 **Subagentes & Async**: `run_task`, `send_subagent_message`, `manage_background_task`.
 - 🧠 **Memória & Worktrees**: `memory` (`save`, `recall`, `forget`), `enter_worktree`, `exit_worktree`, `list_worktrees`.
 - 📄 **Artefatos & Web**: `artifact` (`create`, `read`, `list`, `delete`), `web_fetch` (HTML para Markdown), `web_search`, `show_hooks`.
@@ -193,26 +203,13 @@ O Siliconflower disponibiliza um conjunto completo de ferramentas integradas:
   "mcpServers": {
     "filesystem": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/Workspace"]
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/Workspace"]
     }
   }
 }
 ```
 
 As ferramentas MCP são anunciadas à LLM com nomes qualificados e estáveis no formato `mcp_<servidor>_<ferramenta>_<hash>`. Isso evita colisões entre servidores ou com ferramentas nativas; o nome original continua sendo usado ao chamar o servidor.
-
-Para o agente abrir páginas, clicar e testar uma interface, use um navegador via MCP. Cada ferramenta do servidor entra em todos os pedidos ao modelo, então só ligue se for usar:
-
-```json
-{
-  "mcpServers": {
-    "playwright": {
-      "command": "npx",
-      "args": ["-y", "@playwright/mcp@latest"]
-    }
-  }
-}
-```
 
 ### Testes e diretório de dados alternativo
 
@@ -222,13 +219,11 @@ Defina `SILICONFLOWER_DATA_DIR` para redirecionar `config.json`, logs e os demai
 ```json
 {
   "hooks": {
-    "onEdit": "if (Test-Path tsconfig.json) { bun x tsc --noEmit }",
+    "onEdit": "bun x tsc --noEmit",
     "postTool": "git status --short"
   }
 }
 ```
-
-A saída do `onEdit` volta para o modelo junto com o resultado da edição (até 8 mil caracteres), então ele vê os erros que a própria mudança causou. O hook roda a cada edição, com limite de 30 s; use um comando rápido. Hooks ficam em `config.json`, que vale para todas as pastas: por isso o `Test-Path` no exemplo.
 
 ### Habilidades Customizadas (Skills)
 Crie arquivos Markdown em `~/.siliconflower/skills/` com instruções especializadas. O agente as carrega sob demanda com `read_skill`.
@@ -240,11 +235,13 @@ Crie arquivos Markdown em `~/.siliconflower/skills/` com instruções especializ
 - **HTTP 401:** confira a chave em `config.json` e a variável `SILICONFLOWER_API_KEY`.
 - **HTTP 404:** confira o endereço base (normalmente terminado em `/v1`) e o identificador exato do modelo no provedor.
 - **Servidor MCP indisponível:** confirme `command`, `args` e dependências do servidor. Falhas de conexão aparecem como aviso na barra de status e são gravadas no log; as ferramentas nativas continuam disponíveis. Consulte os detalhes com `bun run start -- logs --level error`.
-- **Acentos corrompidos na saída de comandos:** a partir da v0.2.7, `execute_command`, hooks e tarefas em background forçam UTF-8 no PowerShell e rodam com `-NoProfile` (o seu `$PROFILE` não é carregado nesses comandos).
+- **Acentos corrompidos na saída de comandos (Windows):** a partir da v0.2.7, `execute_command`, hooks e tarefas em background forçam UTF-8 no PowerShell e rodam com `-NoProfile` (o seu `$PROFILE` não é carregado nesses comandos).
+- **Alias ou função do shell não funciona em `execute_command` (Linux/Unix):** os comandos rodam com `$SHELL -c`, não interativo e sem login, então `.bashrc`/`.zshrc` não são carregados. Use o caminho completo do programa ou exporte as variáveis antes de abrir o `siliconflower`.
 - **O agente lembra de coisas de outro projeto / não lembra de nada:** a memória de projeto só existe em pastas com `SILICONFLOWER.md` ou `AGENTS.md` (nela ou acima dela). Confira com `siliconflower show` (linha `Project`) ou na barra de status (`Projeto:`). Abra o agente dentro da pasta do projeto, ou rode `siliconflower init` para criar um. Memórias globais (`~/.siliconflower/memory/`) aparecem em qualquer pasta.
+- **Comando em background parou ao sair:** fechar a TUI, a GUI ou a janela do projeto encerra os comandos em background e o que eles iniciaram. Para um processo que deve continuar, inicie-o fora do agente (`systemd`, `tmux`, `nohup` em outro terminal).
 - **Resposta ou arquivo grande cortado:** cada resposta do modelo tem limite de 32768 tokens de saída, ou 16384 se o provedor recusar esse valor. O raciocínio pode contar nesse limite, conforme o provedor. O modelo é avisado do corte e pode escrever o arquivo em partes; em um texto cortado, envie `continue`.
-- **Comando não encontrado após instalar o `.exe`:** abra uma nova janela do terminal para carregar o PATH atualizado.
 - **Problema no app de desktop:** o log fica em `~/.siliconflower/logs/siliconflower.log`. Instalar o app não instala o comando `siliconflower`.
+- **Comando não encontrado após instalar o binário:** abra uma nova janela do terminal para carregar o PATH atualizado. No Linux, confirme que `~/.local/bin` está no `PATH`.
 
 ---
 
@@ -253,13 +250,15 @@ Crie arquivos Markdown em `~/.siliconflower/skills/` com instruções especializ
 ```text
 siliconflower/
 ├── src/                  # Código (mapa em AGENTS.md)
-├── desktop/              # App de desktop em Electron e instalador
+├── desktop/              # App de desktop em Electron (instalador Windows / AppImage)
+├── .github/workflows/    # CI (testes em Windows e Linux) e release
 ├── tests/                # bun test
-├── scripts/              # Instalação no PATH do Windows e empacotamento
+├── scripts/              # Instalação no PATH (install.sh / install.ps1) e empacotamento
 ├── docs/ARCHITECTURE.md  # Arquitetura e referência técnica
+├── docs/PLATAFORMAS.md   # O que muda entre Windows e Linux/Unix
 ├── AGENTS.md             # Guia curto para agentes de IA e contribuidores (CLAUDE.md aponta para ele)
 ├── CONTRIBUTING.md · SECURITY.md · CHANGELOG.md
-└── build.ts              # Compilação do .exe standalone (Bun)
+└── build.ts              # Compilação do binário standalone (Bun)
 ```
 
 ---

@@ -1,9 +1,11 @@
 {
   "name": "siliconflower",
-  "version": "0.5.0",
-  "description": "AI agent for Windows, as a desktop app or CLI/TUI, with MCP, reasoning control, skills, and OpenAI-compatible backends.",
+  "version": "0.7.0",
+  "description": "AI agent for Windows, Linux and macOS, as a desktop app or CLI/TUI, with MCP, reasoning control, skills, and OpenAI-compatible backends.",
   "os": [
-    "win32"
+    "win32",
+    "darwin",
+    "linux"
   ],
   "type": "module",
   "license": "MIT",
@@ -41,7 +43,7 @@
     "desktop": "bun run --cwd desktop start",
     "typecheck:desktop": "bun run --cwd desktop typecheck",
     "desktop:dist": "bun run build && bun run --cwd desktop dist",
-    "install:bin": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1"
+    "install:bin": "node scripts/install-bin.js"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.2.1",

@@ -1,11 +1,14 @@
 import { join } from "node:path";
-import { readFile, rename, writeFile, access } from "node:fs/promises";
+import { chmod, readFile, realpath, rename, rm, stat, writeFile, access } from "node:fs/promises";
 import { ensureDir, getGlobalDataDir } from "./fs-util.js";
+import { isWindows } from "./platform.js";
 import type { AppConfig, McpServerConfig, Mode } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
 
 const CONFIG_DIR = getGlobalDataDir();
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
+// It holds the API key: only the owner may read it. Has no effect on Windows.
+const CONFIG_MODE = 0o600;
 
 export function configDir(): string {
   return CONFIG_DIR;
@@ -50,10 +53,21 @@ export async function loadStoredConfig(): Promise<AppConfig | null> {
 async function readConfigFile(applyEnv: boolean): Promise<AppConfig | null> {
   try {
     const raw = await readFile(CONFIG_FILE, "utf8");
+    await restrictConfigAccess();
     const data = JSON.parse(raw);
     return normalize(data, { applyEnv });
   } catch {
     return null;
+  }
+}
+
+/** Fixes files saved by older versions. May fail on a read-only target (Nix store): that is fine. */
+async function restrictConfigAccess(): Promise<void> {
+  if (isWindows()) return;
+  try {
+    if (((await stat(CONFIG_FILE)).mode & 0o077) !== 0) await chmod(CONFIG_FILE, CONFIG_MODE);
+  } catch {
+    // The config still works; there is nothing more to do from here.
   }
 }
 
@@ -70,9 +84,16 @@ export function applyEnvOverrides(config: AppConfig): AppConfig {
 export async function saveConfig(config: AppConfig): Promise<void> {
   await ensureDir(CONFIG_DIR);
   // Atomic: a crash in the middle of a save must not cost the user the API key.
-  const temp = `${CONFIG_FILE}.${process.pid}.tmp`;
-  await writeFile(temp, JSON.stringify(config, null, 2), "utf8");
-  await rename(temp, CONFIG_FILE);
+  // rename() replaces the path itself, so resolve links (dotfile managers, Nix/Home Manager).
+  const target = await realpath(CONFIG_FILE).catch(() => CONFIG_FILE);
+  const temp = `${target}.${process.pid}.tmp`;
+  try {
+    await writeFile(temp, JSON.stringify(config, null, 2), { encoding: "utf8", mode: CONFIG_MODE });
+    await rename(temp, target);
+  } catch (e) {
+    await rm(temp, { force: true }).catch(() => {});
+    throw e;
+  }
 }
 
 export function normalize(data: Partial<AppConfig>, opts: { applyEnv?: boolean } = {}): AppConfig {

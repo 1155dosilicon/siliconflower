@@ -42,7 +42,18 @@ export function childEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(Object.entries(env).filter(([name]) => !name.toUpperCase().startsWith("ELECTRON_")));
 }
 
+const isWindows = process.platform === "win32";
+
+/** Windows: taskkill /T. Unix: the agent leads its own process group (detached), so the whole group gets SIGKILL. */
 function killTree(pid: number): Promise<void> {
+  if (!isWindows) {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {
+      try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+    }
+    return Promise.resolve();
+  }
   const taskkill = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
   return new Promise((resolve) => {
     execFile(taskkill, ["/pid", String(pid), "/T", "/F"], { windowsHide: true }, () => resolve());
@@ -55,6 +66,8 @@ export function startAgentProcess(options: AgentProcessOptions): AgentProcess {
     cwd: options.cwd,
     env: childEnv(options.env ?? process.env),
     windowsHide: true,
+    // Unix: a process group of its own, so killTree reaches what the agent started.
+    detached: !isWindows,
     stdio: ["pipe", "pipe", "pipe"],
   });
 

@@ -14,14 +14,10 @@ New-Item -ItemType Directory -Path $tempDir | Out-Null
 $targetFolder = Join-Path $tempDir "siliconflower"
 New-Item -ItemType Directory -Path $targetFolder | Out-Null
 
-$exclude = @('node_modules', 'dist', 'dist-desktop', '.openclaude', '.siliconflower', '.git', 'plano.txt')
+$exclude = @('node_modules', 'dist', '.openclaude', '.siliconflower', '.git')
 
 Get-ChildItem -Path $src | Where-Object { $exclude -notcontains $_.Name -and $_.Name -notlike "*.zip" } | ForEach-Object {
     Copy-Item -Path $_.FullName -Destination $targetFolder -Recurse -Force
-}
-# desktop/ is a project of its own, with its own generated folders.
-foreach ($generated in @('node_modules', 'build')) {
-    Remove-Item (Join-Path $targetFolder "desktop\$generated") -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Compress-Archive -Path "$targetFolder\*" -DestinationPath $zip -Force

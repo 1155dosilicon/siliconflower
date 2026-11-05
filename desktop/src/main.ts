@@ -41,10 +41,13 @@ const recentsFile = () => join(app.getPath("userData"), "projects.json");
 // Not __dirname: the bundler replaces it with the folder of the source file.
 const buildPath = (...parts: string[]) => join(app.getAppPath(), "build", ...parts);
 
+/** Name of the agent built by `bun run build`: with .exe only on Windows. */
+const AGENT_EXE = process.platform === "win32" ? "siliconflower.exe" : "siliconflower";
+
 function agentExe(): string {
   return app.isPackaged
-    ? join(process.resourcesPath, "siliconflower.exe")
-    : join(app.getAppPath(), "..", "dist", "siliconflower.exe");
+    ? join(process.resourcesPath, AGENT_EXE)
+    : join(app.getAppPath(), "..", "dist", AGENT_EXE);
 }
 
 function isDirectory(path: string): boolean {
@@ -466,7 +469,7 @@ function buildMenu(): void {
   ]));
 }
 
-/** The folder given on the command line, if any ("siliconflower-desktop C:\pasta"). */
+/** The folder given on the command line, if any ("siliconflower-desktop C:\pasta" ou "siliconflower-desktop ~/pasta"). */
 function folderFromArgs(argv: string[], workingDirectory: string): string | undefined {
   // Chromium may move switches ahead of the arguments, so positions mean nothing until
   // they are out. In development, the first argument left is the app's own folder.
@@ -497,6 +500,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", (_event, argv, workingDirectory) => openFromArgs(argv, workingDirectory));
 
   app.whenReady().then(() => {
+    // Windows only (taskbar grouping); a no-op on Linux and macOS.
     app.setAppUserModelId("com.siliconflower.desktop");
     buildMenu();
     registerIpc();

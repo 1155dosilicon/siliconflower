@@ -43,7 +43,7 @@ program
   .action(async (_opts, cmd: Command) => {
     const opts = cmd.optsWithGlobals();
     if (!process.versions.bun) {
-      throw new Error("siliconflower gui requer o Bun ou o executável compilado (siliconflower.exe).");
+      throw new Error("siliconflower gui requer o Bun ou o executável compilado (siliconflower ou siliconflower.exe).");
     }
     const port = opts.port === undefined ? 0 : Number(opts.port);
     if (!Number.isInteger(port) || port < 0 || port > 65535) {

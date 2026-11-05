@@ -70,7 +70,7 @@ describe("read_media", () => {
   test("refuses what cannot be sent", async () => {
     const big = join(dir, "grande.png");
     writeFileSync(big, new Uint8Array(MAX_MEDIA_BYTES + 1));
-    for (const path of [file("nota.txt"), file("vazio.png", ""), big, join(dir, "nao-existe.png"), "C:\\Windows\\System32\\x.png"]) {
+    for (const path of [file("nota.txt"), file("vazio.png", ""), big, join(dir, "nao-existe.png"), process.platform === "win32" ? "C:\\Windows\\System32\\x.png" : "/etc/x.png"]) {
       const res = await runBuiltin("read_media", { path }, { config: MIMO });
       expect(res.isError).toBe(true);
       expect(res.media).toBeUndefined();

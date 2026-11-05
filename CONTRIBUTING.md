@@ -8,7 +8,7 @@ O projeto é pequeno e focado. As contribuições costumam ser de três tipos:
 
 ## Ambiente
 
-```powershell
+```bash
 git clone https://github.com/1155dosilicon/siliconflower.git
 cd siliconflower
 bun install
@@ -17,17 +17,19 @@ bun test
 bun run dev
 ```
 
-Requisitos: Windows, Bun >= 1.3 (recomendado) ou Node >= 20 com `tsx`.
+Requisitos: Windows, Linux ou macOS/Unix, Bun >= 1.3 (recomendado) ou Node >= 20 com `tsx`.
 
 Para mexer no app de desktop (`desktop/`, projeto à parte):
 
-```powershell
+```bash
 bun install --cwd desktop
 bun run typecheck:desktop
-bun run build          # uma vez, ou quando o agente mudar: o app usa dist/siliconflower.exe
+bun run build          # uma vez, ou quando o agente mudar: o app usa dist/siliconflower (dist/siliconflower.exe no Windows)
 bun run desktop
-bun run desktop:dist   # gera o instalador em dist-desktop/
+bun run desktop:dist   # gera o pacote da plataforma atual em dist-desktop/ (AppImage no Linux)
 ```
+
+O mesmo código roda em Windows e Linux/Unix. O que é próprio de cada sistema passa por `src/platform.ts` e está listado em `docs/PLATAFORMAS.md`. O CI roda typecheck e testes nos dois; se você não tem um dos sistemas, deixe o CI testar e diga isso no PR.
 
 O mapa do código, os comandos e as regras que já evitaram bugs estão em [AGENTS.md](AGENTS.md). A arquitetura detalhada está em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

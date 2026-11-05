@@ -1,4 +1,5 @@
 import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { getDefaultShell, isWindows } from "./platform.js";
 
 /**
  * Prefix that forces PowerShell 5.1 to emit UTF-8 (the console default is the OEM
@@ -45,15 +46,32 @@ export function decodeClixml(stderr: string): string {
   return (before + parts.join("")).trim();
 }
 
+const KILL_GRACE_MS = 2000;
+const KILL_POLL_MS = 50;
+
+function processGroupAlive(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 /**
- * Kills a process and all of its descendants (Windows `taskkill /T`). The tree must be
- * killed before the parent dies, otherwise the children are orphaned and keep running.
- * Resolves when taskkill ends: await it if this process is about to exit.
+ * Kills a process and all of its descendants. The tree must be killed before the parent
+ * dies, otherwise the children are orphaned and keep running. Resolves when the tree is
+ * gone: await it if this process is about to exit.
+ * - Windows: `taskkill /T /F`.
+ * - Unix: the shell is spawned as a process-group leader (`detached`), so signalling the
+ *   negative PID reaches every descendant; SIGKILL follows if the group outlives SIGTERM.
+ *   The shell having exited says nothing about the group: `sleep 99 &` outlives it.
  */
 export function killProcessTree(child: ChildProcess): Promise<void> {
   const pid = child.pid;
-  if (!pid || child.exitCode !== null) return Promise.resolve();
-  if (process.platform === "win32") {
+  if (!pid) return Promise.resolve();
+  if (isWindows()) {
+    if (child.exitCode !== null) return Promise.resolve();
     return new Promise((resolve) => {
       execFile("taskkill.exe", ["/pid", String(pid), "/T", "/F"], { windowsHide: true }, () => {
         try { child.kill(); } catch { /* already gone */ }
@@ -61,11 +79,29 @@ export function killProcessTree(child: ChildProcess): Promise<void> {
       });
     });
   }
-  try { child.kill("SIGTERM"); } catch { /* already gone */ }
-  return Promise.resolve();
+  const signalGroup = (sig: NodeJS.Signals) => {
+    try {
+      process.kill(-pid, sig);
+    } catch {
+      try { child.kill(sig); } catch { /* already gone */ }
+    }
+  };
+  signalGroup("SIGTERM");
+  const deadline = Date.now() + KILL_GRACE_MS;
+  return new Promise((resolve) => {
+    const check = () => {
+      if (!processGroupAlive(pid)) return resolve();
+      if (Date.now() >= deadline) {
+        signalGroup("SIGKILL");
+        return resolve();
+      }
+      setTimeout(check, KILL_POLL_MS);
+    };
+    check();
+  });
 }
 
-export interface PowerShellOptions {
+export interface ShellOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   timeout?: number;
@@ -73,7 +109,7 @@ export interface PowerShellOptions {
   maxBuffer?: number;
 }
 
-export interface PowerShellResult {
+export interface ShellResult {
   stdout: string;
   stderr: string;
   exitCode: number | null;
@@ -83,22 +119,41 @@ export interface PowerShellResult {
 }
 
 /**
- * Runs a PowerShell command with UTF-8 output, without loading the user profile, and
- * kills the whole process tree on timeout/abort. Returns the child for external control.
+ * Arguments for the Unix shell. `-c` runs non-interactively and without a login, so
+ * rc/profile files (`.bashrc`, `.zshrc`, `.profile`) are not loaded — the Unix
+ * counterpart of PowerShell's `-NoProfile`.
  */
-export function startPowerShell(
-  command: string,
-  opts: PowerShellOptions = {}
-): { child: ChildProcess; done: Promise<PowerShellResult> } {
-  const maxBuffer = opts.maxBuffer ?? 10 * 1024 * 1024;
-  const child = spawn("powershell.exe", powershellArgs(command), {
-    cwd: opts.cwd,
-    env: opts.env ?? process.env,
-    windowsHide: true,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+export function unixShellArgs(command: string): string[] {
+  return ["-c", command];
+}
 
-  const done = new Promise<PowerShellResult>((resolve) => {
+/**
+ * Runs a command in the platform shell (PowerShell on Windows with UTF-8 output and no
+ * profile; `$SHELL -c` on Unix) and kills the whole process tree on timeout/abort.
+ * Returns the child for external control.
+ */
+export function startShell(
+  command: string,
+  opts: ShellOptions = {}
+): { child: ChildProcess; done: Promise<ShellResult> } {
+  const maxBuffer = opts.maxBuffer ?? 10 * 1024 * 1024;
+  const win = isWindows();
+  const child = win
+    ? spawn("powershell.exe", powershellArgs(command), {
+        cwd: opts.cwd,
+        env: opts.env ?? process.env,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+    : spawn(getDefaultShell(), unixShellArgs(command), {
+        cwd: opts.cwd,
+        env: opts.env ?? process.env,
+        // New process group so killProcessTree can signal every descendant.
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+
+  const done = new Promise<ShellResult>((resolve) => {
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     let size = 0;
@@ -131,13 +186,16 @@ export function startPowerShell(
       settled = true;
       if (timer) clearTimeout(timer);
       opts.signal?.removeEventListener("abort", onAbort);
+      const rawErr = Buffer.concat(err).toString("utf8").replace(/^\uFEFF/, "");
       resolve({
-        stdout: Buffer.concat(out).toString("utf8").replace(/^﻿/, ""),
+        stdout: Buffer.concat(out).toString("utf8").replace(/^\uFEFF/, ""),
         // PowerShell echoes the failing script in error records; hide our encoding prefix.
-        stderr: decodeClixml(Buffer.concat(err).toString("utf8").replace(/^﻿/, ""))
-          .split(/\r?\n/)
-          .filter((line) => line !== UTF8_PREFIX.trim())
-          .join("\n"),
+        stderr: win
+          ? decodeClixml(rawErr)
+              .split(/\r?\n/)
+              .filter((line) => line !== UTF8_PREFIX.trim())
+              .join("\n")
+          : rawErr,
         exitCode,
         timedOut,
         aborted,
@@ -151,12 +209,12 @@ export function startPowerShell(
   return { child, done };
 }
 
-export function runPowerShell(command: string, opts: PowerShellOptions = {}): Promise<PowerShellResult> {
-  return startPowerShell(command, opts).done;
+export function runShell(command: string, opts: ShellOptions = {}): Promise<ShellResult> {
+  return startShell(command, opts).done;
 }
 
 /** Human-readable failure description, or undefined when the command succeeded. */
-export function describeFailure(res: PowerShellResult, timeoutMs?: number): string | undefined {
+export function describeFailure(res: ShellResult, timeoutMs?: number): string | undefined {
   if (res.aborted) return "cancelado";
   if (res.timedOut) return `tempo limite de ${timeoutMs ?? "?"}ms excedido`;
   if (res.error) return res.error;

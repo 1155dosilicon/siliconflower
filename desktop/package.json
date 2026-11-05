@@ -1,7 +1,8 @@
 {
   "name": "siliconflower-desktop",
   "productName": "Siliconflower",
-  "version": "0.5.0",
+  "desktopName": "siliconflower-desktop.desktop",
+  "version": "0.7.0",
   "description": "Janela de desktop do Siliconflower.",
   "private": true,
   "license": "MIT",
@@ -11,7 +12,9 @@
     "postinstall": "install-electron",
     "build": "bun run build.ts",
     "start": "bun run build.ts && electron .",
-    "dist": "bun run build.ts && electron-builder --win nsis --x64",
+    "dist": "bun run build.ts && electron-builder --publish never",
+    "dist:win": "bun run build.ts && electron-builder --win nsis --x64 --publish never",
+    "dist:linux": "bun run build.ts && electron-builder --linux AppImage --x64 --publish never",
     "typecheck": "tsc --noEmit"
   },
   "trustedDependencies": [
