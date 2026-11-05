@@ -2,7 +2,7 @@
   "name": "siliconflower-desktop",
   "productName": "Siliconflower",
   "desktopName": "siliconflower-desktop.desktop",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Janela de desktop do Siliconflower.",
   "private": true,
   "license": "MIT",

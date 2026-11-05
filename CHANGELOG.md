@@ -6,6 +6,23 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-05
+
+A interface de terminal (TUI) saiu: as interfaces agora são o app de desktop e a GUI no navegador (`siliconflower gui`). O executável `siliconflower` continua: ele é o motor do app e mantém os subcomandos `gui`, `config`, `show`, `init`, `ensure`, `skills`, `sync` e `logs`.
+
+### Changed
+- `siliconflower` sem subcomando mostra a ajuda e indica o app de desktop ou `siliconflower gui`, em vez de abrir a conversa no terminal.
+- O modo `plano` pede para trocar de modo pelo seletor Modo da interface, sem citar `Ctrl+O`.
+
+### Removed
+- TUI em Ink (`src/App.tsx`, `src/MarkdownText.tsx`, `src/terminal.ts`) e seus testes.
+- Logo em ASCII (`src/ascii.ts`) e o teste dele.
+- Atalhos de terminal `Ctrl+E`, `Ctrl+O` e `Ctrl+C`; na GUI e no app, os seletores Modo e Pensamento e o botão Parar fazem o mesmo.
+- Saída sincronizada (DEC 2026) e a variável `SILICONFLOWER_NO_SYNC_OUTPUT`.
+- Dependências `ink`, `ink-text-input`, `react`, `@types/react`, `@xterm/headless` e `chalk`.
+- Shim de `react-devtools-core` no `build.ts`.
+- Imagem da TUI no README (`assets/preview.png`).
+
 ## [0.7.0] - 2026-11-05
 
 Versões Windows (`siliconflower` 0.5.0) e Linux/Unix (`siliconflower-nix` 0.6.0) unificadas num só código e repositório (`siliconflower`), a partir da versão Linux/Unix, que já rodava nos dois sistemas. Agora a GUI e o app de desktop também existem no Linux. O que muda entre os sistemas está em `docs/PLATAFORMAS.md`.

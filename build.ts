@@ -9,11 +9,6 @@ import { fileURLToPath } from "node:url";
  *   bun run build                # -> dist/siliconflower[.exe] for the current platform
  *
  * Notes:
- *  - `react-devtools-core` is an optional peer of `ink`. It is only used by Ink
- *    when `DEV=true`, but Bun statically resolves its top-level import and would
- *    either fail the build ("Could not resolve") or fail at runtime inside the
- *    compiled binary ("Cannot find package"). We shim it to a no-op module so the
- *    bundle resolves cleanly without pulling in the real (heavy) devtools package.
  *  - `bun build --compile` embeds the Bun runtime + all JS into a single binary.
  */
 
@@ -43,12 +38,6 @@ function resolveBunTarget(): { target: string; binName: string; binExt: string }
 
 const { target: bunTarget, binName, binExt } = resolveBunTarget();
 const finalBin = `${binName}${binExt}`;
-
-const REACT_DEVTOOLS_SHIM = `
-const devtools = { connectToDevTools() {} };
-export default devtools;
-export function connectToDevTools() {}
-`;
 
 const STAINLESS_SHIMS = `
 export const auto = false;
@@ -108,18 +97,6 @@ export default {
 const shimPlugin = {
   name: "optional-deps-shim",
   setup(build: import("bun").PluginBuilder) {
-    // react-devtools-core -> no-op shim
-    build.onResolve({ filter: /^react-devtools-core$/ }, () => ({
-      path: "react-devtools-core",
-      namespace: "sf-shim",
-    }));
-    build.onLoad({ filter: /.*/, namespace: "sf-shim" }, (args) => {
-      if (args.path === "react-devtools-core") {
-        return { contents: REACT_DEVTOOLS_SHIM, loader: "js" };
-      }
-      return undefined;
-    });
-
     // Stainless shims (openai) -> static Bun shims (prevents minified mutable live binding bug)
     build.onResolve({ filter: /(?:openai\/_shims|_shims\/(?:index|registry|auto\/runtime))/ }, () => ({
       path: "stainless-shims",

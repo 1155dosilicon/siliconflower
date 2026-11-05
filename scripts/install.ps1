@@ -81,5 +81,5 @@ if (($env:Path.Split(";") | ForEach-Object { $_.TrimEnd("\") }) -notcontains $In
 Write-Host ""
 Write-Host "Pronto. Em um novo terminal rode:" -ForegroundColor Cyan
 Write-Host "    siliconflower --version"
-Write-Host "    siliconflower            # inicia a TUI (wizard na 1ª vez)"
+Write-Host "    siliconflower gui        # abre a interface no navegador (wizard na 1ª vez)"
 Write-Host "    siliconflower config     # reconfigurar"

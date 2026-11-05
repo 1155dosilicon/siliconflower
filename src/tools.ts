@@ -29,7 +29,7 @@ import { log } from "./logger.js";
 const CANCELLABLE_BUILTINS = new Set(["execute_command", "web_fetch", "web_search"]);
 // Subagents run their own multi-step LLM loop (each request already has its own connect
 // timeout), so a fixed tool timeout would kill any task longer than a minute. They are
-// still cancelled through the parent abort signal (Ctrl+C).
+// still cancelled through the parent abort signal (the interface's cancel).
 
 const MAX_HOOK_OUTPUT_CHARS = 8000;
 
@@ -37,7 +37,7 @@ export interface ToolContext {
   config?: AppConfig;
   mode?: Mode;
   signal?: AbortSignal;
-  /** Interactive prompt provided by the TUI; absent in subagents and tests. */
+  /** Interactive prompt provided by the interface; absent in subagents and tests. */
   askUser?: (question: string, options: string[] | undefined, signal?: AbortSignal) => Promise<string>;
 }
 

@@ -72,7 +72,7 @@ describe("modes", () => {
   test("plano says the block holds even with authorization and how to leave the mode", () => {
     const prompt = buildSystemPrompt("plano", undefined, []);
     expect(prompt).toContain("mesmo que o usuário autorize");
-    expect(prompt).toContain("Ctrl+O");
+    expect(prompt).toContain("seletor Modo");
   });
 
   test("buildSystemPrompt includes platform in sistema mode", () => {

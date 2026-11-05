@@ -21,7 +21,7 @@ describe("glob-util", () => {
   test("matches files with brace expansion pattern", async () => {
     const matches = await search(srcDir, "*.{ts,tsx}");
     expect(matches.some((m) => m.endsWith("glob-util.ts"))).toBe(true);
-    expect(matches.some((m) => m.endsWith("App.tsx"))).toBe(true);
+    expect(matches.some((m) => m.endsWith("index.tsx"))).toBe(true);
   });
 
   test("returns empty for non-existent root", async () => {

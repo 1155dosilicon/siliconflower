@@ -64,7 +64,7 @@ export interface SessionState {
 export interface SessionDeps {
   /** Replaceable in tests, so turns can run without a provider. */
   stream?: typeof streamChat;
-  /** Where conversations are kept. Without it, they end with the session (TUI). */
+  /** Where conversations are kept. Without it, they end with the session (e.g. tests). */
   store?: ConversationStore;
 }
 
@@ -78,7 +78,7 @@ function clip(text: string, max: number): string {
 
 /**
  * One agent conversation, independent of any UI: API history, tool dispatch, cancellation
- * and ask_question. Front ends (TUI, web) render `getState()` and call the action methods.
+ * and ask_question. Front ends (web GUI, desktop app) render `getState()` and call the action methods.
  */
 export class AgentSession {
   readonly config: AppConfig;
@@ -511,7 +511,7 @@ export class AgentSession {
     const { mode, model } = this.state;
     if (!isToolAllowedInMode(mode, name, args)) {
       return {
-        result: `[MODO PLANO ATIVO] Execução de ${name} bloqueada. Apresente o plano ao usuário e peça para alternar para o modo 'programação' (Ctrl+O no terminal ou o seletor Modo na interface gráfica) para aplicar as alterações.`,
+        result: `[MODO PLANO ATIVO] Execução de ${name} bloqueada. Apresente o plano ao usuário e peça para alternar para o modo 'programação' (o seletor Modo da interface) para aplicar as alterações.`,
         isError: true,
       };
     }

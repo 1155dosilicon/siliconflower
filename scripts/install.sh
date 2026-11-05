@@ -42,5 +42,5 @@ esac
 echo ""
 echo "Pronto. Em um novo terminal rode:"
 echo "    siliconflower --version"
-echo "    siliconflower            # inicia a TUI (wizard na 1ª vez)"
+echo "    siliconflower gui        # abre a interface no navegador (wizard na 1ª vez)"
 echo "    siliconflower config     # reconfigurar"

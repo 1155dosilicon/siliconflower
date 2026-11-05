@@ -202,7 +202,7 @@ describe("session with saved conversations", () => {
     expect(new Set(keys).size).toBe(2);
   });
 
-  test("without a store nothing is saved, as in the TUI", async () => {
+  test("without a store nothing is saved", async () => {
     const session = new AgentSession(CONFIG, {}, { stream: echoStream() });
     await session.send("oi");
     expect(session.getState().conversationId).toBeNull();
