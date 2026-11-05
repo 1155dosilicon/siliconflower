@@ -69,7 +69,9 @@ A janela mostra a mesma página, com texto vindo do modelo e de repositórios, e
 
 - no app instalado, os *fuses* do Electron desligam o uso do executável como interpretador Node (`ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS`, `--inspect`), e ele só carrega o código de dentro do próprio pacote, com integridade verificada.
 
-**Limitação:** o AppImage e o instalador do Windows ainda não são assinados, então não há como conferir a origem do arquivo (no Windows, o SmartScreen pode avisar ao executá-lo). Baixe só de uma fonte em que confia.
+- no Linux, o sandbox do Chromium fica ligado no `.deb` e no `scripts/install-appimage.sh`. O script só passa `--no-sandbox` quando o sistema impede *user namespaces* sem privilégio (e avisa); nesse caso, prefira o `.deb`, que configura o `chrome-sandbox`.
+
+**Limitação:** o `.deb`, o AppImage e o instalador do Windows ainda não são assinados, então não há como conferir a origem do arquivo (no Windows, o SmartScreen pode avisar ao executá-lo). Baixe só de uma fonte em que confia.
 
 
 ## Instruções de projeto vêm do repositório

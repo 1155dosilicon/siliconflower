@@ -21,11 +21,13 @@ jobs:
             agent: dist/siliconflower.exe
             agent_name: siliconflower.exe
             app: dist-desktop/Siliconflower-Setup-*.exe
+            extra: ""
           - os: ubuntu-latest
             dist: dist:linux
             agent: dist/siliconflower
             agent_name: siliconflower-linux-x64
-            app: dist-desktop/Siliconflower-*.AppImage
+            app: dist-desktop/Siliconflower-*.AppImage dist-desktop/Siliconflower-*.deb
+            extra: scripts/install-appimage.sh
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -67,6 +69,7 @@ jobs:
           mkdir -p upload
           cp "${{ matrix.agent }}" "upload/${{ matrix.agent_name }}"
           cp ${{ matrix.app }} upload/
+          if [ -n "${{ matrix.extra }}" ]; then cp ${{ matrix.extra }} upload/; fi
 
       - uses: softprops/action-gh-release@v2
         with:

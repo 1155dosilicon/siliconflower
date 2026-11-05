@@ -25,10 +25,17 @@ win:
     - from: ../dist/siliconflower.exe
       to: siliconflower.exe
 linux:
-  target: AppImage
+  # AppImage: runs anywhere, or per-user with scripts/install-appimage.sh. deb: system-wide
+  # install for Debian/Ubuntu/elementary, with menu entry, icon and setuid chrome-sandbox,
+  # and no FUSE.
+  target:
+    - AppImage
+    - deb
   icon: resources/icon.png
   category: Development
   executableName: siliconflower-desktop
+  # Debian wants "Name <email>". Public: it goes into every .deb.
+  maintainer: silicon <redesneural@yahoo.com>
   # Links the running window to the .desktop entry (WM_CLASS / Wayland app_id).
   syncDesktopName: true
   artifactName: Siliconflower-${version}-${arch}.${ext}
@@ -46,3 +53,20 @@ nsis:
   artifactName: Siliconflower-Setup-${version}.${ext}
   # Recent projects stay, as a later reinstall expects.
   deleteAppDataOnUninstall: false
+deb:
+  # Installs to /opt/Siliconflower and links /usr/bin/siliconflower-desktop.
+  packageCategory: devel
+  # electron-builder's default list plus what the Electron binary also links against
+  # (libgbm, libasound). On Ubuntu 24.04 the t64 packages provide these names.
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+    - libgbm1
+    - libasound2

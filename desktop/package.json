@@ -7,6 +7,7 @@
   "private": true,
   "license": "MIT",
   "author": "siliconflower contributors",
+  "homepage": "https://github.com/1155dosilicon/siliconflower#readme",
   "main": "build/main.cjs",
   "scripts": {
     "postinstall": "install-electron",
@@ -14,7 +15,7 @@
     "start": "bun run build.ts && electron .",
     "dist": "bun run build.ts && electron-builder --publish never",
     "dist:win": "bun run build.ts && electron-builder --win nsis --x64 --publish never",
-    "dist:linux": "bun run build.ts && electron-builder --linux AppImage --x64 --publish never",
+    "dist:linux": "bun run build.ts && electron-builder --linux AppImage deb --x64 --publish never",
     "typecheck": "tsc --noEmit"
   },
   "trustedDependencies": [

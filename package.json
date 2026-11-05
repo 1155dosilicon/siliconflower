@@ -43,6 +43,7 @@
     "desktop": "bun run --cwd desktop start",
     "typecheck:desktop": "bun run --cwd desktop typecheck",
     "desktop:dist": "bun run build && bun run --cwd desktop dist",
+    "desktop:install": "bash scripts/install-appimage.sh",
     "install:bin": "node scripts/install-bin.js"
   },
   "dependencies": {

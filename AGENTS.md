@@ -27,7 +27,7 @@ Antes de dar uma tarefa por concluída: `bun run typecheck` e `bun test`.
 - `src/shell.ts`: toda execução de shell (PowerShell no Windows, `$SHELL -c` em Unix). `platform.ts`: detecção de SO e shell padrão. `project.ts`: detecção de projeto (`SILICONFLOWER.md`/`AGENTS.md`).
 - `src/services/`: memória, mídia, subagentes, tarefas em background, conversas salvas, web, artefatos, worktrees, repomap, smart-edit.
 - `src/core/hooks.ts`: hooks. `mcp.ts`: cliente MCP.
-- `desktop/`: app Electron, projeto à parte (`bun install --cwd desktop`, `bun run desktop`, `bun run typecheck:desktop`). `main.ts`: janelas e segurança. `agent-process.ts`: ciclo de vida do `siliconflower gui --managed`, um por projeto. `settings.ts`: formulário de configuração, sem Electron. `bun run desktop:dist` gera o pacote da plataforma atual em `dist-desktop/` (AppImage no Linux, NSIS no Windows).
+- `desktop/`: app Electron, projeto à parte (`bun install --cwd desktop`, `bun run desktop`, `bun run typecheck:desktop`). `main.ts`: janelas e segurança. `agent-process.ts`: ciclo de vida do `siliconflower gui --managed`, um por projeto. `settings.ts`: formulário de configuração, sem Electron. `bun run desktop:dist` gera o pacote da plataforma atual em `dist-desktop/` (`.deb` e AppImage no Linux, NSIS no Windows). `scripts/install-appimage.sh`: instala o AppImage por usuário, com atalho e ícone (testes em `tests/install-appimage.test.ts`).
 
 ## Regras (cada uma já causou bug)
 

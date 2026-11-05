@@ -22,7 +22,7 @@ Agente de IA de alta performance para desenvolvimento de software em **Windows, 
 - 🗺️ **RepoMap & Símbolos**: Mapeamento estrutural de código (TS, JS, Python, Go, Rust) com baixo consumo de tokens.
 - ⚡ **Raciocínio & Modos de Operação**: Controle de *reasoning effort* (`Ctrl+E`) e modos de trabalho (`Ctrl+O`: `programação`, `sistema`, `plano`). Na API oficial Xiaomi MiMo, o atalho alterna o pensamento entre ligado e desligado.
 - 🖥️ **TUI com Scroll Livre & Viewport Limpo**: Inicialização com tela limpa e suporte nativo completo à rolagem com a rodinha do mouse em respostas longas e blocos de código (estilo Claude Code).
-- 🪟 **App de Desktop**: janela própria por projeto (Electron, AppImage no Linux), configuração sem terminal e conversas salvas que você retoma depois.
+- 🪟 **App de Desktop**: janela própria por projeto (Electron; `.deb` e AppImage no Linux), configuração sem terminal e conversas salvas que você retoma depois.
 - 🌐 **Interface no Navegador**: `siliconflower gui` abre a mesma interface no Firefox ou em outro navegador, mostrando argumentos e resultados das ferramentas e tarefas.
 - 🧩 **Ecossistema MCP & Hooks**: Suporte nativo ao Model Context Protocol e automações disparadas por eventos do ciclo de vida (`preTool`, `postTool`, `onEdit`, `onCommand`, `onSessionStart`, `onSessionEnd`).
 - 📦 **Binário Nativo Standalone**: Compilação para binário único via Bun (`.exe` no Windows, `siliconflower` em Linux/Unix), sem necessidade de Node.js instalado.
@@ -33,10 +33,30 @@ Agente de IA de alta performance para desenvolvimento de software em **Windows, 
 
 Um único código para Windows, Linux e macOS. O que muda entre os sistemas está em [docs/PLATAFORMAS.md](docs/PLATAFORMAS.md).
 
+### Requisitos do sistema
+
+**Linux**
+
+| Item | App de desktop (`.deb`, AppImage) | Agente / terminal (`siliconflower`) |
+| :--- | :--- | :--- |
+| Arquitetura | x86_64 (64 bits). Não há pacote para ARM nem 32 bits | x86_64; em ARM64, compile a partir do código-fonte |
+| CPU | x86_64 comum (não exige AVX2) | com SSE4.2: Intel Nehalem (2008) ou AMD Bulldozer (2011) em diante; não exige AVX2 |
+| glibc | **2.25 ou mais nova** | 2.17 ou mais nova |
+| Kernel | qualquer atual | 3.10 ou mais novo (5.6+ recomendado pelo Bun) |
+| Distribuição (mínimo estimado) | Ubuntu 18.04, Debian 10, elementary OS 5, Linux Mint 19, Fedora 28 ou mais novas | Ubuntu 14.04, Debian 8, RHEL/CentOS 7 ou mais novas |
+| Bibliotecas | GTK 3, NSS, libnotify, libsecret, libgbm, ALSA, libXss, libXtst, AT-SPI e `xdg-utils` (o `.deb` instala sozinho) | só a glibc |
+| Sessão gráfica | X11 ou Wayland | não precisa |
+| Opcionais | FUSE 2 (`libfuse2t64`) só para abrir o AppImage direto, sem o script ou o `.deb` | `git` (ferramentas de worktree); `xdg-open` (`xdg-utils`), para `siliconflower gui` abrir o navegador |
+
+As versões de glibc foram medidas nos binários da 0.7.0; kernel e CPU do agente vêm da [documentação do Bun](https://bun.sh/docs/installation). A linha de distribuições é uma estimativa a partir disso: testado de verdade só no elementary OS 8 e no Ubuntu 24.04. **No Ubuntu 14.04 e 16.04 o app de desktop não abre** (glibc 2.19 e 2.23, abaixo de 2.25: dá erro de `GLIBC_2.25 not found`); o agente no terminal deve funcionar neles, mas sem teste.
+
+**Windows:** Windows 10 ou 11, x64. O agente usa o Windows PowerShell 5.1, que já vem no sistema.
+
 ### App de desktop (recomendado)
 1. Baixe na [última versão](https://github.com/1155dosilicon/siliconflower/releases/latest):
    - **Windows:** `Siliconflower-Setup-<versão>.exe`. Execute com dois cliques; não pede administrador. O instalador não é assinado, então o SmartScreen pode avisar: clique em **Mais informações** e em **Executar assim mesmo**.
-   - **Linux:** `Siliconflower-<versão>-x86_64.AppImage`. Dê permissão de execução (`chmod +x Siliconflower-*.AppImage`) e abra.
+   - **Linux (Debian, Ubuntu, elementary, Mint...):** `Siliconflower-<versão>-amd64.deb`. Instale com `sudo apt install ./Siliconflower-*.deb`; o app aparece no menu de aplicativos. Para remover: `sudo apt remove siliconflower-desktop`.
+   - **Linux, sem senha de administrador ou em outras distribuições:** `Siliconflower-<versão>-x86_64.AppImage` e `install-appimage.sh`. Rode `bash install-appimage.sh Siliconflower-*.AppImage`: ele instala só para o seu usuário, com ícone no menu (veja [App de Desktop](#app-de-desktop)).
 2. Informe provedor, chave e modelo, e escolha a pasta do projeto. Não exige Bun nem Node.
 
 ### Modo terminal, sem compilar
@@ -153,14 +173,24 @@ As opções `--model`, `--reasoning`, `--mode`, `--base-url` e `--api-key` tamb�
 Enquanto o agente trabalha, a página mostra um aviso **Pensando...** até o fim do turno, sem o texto do raciocínio; durante uma ferramenta, quem mostra a atividade é o cartão dela. As conversas ficam salvas por projeto, na lateral: **+ Nova conversa** começa outra, clicar em uma retoma de onde parou e **×** apaga. Na TUI, a conversa continua terminando ao sair. Fechar a aba encerra o agente depois de cerca de 15 segundos; `Ctrl+C` no terminal encerra na hora. Uma resposta só é salva ao terminar ou ser interrompida: se o agente cair no meio dela, ela se perde. A URL traz um token de acesso: não a compartilhe (veja [SECURITY.md](SECURITY.md)).
 
 ### App de Desktop
-A mesma interface em janela própria, sem terminal nem navegador. No Linux, o pacote é um AppImage (`Siliconflower-<versão>-x86_64.AppImage`): dê permissão de execução (`chmod +x`) e abra. No Windows, é um instalador por usuário, sem administrador. O app traz o agente e o Electron e não coloca `siliconflower` no `PATH`: o modo terminal é instalado à parte.
+A mesma interface em janela própria, sem terminal nem navegador. No Windows, é um instalador por usuário, sem administrador. No Linux, há três jeitos:
+
+| Jeito | Para quem | Onde fica |
+| :--- | :--- | :--- |
+| `.deb`: `sudo apt install ./Siliconflower-<versão>-amd64.deb` | Debian, Ubuntu, elementary e derivados; todos os usuários do computador | `/opt/Siliconflower`, comando `siliconflower-desktop`, atalho em `/usr/share/applications`. Remova com `sudo apt remove siliconflower-desktop` |
+| Script: `bash scripts/install-appimage.sh [arquivo.AppImage]` (ou `bun run desktop:install`) | só você, sem senha; qualquer distribuição | `~/.local/share/siliconflower-desktop`, comando em `~/.local/bin`, atalho em `~/.local/share/applications`. Remova com `--uninstall` |
+| AppImage direto: `chmod +x` e abrir | testar sem instalar | onde estiver o arquivo; precisa de FUSE 2 (`libfuse2t64`) |
+
+O `.deb` e o script não precisam de FUSE: o script extrai o AppImage em vez de montá-lo. Rodar o script de novo com uma versão nova atualiza o app. Nenhum dos três apaga sua configuração e suas conversas (`~/.siliconflower`) ao remover.
+
+> ⚠️ **Não instale o pacote `fuse`** (`apt install fuse`) para abrir o AppImage. No Ubuntu 24.04, no elementary OS 8 e derivados, ele remove o `fuse3` e, junto, parte da área de trabalho (Flatpak, portais, arquivos, aplicativos do sistema). Se o AppImage pedir FUSE, use o `.deb` ou o script de instalação, que não precisam dele, ou instale `libfuse2t64`. Se já instalou o `fuse`, `sudo apt install fuse3` e os pacotes removidos (veja `/var/log/apt/history.log`) desfazem o estrago. O app traz o agente e o Electron e não coloca `siliconflower` no `PATH`: o modo terminal é instalado à parte.
 
 Para gerar o pacote a partir do código-fonte, ou desenvolver sem empacotar:
 
 ```bash
 bun install                    # só na primeira vez
 bun install --cwd desktop      # só na primeira vez: baixa o Electron
-bun run desktop:dist           # gera em dist-desktop/ o pacote da plataforma atual (AppImage no Linux, instalador .exe no Windows)
+bun run desktop:dist           # gera em dist-desktop/ o pacote da plataforma atual (`.deb` e AppImage no Linux, instalador .exe no Windows)
 
 bun run build                  # ou, sem empacotar: compila o agente
 bun run desktop                # e abre o app a partir do código-fonte
@@ -240,6 +270,7 @@ Crie arquivos Markdown em `~/.siliconflower/skills/` com instruções especializ
 - **O agente lembra de coisas de outro projeto / não lembra de nada:** a memória de projeto só existe em pastas com `SILICONFLOWER.md` ou `AGENTS.md` (nela ou acima dela). Confira com `siliconflower show` (linha `Project`) ou na barra de status (`Projeto:`). Abra o agente dentro da pasta do projeto, ou rode `siliconflower init` para criar um. Memórias globais (`~/.siliconflower/memory/`) aparecem em qualquer pasta.
 - **Comando em background parou ao sair:** fechar a TUI, a GUI ou a janela do projeto encerra os comandos em background e o que eles iniciaram. Para um processo que deve continuar, inicie-o fora do agente (`systemd`, `tmux`, `nohup` em outro terminal).
 - **Resposta ou arquivo grande cortado:** cada resposta do modelo tem limite de 32768 tokens de saída, ou 16384 se o provedor recusar esse valor. O raciocínio pode contar nesse limite, conforme o provedor. O modelo é avisado do corte e pode escrever o arquivo em partes; em um texto cortado, envie `continue`.
+- **AppImage pede FUSE / "libfuse.so.2":** use o `.deb` ou `scripts/install-appimage.sh`, que não precisam de FUSE, ou instale `libfuse2t64`. **Nunca** `apt install fuse` no Ubuntu 24.04 e derivados (veja o aviso em [App de Desktop](#app-de-desktop)).
 - **Problema no app de desktop:** o log fica em `~/.siliconflower/logs/siliconflower.log`. Instalar o app não instala o comando `siliconflower`.
 - **Comando não encontrado após instalar o binário:** abra uma nova janela do terminal para carregar o PATH atualizado. No Linux, confirme que `~/.local/bin` está no `PATH`.
 
@@ -250,10 +281,10 @@ Crie arquivos Markdown em `~/.siliconflower/skills/` com instruções especializ
 ```text
 siliconflower/
 ├── src/                  # Código (mapa em AGENTS.md)
-├── desktop/              # App de desktop em Electron (instalador Windows / AppImage)
+├── desktop/              # App de desktop em Electron (instalador Windows / .deb e AppImage)
 ├── .github/workflows/    # CI (testes em Windows e Linux) e release
 ├── tests/                # bun test
-├── scripts/              # Instalação no PATH (install.sh / install.ps1) e empacotamento
+├── scripts/              # Instalação no PATH (install.sh / install.ps1), do app no Linux (install-appimage.sh) e empacotamento
 ├── docs/ARCHITECTURE.md  # Arquitetura e referência técnica
 ├── docs/PLATAFORMAS.md   # O que muda entre Windows e Linux/Unix
 ├── AGENTS.md             # Guia curto para agentes de IA e contribuidores (CLAUDE.md aponta para ele)
