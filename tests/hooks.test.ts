@@ -27,7 +27,8 @@ describe("hooks system", () => {
     expect(res.executed).toBe(true);
     expect(res.output).toContain("read_file");
     expect(res.output).toContain(filePath);
-  });
+    // First shell of the file: a cold PowerShell start on the CI runner can pass Bun's 5 s default.
+  }, 30_000);
 
   test("loads hooks from centralized workspace directory", async () => {
     const dummyCwd = join(tmpdir(), `dummy_hook_ws_${Date.now()}`);
