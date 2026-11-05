@@ -155,6 +155,18 @@ describe("installer config", () => {
     expect(readFileSync(resolve(desktop, "..", "scripts", "install.ps1"), "utf8")).toMatch(/Programs\\siliconflower/i);
   });
 
+  test("Linux ships an AppImage and a .deb that can be built", () => {
+    // electron-builder refuses a .deb without a homepage and a maintainer (or author email).
+    const pkg = JSON.parse(readFileSync(join(desktop, "package.json"), "utf8"));
+    expect(builder).toMatch(/^\s+- AppImage$/m);
+    expect(builder).toMatch(/^\s+- deb$/m);
+    expect(builder).toMatch(/^\s+maintainer: \S/m);
+    expect(pkg.homepage).toStartWith("https://");
+    // The window, the .deb entry and scripts/install-appimage.sh all use this name.
+    expect(pkg.desktopName).toBe("siliconflower-desktop.desktop");
+    expect(builder).toContain("executableName: siliconflower-desktop");
+  });
+
   test("the installed app cannot be used to run other code", () => {
     for (const fuse of ["runAsNode: false", "enableNodeOptionsEnvironmentVariable: false", "enableNodeCliInspectArguments: false", "onlyLoadAppFromAsar: true"]) {
       expect(builder).toContain(fuse);

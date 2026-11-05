@@ -51,7 +51,7 @@ Até a 0.6.0 havia dois repositórios: `siliconflower` (Windows) e `siliconflowe
 | Sinais da GUI | `SIGINT`, `SIGTERM`, `SIGBREAK` | `SIGINT`, `SIGTERM`, `SIGHUP` | `src/gui/index.ts` |
 | Executável do agente | `siliconflower.exe` | `siliconflower` | `desktop/src/main.ts` (`AGENT_EXE`), `desktop/electron-builder.yml` |
 | Encerramento forçado do agente | `taskkill /T /F` | o agente roda em grupo de processos próprio (`detached`) e o grupo recebe `SIGKILL` | `desktop/src/agent-process.ts` |
-| Pacote | instalador NSIS por usuário (`.exe`), ícone `.ico` | AppImage, ícone `icon.png`; `win:` continua no `electron-builder.yml` | `desktop/electron-builder.yml`, `desktop/package.json` (`dist`, `dist:win`, `dist:linux`) |
+| Pacote | instalador NSIS por usuário (`.exe`), ícone `.ico` | `.deb` (sistema, em `/opt`, sem FUSE) e AppImage (instalável por usuário com `scripts/install-appimage.sh`, que o extrai: sem FUSE), ícone `icon.png`; `win:` continua no `electron-builder.yml` | `desktop/electron-builder.yml`, `desktop/package.json` (`dist`, `dist:win`, `dist:linux`) |
 | `app.setAppUserModelId` | agrupa na barra de tarefas | sem efeito (mantido igual ao Windows) | `desktop/src/main.ts` |
 
 ## Build, instalação e pacote
@@ -60,7 +60,16 @@ Até a 0.6.0 havia dois repositórios: `siliconflower` (Windows) e `siliconflowe
 | :--- | :--- | :--- | :--- |
 | Build | `dist/siliconflower.exe` | `dist/siliconflower` (`build.ts` escolhe `bun-<sistema>-<arquitetura>` pela máquina atual) | `build.ts` |
 | `install:bin` | `scripts/install.ps1` (`%LOCALAPPDATA%\Programs\siliconflower` + `PATH`) | `scripts/install-bin.js`: `~/.local/bin` em Unix (`scripts/install.sh`), `install.ps1` no Windows | `package.json`, `scripts/` |
-| Release | `siliconflower.exe` e `Siliconflower-Setup-<versão>.exe` (job `windows-latest`) | `siliconflower-linux-x64` e `Siliconflower-<versão>-x86_64.AppImage` (job `ubuntu-latest`) | `.github/workflows/release.yml` |
+| Release | `siliconflower.exe` e `Siliconflower-Setup-<versão>.exe` (job `windows-latest`) | `siliconflower-linux-x64`, `Siliconflower-<versão>-x86_64.AppImage`, `Siliconflower-<versão>-amd64.deb` e `install-appimage.sh` (job `ubuntu-latest`) | `.github/workflows/release.yml` |
+
+## Requisitos mínimos
+
+Medidos nos binários da 0.7.0 (maior versão de símbolo da glibc com `objdump -T`): o Electron (app de desktop) exige glibc 2.25 e o agente (Bun) exige glibc 2.17. Pela documentação do Bun, o agente roda em kernel 3.10 ou mais novo e precisa de SSE4.2, não de AVX2 (o binário x64 escolhe AVX2 sozinho quando existe). A tabela completa, com as distribuições, está no README (Requisitos do sistema). Ao subir a versão do Electron ou do Bun, meça de novo:
+
+```bash
+objdump -T dist-desktop/linux-unpacked/siliconflower-desktop | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1
+objdump -T dist/siliconflower | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1
+```
 
 ## Testes
 

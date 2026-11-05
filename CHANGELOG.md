@@ -34,6 +34,15 @@ Versões Windows (`siliconflower` 0.5.0) e Linux/Unix (`siliconflower-nix` 0.6.0
 - App de desktop: projetos recentes diferenciam maiúsculas em Linux/Unix.
 - GUI: `SIGHUP` também encerra o agente e as tarefas em background.
 
+### Added (pacotes Linux)
+- Pacote `.deb` do app de desktop para Debian, Ubuntu, elementary e derivados: instala em `/opt/Siliconflower`, com atalho, ícone e comando `siliconflower-desktop`, sem FUSE.
+- `scripts/install-appimage.sh` (`bun run desktop:install`): instala o AppImage só para o usuário, sem senha e sem FUSE, com atalho em `~/.local/share/applications`, ícone e comando em `~/.local/bin`; `--uninstall` remove. Vai junto no release.
+- README: requisitos do sistema (arquitetura, glibc, kernel, bibliotecas e distribuições mínimas), medidos nos binários.
+- README: aviso para não instalar o pacote `fuse` no Ubuntu 24.04 e derivados, que remove o `fuse3` e parte da área de trabalho.
+
+### Changed (pacotes Linux)
+- O `.deb` declara também `libgbm1` e `libasound2`, que o Electron usa e a lista padrão do `electron-builder` não inclui.
+
 ## [0.6.0] - 2026-11-05
 
 ### Added
