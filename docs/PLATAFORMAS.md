@@ -1,6 +1,6 @@
 # O que muda entre Windows e Linux/Unix
 
-O Siliconflower tem um único código para Windows, Linux e macOS/Unix. As funções são as mesmas em todos: TUI, GUI no navegador (`siliconflower gui`), app de desktop em Electron, conversas salvas, ferramentas, subagentes, MCP, hooks e skills.
+O Siliconflower tem um único código para Windows, Linux e macOS/Unix. As funções são as mesmas em todos: GUI no navegador (`siliconflower gui`), app de desktop em Electron, conversas salvas, ferramentas, subagentes, MCP, hooks e skills.
 
 Esta lista é tudo o que **deve** ser diferente entre os sistemas. Fora daqui, o comportamento é o mesmo. O código específico de SO passa por `src/platform.ts` (`isWindows()`), e os testes que dependem dele escolhem o lado pela plataforma. Ao criar ou remover uma diferença, atualize este arquivo.
 
@@ -34,14 +34,6 @@ Até a 0.6.0 havia dois repositórios: `siliconflower` (Windows) e `siliconflowe
 | `config.json` | gravação atômica | gravação atômica com permissão `0600` (e correção de arquivos antigos ao ler); resolve links simbólicos antes de substituir (dotfiles, Nix/Home Manager); apaga o temporário em caso de falha | `src/config.ts` |
 | ID do workspace | caminho em minúsculas (sistema de arquivos sem distinção de maiúsculas) | caminho como está, para duas pastas que diferem só em maiúsculas não colidirem | `src/fs-util.ts` |
 | Projetos recentes do app | `folderKey` em minúsculas | `folderKey` mantém maiúsculas | `desktop/src/projects.ts` |
-
-## TUI (terminal)
-
-| Ponto | Windows | Linux/Unix | Onde |
-| :--- | :--- | :--- | :--- |
-| Sinais de saída | `SIGINT`, `SIGTERM`, `SIGBREAK` | `SIGINT`, `SIGTERM`, `SIGHUP` (terminal fechado) | `src/terminal.ts` |
-| Tarefas em background ao sair | encerradas com o console | a TUI chama `killAllBackgroundTasks` ao sair e nos sinais (`onExitSignal`): em grupo de processos próprio, sobreviveriam ao app | `src/App.tsx`, `src/terminal.ts` |
-| Saída sincronizada (DEC 2026) | não usa | cada quadro vai entre `ESC[?2026h`/`ESC[?2026l`; reduz o piscar em terminais Linux. `SILICONFLOWER_NO_SYNC_OUTPUT=1` desliga | `src/terminal.ts`, `src/App.tsx` |
 
 ## GUI e app de desktop
 
@@ -81,4 +73,6 @@ Ajustes que existiam só na versão Linux/Unix e não eram de plataforma. Saíra
 
 - Seção `MCPs:` da barra de status da TUI (`on (2)`, `on (1/2)`, `off`) e `mcpStatusLabel` em `src/mcp.ts` (0.6.0).
 - Barra de status curta: `Projeto:` só com o nome da pasta, e a contagem de tokens fora da linha de status (0.6.0). Agora, como no Windows: `Projeto: <pasta> (<arquivo>)` e tokens repetidos na linha de status.
-- Texto em streaming repassado à TUI no máximo a cada 60 ms (0.5.0). A TUI agora redesenha a cada pedaço recebido, como no Windows; a saída sincronizada continua.
+- Texto em streaming repassado à TUI no máximo a cada 60 ms (0.5.0). A TUI passou a redesenhar a cada pedaço recebido, como no Windows.
+
+Na 0.8.0 a TUI (interface de terminal em Ink) saiu de todos os sistemas, e com ela as diferenças de sinais, tarefas em background ao sair e saída sincronizada (DEC 2026) que ela tinha. As interfaces agora são a GUI no navegador e o app de desktop.

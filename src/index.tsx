@@ -2,7 +2,6 @@
 import { Command } from "commander";
 import { configExists, loadConfig, loadStoredConfig, applyEnvOverrides, isValid, configFile, configDir } from "./config.js";
 import { ensureConfig, runSetup } from "./wizard.js";
-import { startApp } from "./App.js";
 import type { AppConfig, Mode, ReasoningLevel } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
 import { MODES } from "./modes.js";
@@ -20,22 +19,22 @@ const program = new Command();
 
 program
   .name("siliconflower")
-  .description("CLI/TUI AI agent with MCP, reasoning, skills, modes, and OpenAI-compatible backends.")
+  .description("AI agent with MCP, reasoning, skills, modes, and OpenAI-compatible backends.")
   .version(APP_VERSION)
   .option("-m, --model <id>", "override the model")
   .option("-r, --reasoning <level>", `reasoning level: ${REASONING_LEVELS.join(", ")}`)
   .option("--mode <mode>", `mode: ${MODES.join(", ")}`)
   .option("--base-url <url>", "override the API base URL")
   .option("--api-key <key>", "override the API key")
-  .action(async (opts) => {
-    const { config, overrides } = await resolveRun(opts);
-    await log("info", "=== siliconflower iniciado por CLI ===");
-    await startApp(config, overrides);
+  .action(() => {
+    // The terminal interface was removed in 0.8.0: the desktop app and `gui` are the interfaces.
+    program.outputHelp();
+    console.log("\nPara conversar com o agente, use o app de desktop ou rode `siliconflower gui`.");
   });
 
 program
   .command("gui")
-  .description("Open the web interface in the browser, with saved conversations (accepts the same options as the main command)")
+  .description("Open the web interface in the browser, with saved conversations (accepts the global options above)")
   .option("--port <n>", "local port (default: a free port)")
   .option("--no-open", "do not open the browser, only print the URL")
   .option("--managed", "controlled by another program (desktop app): JSON events on stdout, exits when stdin closes")
@@ -63,7 +62,7 @@ program
       throw e;
     }
     await log("info", "=== siliconflower iniciado por GUI ===");
-    // Imported only here: it depends on Bun, and the TUI also runs on Node + tsx.
+    // Imported only here: it depends on Bun, and the other subcommands also run on Node + tsx.
     const { startGui } = await import("./gui/index.js");
     await startGui(resolved.config, resolved.overrides, {
       port,
@@ -79,7 +78,7 @@ program
   .action(async () => {
     const existing = await loadStoredConfig();
     await runSetup(existing);
-    console.log("Done. Run `siliconflower` to start.");
+    console.log("Done. Open the desktop app or run `siliconflower gui` to start.");
   });
 
 program

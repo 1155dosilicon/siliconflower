@@ -4,7 +4,7 @@ Referência para quem vai mudar o código. Comandos, regras e mapa resumido est�
 
 ## Fluxo de uma mensagem
 
-1. **`index.tsx`** carrega a configuração efetiva (`config.json` + variáveis de ambiente), aplica as flags da CLI e inicia a TUI ou a GUI. Se a configuração estiver incompleta, abre o assistente.
+1. **`index.tsx`** carrega a configuração efetiva (`config.json` + variáveis de ambiente), aplica as flags da CLI e inicia a GUI (`gui`, ou `gui --managed` no app de desktop). Se a configuração estiver incompleta, abre o assistente no terminal; no `--managed`, avisa o app com `config_required`. Sem subcomando, só mostra a ajuda.
 2. **`AgentSession`** (`session.ts`), ao iniciar, carrega as skills e conecta os servidores MCP. Uma falha de MCP vai para o log e para a barra de status, sem bloquear as ferramentas nativas.
 3. **A cada mensagem**, monta o prompt de sistema (`modes.ts`):
    - identidade, foco do modo e regras comuns;
@@ -20,25 +20,20 @@ Referência para quem vai mudar o código. Comandos, regras e mapa resumido est�
 
 Saídas de ferramenta acima de 32 mil caracteres são truncadas (início e fim). O conteúdo completo vai para `~/.siliconflower/outputs/` e o caminho aparece na resposta (`processToolOutput`).
 
-**Cancelamento**: a TUI é renderizada com `exitOnCtrlC: false`. `Ctrl+C` durante uma resposta (ou `Esc`/**Parar** na GUI) chama `AgentSession.cancel()`, que aborta o `AbortController` do turno. O SDK da OpenAI encerra o stream em silêncio ao abortar, então `llm.ts` confere o sinal depois do stream e antes de cada ferramenta: um turno cancelado nunca conta como concluído nem executa as chamadas já recebidas. O sinal chega:
+**Cancelamento**: `Esc` ou **Parar** na interface chama `AgentSession.cancel()`, que aborta o `AbortController` do turno. O SDK da OpenAI encerra o stream em silêncio ao abortar, então `llm.ts` confere o sinal depois do stream e antes de cada ferramenta: um turno cancelado nunca conta como concluído nem executa as chamadas já recebidas. O sinal chega:
 - à requisição HTTP;
 - aos comandos, que têm a árvore de processos encerrada;
 - aos subagentes e às ferramentas deles;
 - às chamadas MCP;
 - a uma pergunta pendente de `ask_question`.
 
-Com o agente ocioso, `Ctrl+C` sai. Ao fechar a TUI ou a GUI, inclusive por `SIGINT`, `SIGTERM` ou `SIGHUP`, `killAllBackgroundTasks` encerra as tarefas em background: elas rodam em grupo de processos próprio e sobreviveriam ao app. `killProcessTree` espera o grupo acabar e usa `SIGKILL` após 2 s.
-
-**Renderização**: o logo, as últimas 50 mensagens e a resposta em andamento (inteira) ficam no quadro dinâmico do Ink. Quando o quadro passa da altura do terminal, o Ink limpa a tela e redesenha tudo a cada atualização. `enableSynchronizedOutput` (`terminal.ts`) envolve cada escrita em `ESC[?2026h`/`ESC[?2026l`, e os terminais com saída sincronizada mostram cada quadro de uma vez, sem piscar; nos sem suporte (ex.: VTE), a tela pisca.
-
-**Redimensionamento**: o Ink 5 apaga "as N linhas do quadro anterior", mas o terminal já refez a quebra dessas linhas em outra quantidade de linhas, e sobram fragmentos. Por isso, 150 ms depois do último `resize`, a `App` atualiza a largura (o Ink desenha o quadro na nova largura). Em seguida chama `useStdout().write(ANSI_CLEAR_SCREEN)`. Esse `write` do Ink zera a contabilidade do quadro, limpa a tela e o scrollback e redesenha o quadro inteiro. O logo (`ascii.ts`) escolhe a variante pela largura: completo, empilhado ou texto.
+Ao fechar a GUI, inclusive por `SIGINT`, `SIGTERM` ou `SIGHUP`, `killAllBackgroundTasks` encerra as tarefas em background: elas rodam em grupo de processos próprio e sobreviveriam ao app. `killProcessTree` espera o grupo acabar e usa `SIGKILL` após 2 s.
 
 ## Sessão e interfaces
 
 `AgentSession` (`session.ts`) concentra a conversa e não depende de interface: histórico da API, despacho de ferramentas, modo `plano`, cancelamento e `ask_question`. As interfaces leem `getState()` (objeto substituído a cada mudança, nunca alterado), assinam `subscribe`/`onStreamEvent` e chamam as ações (`send`, `cancel`, `answer`, `setMode`, `setReasoning`).
 
-- **TUI** (`App.tsx`): desenha o estado com Ink.
-- **GUI** (`gui/`): `gui/index.ts` controla o ciclo de vida e abre o navegador (`openUrlCommand`: `xdg-open` no Linux, `open` no macOS, `Start-Process` no Windows, sempre via `runShell`); `gui/server.ts` serve a página e faz a ponte por WebSocket; `gui/client/` é HTML, CSS e JS puros, sem build, embutidos no binário por `import ... with { type: "text" }`. Usa `Bun.serve`, então só é importada dinamicamente pelo comando `gui`, e a TUI continua rodando em Node + tsx.
+- **GUI** (`gui/`): `gui/index.ts` controla o ciclo de vida e abre o navegador (`openUrlCommand`: `xdg-open` no Linux, `open` no macOS, `Start-Process` no Windows, sempre via `runShell`); `gui/server.ts` serve a página e faz a ponte por WebSocket; `gui/client/` é HTML, CSS e JS puros, sem build, embutidos no binário por `import ... with { type: "text" }`. Usa `Bun.serve`, então só é importada dinamicamente pelo comando `gui`, e os demais subcomandos continuam rodando em Node + tsx.
 
 **Protocolo do WebSocket** (JSON). Servidor: `hello` (estado e ferramentas, para uma página nova ou recarregada), `state` (só as chaves que mudaram, agrupadas a cada 33 ms) e `tool`. O texto do raciocínio não vai para a página. Página: `send`, `answer`, `cancel`, `mode`, `reasoning`; valores inválidos são ignorados.
 
@@ -50,7 +45,7 @@ Protocolo de `--managed` (`gui/managed.ts`), uma linha JSON no stdout: `{"event"
 
 **Configurações** (`desktop/src/settings.ts`): rodam no processo principal, reaproveitando `src/config.ts` no bundle (gravação atômica com `0600` em Unix), e a chave não sai de lá. O app só inicia o agente com configuração válida; sem ela, abre o formulário e depois segue para o que foi pedido. Um agente em execução mantém a configuração com que iniciou, então aplicar uma mudança é reiniciá-lo: o app oferece isso ao salvar, e a conversa volta com `--resume-latest`.
 
-**Conversas salvas** (`services/conversations.ts`): `AgentSession` recebe um `ConversationStore` por dependência. A GUI passa um, em `getWorkspaceDataDir(cwd)/sessions`; a TUI não passa, e nada é salvo. Cada `<id>.jsonl` tem uma linha de resumo, para listar sem ler históricos inteiros, e uma de conteúdo: histórico da API, mensagens exibidas, cartões de ferramentas e tarefas. A gravação é atômica e acontece só depois de `commitTurn`, então o arquivo nunca tem turno incompleto; `completeHistory` ainda corta o histórico ao carregar, por garantia. Fechar no meio de uma resposta aborta o turno e `close()` espera ele ser salvo. Arquivo danificado vira um aviso e fica de fora da lista. O protocolo do WebSocket ganha `new`, `resume` e `delete`; ao trocar de conversa, o servidor reenvia `hello` e a página redesenha tudo.
+**Conversas salvas** (`services/conversations.ts`): `AgentSession` recebe um `ConversationStore` por dependência. A GUI passa um, em `getWorkspaceDataDir(cwd)/sessions`; sem ele (subagentes, testes), nada é salvo. Cada `<id>.jsonl` tem uma linha de resumo, para listar sem ler históricos inteiros, e uma de conteúdo: histórico da API, mensagens exibidas, cartões de ferramentas e tarefas. A gravação é atômica e acontece só depois de `commitTurn`, então o arquivo nunca tem turno incompleto; `completeHistory` ainda corta o histórico ao carregar, por garantia. Fechar no meio de uma resposta aborta o turno e `close()` espera ele ser salvo. Arquivo danificado vira um aviso e fica de fora da lista. O protocolo do WebSocket ganha `new`, `resume` e `delete`; ao trocar de conversa, o servidor reenvia `hello` e a página redesenha tudo.
 
 **Pacotes** (`desktop/electron-builder.yml`): no Linux, um `.deb` e um AppImage (`bun run desktop:dist` ou `dist:linux` em `desktop/`). O `.deb` instala em `/opt/Siliconflower` e, no `postinst` do `electron-builder`, ajusta o `chrome-sandbox` e o perfil do AppArmor. O AppImage pode ser instalado por usuário com `scripts/install-appimage.sh`, que o extrai (sem FUSE) para `~/.local/share/siliconflower-desktop`, cria o atalho e o ícone e só usa `--no-sandbox` quando o sistema bloqueia *user namespaces*. Os três usam o nome `siliconflower-desktop` (`desktopName`, `executableName`, `StartupWMClass`), para o menu associar a janela aberta ao ícone; no Windows, NSIS por usuário, em `%LOCALAPPDATA%\Programs\siliconflower-desktop`, pasta que vem do `name` em `desktop/package.json` e precisa ser diferente de `Programs\siliconflower`, usada pelo CLI (`scripts/install.ps1`). O agente vai em `resources/`, fora do asar, porque um executável não roda de dentro dele. Projetos recentes são identificados por `folderKey`, que ignora maiúsculas só no Windows. O ícone é gerado por `desktop/scripts/make-icon.ts` (`.ico` no Windows, `icon.png` no Linux).
 
@@ -63,8 +58,8 @@ Todos os provedores usam Chat Completions compatível com OpenAI (`llm.ts`):
 - **Xiaomi MiMo** (`reasoning.ts`; hostname `xiaomimimo.com` ou subdomínio):
   - o raciocínio vira `thinking.type` `enabled`/`disabled`;
   - `reasoning_content` é preservado na mensagem `assistant` que antecede resultados de ferramenta;
-  - `Ctrl+E` alterna entre `none` e `high`.
-- **Demais provedores**: `low`/`medium`/`high` vão como `reasoning_effort`, e `Ctrl+E` percorre os quatro níveis.
+  - o seletor **Pensamento** só oferece `none` e `high` (desligado/ligado).
+- **Demais provedores**: `low`/`medium`/`high` vão como `reasoning_effort`, e o seletor **Pensamento** oferece os quatro níveis.
 - **Limite de saída** (32768 tokens): vai em `max_completion_tokens` para `api.openai.com` e em `max_tokens` nos demais. Se o provedor recusar o valor, a requisição é repetida com 16384. Se a resposta for cortada nele, uma chamada de ferramenta incompleta não executa (o modelo recebe o erro, e o histórico guarda `{}` no lugar do JSON quebrado) e um texto cortado termina com um aviso. O mesmo vale para um stream encerrado sem `finish_reason`, tratado como resposta interrompida.
 - **HTTP 400 só com "Request failed"**: o Xiaomi MiMo devolve isso às vezes para pedidos válidos, e a requisição é repetida uma vez.
 
@@ -118,7 +113,7 @@ Quando o provedor rejeita `reasoning_effort` ou o parâmetro de tokens, a requis
 | `preTool`, `postTool` | Antes e depois de cada ferramenta nativa (não no modo `plano`) | `hooks` do `config.json` |
 | `onEdit` | Depois de `write_file`, `edit_file`, `apply_patch`, `move_path` e `delete_path` bem-sucedidos | `config.json` |
 | `onCommand` | Antes de `execute_command` | `hooks.onCommand` inline; se ausente, o primeiro `hooks.json` em: workspace → `<raiz>/.siliconflower/` → `~/.siliconflower/` |
-| `onSessionStart`, `onSessionEnd` | Abertura e fechamento da TUI, inclusive no modo `plano` | `config.json` |
+| `onSessionStart`, `onSessionEnd` | Abertura e fechamento da sessão (GUI ou app), inclusive no modo `plano` | `config.json` |
 
 Os hooks rodam via `shell.ts`, com timeout de 30 s, e recebem estas variáveis:
 - `SILICONFLOWER_EVENT`;
@@ -162,7 +157,7 @@ Os schemas em `src/tools.ts` são a fonte de verdade; esta tabela só indica ond
 | `execute_command` | `tools.ts` + `shell.ts` | Timeout de até 120 s; `runInBackground` cria tarefa com timeout de até 1 h |
 | `manage_background_task` | `services/background-tasks.ts` | `list`, `status`, `kill` |
 | `run_task`, `send_subagent_message` | `services/subagent.ts` | Sem timeout fixo, cancelável; subagentes não têm `run_task` nem MCP, recebem o contexto do projeto (`buildSubagentPrompt`), e `research` e `plan` são somente leitura |
-| `ask_question` | `tools.ts` + `session.ts` | Pausa e espera a resposta na interface (TUI ou GUI); sem interface, pede ao modelo que repasse a pergunta |
+| `ask_question` | `tools.ts` + `session.ts` | Pausa e espera a resposta na interface; sem interface, pede ao modelo que repasse a pergunta |
 | `todowrite` | `todo.ts` | Checklist da sessão |
 | `memory` | `services/memory.ts` | `save`, `recall`, `forget`; veja "Projetos e memória" |
 | `artifact` | `services/artifact.ts` | `create`, `read`, `list`, `delete`; mudar o tipo remove o arquivo antigo |

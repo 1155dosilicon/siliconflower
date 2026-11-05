@@ -38,7 +38,7 @@ export class McpManager {
 
   /**
    * Connects every configured server. Failures never throw: they are logged to the log
-   * file and exposed via connectFailures() (writing to stderr would corrupt the Ink TUI).
+   * file and exposed via connectFailures() (in `gui --managed`, stray output would break the protocol with the desktop app).
    */
   async connectAll(config: Record<string, McpServerConfig> | undefined): Promise<McpTool[]> {
     this.failures = [];

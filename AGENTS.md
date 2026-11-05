@@ -1,6 +1,6 @@
 # Siliconflower — guia para agentes
 
-Agente de IA para Windows, Linux e macOS/Unix, em CLI/TUI e app de desktop: TypeScript + Bun + Ink/React (Electron no app), sobre APIs compatíveis com OpenAI.
+Agente de IA para Windows, Linux e macOS/Unix, como app de desktop e interface no navegador: TypeScript + Bun (Electron no app), sobre APIs compatíveis com OpenAI.
 Um único código para todos os sistemas: o que muda entre Windows e Linux/Unix fica listado em `docs/PLATAFORMAS.md` (atualize esse arquivo ao criar ou remover uma diferença). O CI (`.github/workflows/ci.yml`) roda typecheck e testes em Windows e Linux.
 Textos para o usuário, prompts e docs ficam em pt-BR. Logs e campos de protocolo ficam em ASCII.
 
@@ -12,7 +12,7 @@ bun run typecheck   # precisa passar limpo
 bun test            # roda o shell real da plataforma; usa SILICONFLOWER_DATA_DIR temporário (tests/setup.ts)
 bun run build       # gera dist/siliconflower (Linux/macOS) ou dist/siliconflower.exe (Windows)
 npm run install:bin # Unix: copia para ~/.local/bin; Windows: %LOCALAPPDATA%\Programs\siliconflower + PATH
-bun start           # roda a partir do código-fonte
+bun start -- gui    # roda a GUI a partir do código-fonte (sem argumentos, só mostra a ajuda)
 ```
 
 Antes de dar uma tarefa por concluída: `bun run typecheck` e `bun test`.
@@ -21,7 +21,7 @@ Antes de dar uma tarefa por concluída: `bun run typecheck` e `bun test`.
 
 - `src/index.tsx`: CLI (commander). `config.ts`/`wizard.ts`: configuração.
 - `src/session.ts`: `AgentSession`, a conversa sem interface: histórico da API, despacho de ferramentas, cancelamento e `ask_question`.
-- `src/App.tsx`: TUI (Ink). `src/gui/`: interface web (`server.ts` com WebSocket, `client/` em HTML/CSS/JS puros, sem build).
+- `src/gui/`: interface web (`server.ts` com WebSocket, `client/` em HTML/CSS/JS puros, sem build).
 - `src/llm.ts`: loop de streaming e ferramentas (até 50 passos), compactação por passo, fallbacks de parâmetros. `context.ts`: compactação e truncamento de saídas.
 - `src/tools.ts`: ferramentas nativas (schema + `run`). `read_skill` fica em `skills.ts`. `tool-policy.ts`: allowlist do modo `plano`.
 - `src/shell.ts`: toda execução de shell (PowerShell no Windows, `$SHELL -c` em Unix). `platform.ts`: detecção de SO e shell padrão. `project.ts`: detecção de projeto (`SILICONFLOWER.md`/`AGENTS.md`).
@@ -33,7 +33,7 @@ Antes de dar uma tarefa por concluída: `bun run typecheck` e `bun test`.
 
 - **Shell só via `src/shell.ts`** (`runShell`/`startShell`). `exec`/`execFile` com PowerShell quebra acentos (CP850) e carrega o `$PROFILE`; em qualquer SO, matar só o processo pai deixa filhos órfãos (Windows usa `taskkill /T`, Unix mata o grupo de processos).
 - **Código específico de SO** passa por `src/platform.ts` (`isWindows()`); testes que dependem do shell devem cobrir os dois lados.
-- **Nada de `process.stdout`/`stderr.write` com a TUI aberta**: isso corrompe o Ink. Use `log()` de `logger.ts`, que nunca lança exceção.
+- **Nada de `process.stdout`/`stderr.write` na sessão, nas ferramentas e na GUI** (só os subcomandos que imprimem e saem usam `console`): no `gui --managed`, o stdout é o protocolo JSON com o app (`src/gui/managed.ts`), e lixo nele quebra o app. Use `log()` de `logger.ts`, que nunca lança exceção.
 - **Ferramenta nova**:
   - schema e `run` em `tools.ts`;
   - decida se entra na allowlist de `tool-policy.ts` (fora dela, fica bloqueada no modo `plano`);
@@ -44,9 +44,6 @@ Antes de dar uma tarefa por concluída: `bun run typecheck` e `bun test`.
 - **Config**: `loadConfig()` aplica as variáveis de ambiente e serve só para execução. Para editar ou salvar, use `loadStoredConfig()`.
 - **Dados por projeto**: use `getWorkspaceDataDir(cwd)`, que resolve a raiz do projeto. Não grave arquivos na pasta do usuário sem ele pedir.
 - **Argumentos do modelo não são confiáveis**: caminhos passam por `isPathBlockedSafe`, números por clamp.
-- **`render(..., { exitOnCtrlC: false })` em `App.tsx` é intencional**: sem isso, `Ctrl+C` fecha o app em vez de cancelar.
-- **A TUI desenha a conversa inteira no quadro dinâmico do Ink (escolha intencional)**: quando o quadro passa da altura do terminal, o Ink redesenha a tela toda a cada atualização. Em terminais com saída sincronizada (DEC 2026) isso não aparece; em terminais sem ela (ex.: VTE), pisca. Não troque por `<Static>`/corte da resposta sem o dono do projeto pedir.
-- **Repaint após redimensionar (`App.tsx`) é intencional**: o Ink sozinho deixa restos de quadros antigos quando o terminal refaz a quebra das linhas. `tests/tui-resize.test.ts` reproduz isso num emulador (xterm headless); mudanças de layout da TUI devem passar nele.
 - **GUI**: a lógica da conversa fica em `session.ts`, não na interface. Texto do modelo nunca vira HTML (sem `innerHTML`; use `textContent`). Não relaxe as checagens de token, `Host`, `Origin` nem a CSP de `gui/server.ts`: o agente executa comandos e qualquer site pode tentar acessar a porta local.
 - **Abortar stream**: o SDK da OpenAI encerra a iteração em silêncio ao abortar. Confira `signal.aborted` depois do stream (`llm.ts`), senão o turno cancelado parece concluído e as ferramentas recebidas executam.
 - **Versão**: `package.json`, `desktop/package.json` e `src/version.ts` mudam juntos (`tests/version.test.ts` verifica).

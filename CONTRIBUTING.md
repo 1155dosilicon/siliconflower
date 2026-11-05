@@ -37,7 +37,7 @@ O mapa do código, os comandos e as regras que já evitaram bugs estão em [AGEN
 
 - TypeScript em modo strict. Sem `any`, exceto ao envolver respostas de SDK.
 - Textos para o usuário e prompts em pt-BR. Logs, campos de protocolo e saídas lidas por máquina em ASCII.
-- Unicode decorativo só nos indicadores de status existentes da TUI e no logo. Mensagens operacionais precisam fazer sentido mesmo num terminal que não mostra esses símbolos.
+- Unicode decorativo só nos indicadores de status já existentes da interface. Mensagens operacionais precisam fazer sentido mesmo num terminal que não mostra esses símbolos.
 - Prefira `void promise.catch(...)` a caminhos de promise sem tratamento. `log()` nunca deve lançar exceção.
 - Saída do modelo não é confiável: valide caminhos e argumentos.
 

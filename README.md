@@ -1,16 +1,12 @@
 # 🌸 SILICONFLOWER
 
-![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)
+![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-0078D6.svg)
 ![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black.svg)
 ![Node](https://img.shields.io/badge/Node.js-%3E%3D20-green.svg)
 
-Agente de IA de alta performance para desenvolvimento de software em **Windows, Linux e macOS/Unix**, como **app de desktop** ou no **terminal (CLI/TUI)**. Integra **30 ferramentas nativas**, **Subagentes & Background Tasks**, **Memória Persistente**, **Git Worktrees**, **RepoMap**, **Busca Web** e **Protocolo MCP**, compatível com **SiliconFlow, OpenRouter, OpenAI** e demais backends compatíveis com a API da OpenAI.
-
-<p align="center">
-  <img src="assets/preview.png" alt="SiliconFlower TUI Preview" width="100%" />
-</p>
+Agente de IA de alta performance para desenvolvimento de software em **Windows, Linux e macOS/Unix**, como **app de desktop** ou **interface no navegador**. Integra **30 ferramentas nativas**, **Subagentes & Background Tasks**, **Memória Persistente**, **Git Worktrees**, **RepoMap**, **Busca Web** e **Protocolo MCP**, compatível com **SiliconFlow, OpenRouter, OpenAI** e demais backends compatíveis com a API da OpenAI.
 
 ---
 
@@ -20,8 +16,7 @@ Agente de IA de alta performance para desenvolvimento de software em **Windows, 
 - 🧠 **Projetos & Memória sob demanda**: uma pasta vira projeto quando tem `SILICONFLOWER.md` ou `AGENTS.md` (crie com `siliconflower init`). O arquivo traz suas instruções do projeto e ativa a memória daquela pasta e das subpastas. As memórias que o agente salva ficam em `~/.siliconflower/workspaces/<workspace-id>/memory/`, fora do repositório, e só o índice (nome e descrição) entra no prompt; o conteúdo é lido quando relevante. Pastas sem arquivo começam sempre limpas.
 - 🌳 **Git Worktrees Isolados**: Testes e refatorações em branches temporárias em `<repo>/.worktrees/<branch>` (excluída automaticamente via `.git/info/exclude`), sem afetar a área de trabalho atual.
 - 🗺️ **RepoMap & Símbolos**: Mapeamento estrutural de código (TS, JS, Python, Go, Rust) com baixo consumo de tokens.
-- ⚡ **Raciocínio & Modos de Operação**: Controle de *reasoning effort* (`Ctrl+E`) e modos de trabalho (`Ctrl+O`: `programação`, `sistema`, `plano`). Na API oficial Xiaomi MiMo, o atalho alterna o pensamento entre ligado e desligado.
-- 🖥️ **TUI com Scroll Livre & Viewport Limpo**: Inicialização com tela limpa e suporte nativo completo à rolagem com a rodinha do mouse em respostas longas e blocos de código (estilo Claude Code).
+- ⚡ **Raciocínio & Modos de Operação**: Controle de *reasoning effort* (seletor **Pensamento**) e modos de trabalho (seletor **Modo**: `programação`, `sistema`, `plano`). Na API oficial Xiaomi MiMo, o seletor alterna o pensamento entre ligado e desligado.
 - 🪟 **App de Desktop**: janela própria por projeto (Electron; `.deb` e AppImage no Linux), configuração sem terminal e conversas salvas que você retoma depois.
 - 🌐 **Interface no Navegador**: `siliconflower gui` abre a mesma interface no Firefox ou em outro navegador, mostrando argumentos e resultados das ferramentas e tarefas.
 - 🧩 **Ecossistema MCP & Hooks**: Suporte nativo ao Model Context Protocol e automações disparadas por eventos do ciclo de vida (`preTool`, `postTool`, `onEdit`, `onCommand`, `onSessionStart`, `onSessionEnd`).
@@ -48,7 +43,7 @@ Um único código para Windows, Linux e macOS. O que muda entre os sistemas est�
 | Sessão gráfica | X11 ou Wayland | não precisa |
 | Opcionais | FUSE 2 (`libfuse2t64`) só para abrir o AppImage direto, sem o script ou o `.deb` | `git` (ferramentas de worktree); `xdg-open` (`xdg-utils`), para `siliconflower gui` abrir o navegador |
 
-As versões de glibc foram medidas nos binários da 0.7.0; kernel e CPU do agente vêm da [documentação do Bun](https://bun.sh/docs/installation). A linha de distribuições é uma estimativa a partir disso: testado de verdade só no elementary OS 8 e no Ubuntu 24.04. **No Ubuntu 14.04 e 16.04 o app de desktop não abre** (glibc 2.19 e 2.23, abaixo de 2.25: dá erro de `GLIBC_2.25 not found`); o agente no terminal deve funcionar neles, mas sem teste.
+As versões de glibc foram medidas nos binários da 0.7.0; kernel e CPU do agente vêm da [documentação do Bun](https://bun.sh/docs/installation). A linha de distribuições é uma estimativa a partir disso: testado de verdade só no elementary OS 8 e no Ubuntu 24.04. **No Ubuntu 14.04 e 16.04 o app de desktop não abre** (glibc 2.19 e 2.23, abaixo de 2.25: dá erro de `GLIBC_2.25 not found`); o agente avulso (`siliconflower gui`) deve funcionar neles, mas sem teste.
 
 **Windows:** Windows 10 ou 11, x64. O agente usa o Windows PowerShell 5.1, que já vem no sistema.
 
@@ -59,8 +54,8 @@ As versões de glibc foram medidas nos binários da 0.7.0; kernel e CPU do agent
    - **Linux, sem senha de administrador ou em outras distribuições:** `Siliconflower-<versão>-x86_64.AppImage` e `install-appimage.sh`. Rode `bash install-appimage.sh Siliconflower-*.AppImage`: ele instala só para o seu usuário, com ícone no menu (veja [App de Desktop](#app-de-desktop)).
 2. Informe provedor, chave e modelo, e escolha a pasta do projeto. Não exige Bun nem Node.
 
-### Modo terminal, sem compilar
-Baixe na [última versão](https://github.com/1155dosilicon/siliconflower/releases/latest) o binário `siliconflower.exe` (Windows) ou `siliconflower-linux-x64` (Linux) e rode dentro da pasta do projeto. Para usar de qualquer pasta, coloque-o numa pasta do `PATH` (no Linux, renomeie para `siliconflower` e use `~/.local/bin`). Só é necessário se você quer o terminal: o app já traz o próprio agente.
+### Agente avulso, sem o app
+Baixe na [última versão](https://github.com/1155dosilicon/siliconflower/releases/latest) o binário `siliconflower.exe` (Windows) ou `siliconflower-linux-x64` (Linux). Dentro da pasta do projeto, `siliconflower gui` abre a interface no navegador; os outros subcomandos (`config`, `show`, `init`, `skills`, `logs`...) estão em [Comandos de Gerenciamento](#comandos-de-gerenciamento--flags-cli). Sem argumentos, ele só mostra a ajuda: a conversa no terminal saiu na 0.8.0. Para usar de qualquer pasta, coloque-o numa pasta do `PATH` (no Linux, renomeie para `siliconflower` e use `~/.local/bin`). Só é necessário sem o app: o app já traz o próprio agente.
 
 ### A partir do código-fonte
 
@@ -75,8 +70,8 @@ git clone https://github.com/1155dosilicon/siliconflower.git
 cd siliconflower
 bun install
 
-# 2. Iniciar (abre o wizard de configuração na 1ª execução)
-bun run start
+# 2. Abrir a interface no navegador (abre o wizard de configuração na 1ª execução)
+bun run start -- gui
 ```
 
 #### Compilar e Instalar no PATH
@@ -85,14 +80,14 @@ bun run start
 ```bash
 bun run build          # Gera dist/siliconflower
 npm run install:bin    # Copia para ~/.local/bin
-siliconflower          # Executa a partir de qualquer pasta
+siliconflower gui      # Abre a interface a partir de qualquer pasta
 ```
 
 **Windows:**
 ```powershell
 bun run build          # Gera dist/siliconflower.exe
 npm run install:bin    # Adiciona ao PATH do usuário
-siliconflower          # Executa a partir de qualquer pasta
+siliconflower gui      # Abre a interface a partir de qualquer pasta
 ```
 
 Abra um novo terminal depois da instalação para carregar o PATH atualizado.
@@ -124,7 +119,7 @@ As configurações globais e dados do Siliconflower ficam organizados em `~/.sil
 
 ### Comandos de Gerenciamento & Flags CLI
 ```bash
-bun run start -- --help
+bun run start -- --help      # Também é o que aparece sem argumentos
 bun run start -- --version
 bun run start -- gui          # Abre a interface gráfica no navegador padrão (--port <n>, --no-open)
 bun run start -- config       # Reabre o assistente de configuração
@@ -145,32 +140,25 @@ As variáveis `SILICONFLOWER_API_KEY`, `SILICONFLOWER_BASE_URL` e `SILICONFLOWER
 
 ### Xiaomi MiMo
 
-Quando `baseURL` usa `xiaomimimo.com` ou um subdomínio oficial, o Siliconflower trata o raciocínio como um controle binário: `none` desativa o pensamento e `high` o ativa. O assistente de configuração mostra as opções `off` e `on`, e `Ctrl+E` alterna entre elas. O pedido envia `thinking.type` como `disabled` ou `enabled`; outros provedores compatíveis com OpenAI continuam usando `reasoning_effort` com `none`, `low`, `medium` ou `high`.
+Quando `baseURL` usa `xiaomimimo.com` ou um subdomínio oficial, o Siliconflower trata o raciocínio como um controle binário: `none` desativa o pensamento e `high` o ativa. O assistente de configuração mostra as opções `off` e `on`, e o seletor **Pensamento** alterna entre elas. O pedido envia `thinking.type` como `disabled` ou `enabled`; outros provedores compatíveis com OpenAI continuam usando `reasoning_effort` com `none`, `low`, `medium` ou `high`.
 
 ---
 
 ## ⌨️ Atalhos & Modos de Operação
 
-### Atalhos no Terminal (TUI)
-| Atalho | Ação |
-| :--- | :--- |
-| `Enter` | Envia a mensagem |
-| `Ctrl+E` | Alterna o nível de raciocínio (`none` ➔ `low` ➔ `medium` ➔ `high`); na API oficial Xiaomi MiMo, alterna pensamento desligado/ligado |
-| `Ctrl+O` | Alterna o modo de operação (`programação` ➔ `sistema` ➔ `plano`) |
-| `Ctrl+C` | Cancela a geração (ou a pergunta de `ask_question`) em andamento; com o agente ocioso, sai |
-
 ### Interface Gráfica (`siliconflower gui`)
 Rode o comando **dentro da pasta do projeto**: ela é a pasta de trabalho do agente. A página abre no navegador padrão (`xdg-open` no Linux, `open` no macOS, `Start-Process` no Windows); com `--no-open`, copie a URL do terminal para o navegador que preferir. Requer Bun ou o binário compilado (não roda com Node + tsx).
 
-As opções `--model`, `--reasoning`, `--mode`, `--base-url` e `--api-key` também valem aqui. Para vários projetos ao mesmo tempo, rode um `gui` em cada pasta: cada um usa sua própria porta e conversa. A configuração inicial continua no terminal, com `siliconflower config`.
+As opções `--model`, `--reasoning`, `--mode`, `--base-url` e `--api-key` também valem aqui. Para vários projetos ao mesmo tempo, rode um `gui` em cada pasta: cada um usa sua própria porta e conversa. Sem o app, a configuração inicial é feita no terminal, com `siliconflower config` (o `gui` abre esse assistente sozinho na 1ª execução).
 
 | Na página | Ação |
 | :--- | :--- |
 | `Enter` / `Shift+Enter` | Envia a mensagem / quebra a linha |
 | `Esc` ou botão **Parar** | Cancela a resposta (ou a pergunta) em andamento |
-| Seletores **Modo** e **Pensamento** | Equivalem a `Ctrl+O` e `Ctrl+E` |
+| Seletor **Modo** | Troca o modo de operação (`programação`, `sistema`, `plano`) |
+| Seletor **Pensamento** | Troca o nível de raciocínio (`none`, `low`, `medium`, `high`); na API oficial Xiaomi MiMo, desligado/ligado |
 
-Enquanto o agente trabalha, a página mostra um aviso **Pensando...** até o fim do turno, sem o texto do raciocínio; durante uma ferramenta, quem mostra a atividade é o cartão dela. As conversas ficam salvas por projeto, na lateral: **+ Nova conversa** começa outra, clicar em uma retoma de onde parou e **×** apaga. Na TUI, a conversa continua terminando ao sair. Fechar a aba encerra o agente depois de cerca de 15 segundos; `Ctrl+C` no terminal encerra na hora. Uma resposta só é salva ao terminar ou ser interrompida: se o agente cair no meio dela, ela se perde. A URL traz um token de acesso: não a compartilhe (veja [SECURITY.md](SECURITY.md)).
+Enquanto o agente trabalha, a página mostra um aviso **Pensando...** até o fim do turno, sem o texto do raciocínio; durante uma ferramenta, quem mostra a atividade é o cartão dela. As conversas ficam salvas por projeto, na lateral: **+ Nova conversa** começa outra, clicar em uma retoma de onde parou e **×** apaga. Fechar a aba encerra o agente depois de cerca de 15 segundos; `Ctrl+C` no terminal encerra na hora. Uma resposta só é salva ao terminar ou ser interrompida: se o agente cair no meio dela, ela se perde. A URL traz um token de acesso: não a compartilhe (veja [SECURITY.md](SECURITY.md)).
 
 ### App de Desktop
 A mesma interface em janela própria, sem terminal nem navegador. No Windows, é um instalador por usuário, sem administrador. No Linux, há três jeitos:
@@ -183,7 +171,7 @@ A mesma interface em janela própria, sem terminal nem navegador. No Windows, é
 
 O `.deb` e o script não precisam de FUSE: o script extrai o AppImage em vez de montá-lo. Rodar o script de novo com uma versão nova atualiza o app. Nenhum dos três apaga sua configuração e suas conversas (`~/.siliconflower`) ao remover.
 
-> ⚠️ **Não instale o pacote `fuse`** (`apt install fuse`) para abrir o AppImage. No Ubuntu 24.04, no elementary OS 8 e derivados, ele remove o `fuse3` e, junto, parte da área de trabalho (Flatpak, portais, arquivos, aplicativos do sistema). Se o AppImage pedir FUSE, use o `.deb` ou o script de instalação, que não precisam dele, ou instale `libfuse2t64`. Se já instalou o `fuse`, `sudo apt install fuse3` e os pacotes removidos (veja `/var/log/apt/history.log`) desfazem o estrago. O app traz o agente e o Electron e não coloca `siliconflower` no `PATH`: o modo terminal é instalado à parte.
+> ⚠️ **Não instale o pacote `fuse`** (`apt install fuse`) para abrir o AppImage. No Ubuntu 24.04, no elementary OS 8 e derivados, ele remove o `fuse3` e, junto, parte da área de trabalho (Flatpak, portais, arquivos, aplicativos do sistema). Se o AppImage pedir FUSE, use o `.deb` ou o script de instalação, que não precisam dele, ou instale `libfuse2t64`. Se já instalou o `fuse`, `sudo apt install fuse3` e os pacotes removidos (veja `/var/log/apt/history.log`) desfazem o estrago. O app traz o agente e o Electron e não coloca `siliconflower` no `PATH`: o agente avulso é instalado à parte.
 
 Para gerar o pacote a partir do código-fonte, ou desenvolver sem empacotar:
 
@@ -216,7 +204,7 @@ O Siliconflower disponibiliza um conjunto completo de ferramentas integradas:
 
 - 📁 **Arquivos & Edição**: `read_file`, `read_media` (imagem em qualquer provedor; áudio e vídeo na API Xiaomi MiMo), `write_file`, `edit_file` (fuzzy/newline matching), `apply_patch`, `list_directory`, `create_directory`, `move_path`, `delete_path`, `file_info`.
 - 🔍 **Busca & Navegação**: `search_files` (glob), `grep_content` (regex), `repo_map`, `find_symbol`.
-- 💻 **Execução & Tarefas**: `execute_command` (shell arbitrário com os privilégios do usuário — PowerShell no Windows com saída em UTF-8, `$SHELL` em Linux/Unix), `read_logs`, `ask_question` (pausa e espera sua resposta na TUI), `todowrite`, `read_skill`.
+- 💻 **Execução & Tarefas**: `execute_command` (shell arbitrário com os privilégios do usuário — PowerShell no Windows com saída em UTF-8, `$SHELL` em Linux/Unix), `read_logs`, `ask_question` (pausa e espera sua resposta na interface), `todowrite`, `read_skill`.
 - 🤖 **Subagentes & Async**: `run_task`, `send_subagent_message`, `manage_background_task`.
 - 🧠 **Memória & Worktrees**: `memory` (`save`, `recall`, `forget`), `enter_worktree`, `exit_worktree`, `list_worktrees`.
 - 📄 **Artefatos & Web**: `artifact` (`create`, `read`, `list`, `delete`), `web_fetch` (HTML para Markdown), `web_search`, `show_hooks`.
@@ -268,7 +256,7 @@ Crie arquivos Markdown em `~/.siliconflower/skills/` com instruções especializ
 - **Acentos corrompidos na saída de comandos (Windows):** a partir da v0.2.7, `execute_command`, hooks e tarefas em background forçam UTF-8 no PowerShell e rodam com `-NoProfile` (o seu `$PROFILE` não é carregado nesses comandos).
 - **Alias ou função do shell não funciona em `execute_command` (Linux/Unix):** os comandos rodam com `$SHELL -c`, não interativo e sem login, então `.bashrc`/`.zshrc` não são carregados. Use o caminho completo do programa ou exporte as variáveis antes de abrir o `siliconflower`.
 - **O agente lembra de coisas de outro projeto / não lembra de nada:** a memória de projeto só existe em pastas com `SILICONFLOWER.md` ou `AGENTS.md` (nela ou acima dela). Confira com `siliconflower show` (linha `Project`) ou na barra de status (`Projeto:`). Abra o agente dentro da pasta do projeto, ou rode `siliconflower init` para criar um. Memórias globais (`~/.siliconflower/memory/`) aparecem em qualquer pasta.
-- **Comando em background parou ao sair:** fechar a TUI, a GUI ou a janela do projeto encerra os comandos em background e o que eles iniciaram. Para um processo que deve continuar, inicie-o fora do agente (`systemd`, `tmux`, `nohup` em outro terminal).
+- **Comando em background parou ao sair:** fechar a GUI ou a janela do projeto encerra os comandos em background e o que eles iniciaram. Para um processo que deve continuar, inicie-o fora do agente (`systemd`, `tmux`, `nohup` em outro terminal).
 - **Resposta ou arquivo grande cortado:** cada resposta do modelo tem limite de 32768 tokens de saída, ou 16384 se o provedor recusar esse valor. O raciocínio pode contar nesse limite, conforme o provedor. O modelo é avisado do corte e pode escrever o arquivo em partes; em um texto cortado, envie `continue`.
 - **AppImage pede FUSE / "libfuse.so.2":** use o `.deb` ou `scripts/install-appimage.sh`, que não precisam de FUSE, ou instale `libfuse2t64`. **Nunca** `apt install fuse` no Ubuntu 24.04 e derivados (veja o aviso em [App de Desktop](#app-de-desktop)).
 - **Problema no app de desktop:** o log fica em `~/.siliconflower/logs/siliconflower.log`. Instalar o app não instala o comando `siliconflower`.
