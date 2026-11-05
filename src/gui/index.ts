@@ -1,5 +1,6 @@
 import { AgentSession, type SessionOverrides } from "../session.js";
-import { runPowerShell, describeFailure } from "../shell.js";
+import { runShell, describeFailure } from "../shell.js";
+import { isWindows } from "../platform.js";
 import { killAllBackgroundTasks } from "../services/background-tasks.js";
 import { ConversationStore } from "../services/conversations.js";
 import { getWorkspaceDataDir } from "../fs-util.js";
@@ -51,7 +52,8 @@ export async function startGui(config: AppConfig, overrides: SessionOverrides, o
   });
   void session.start().catch((e) => log("error", `GUI: falha ao iniciar a sessão: ${String(e)}`));
 
-  for (const signal of ["SIGINT", "SIGTERM", "SIGBREAK"] as const) {
+  const signals: NodeJS.Signals[] = isWindows() ? ["SIGINT", "SIGTERM", "SIGBREAK"] : ["SIGINT", "SIGTERM", "SIGHUP"];
+  for (const signal of signals) {
     process.once(signal, () => void shutdown());
   }
 
@@ -66,7 +68,7 @@ export async function startGui(config: AppConfig, overrides: SessionOverrides, o
   }
   if (options.open) {
     // The URL is built by the server (fixed host, numeric port, hex token): safe to quote.
-    const res = await runPowerShell(`Start-Process '${server.url}'`, { timeout: 15_000 });
+    const res = await runShell(openUrlCommand(server.url), { timeout: 15_000 });
     const failure = describeFailure(res);
     if (failure) {
       await log("warn", `GUI: navegador não abriu: ${failure}`);
@@ -77,4 +79,10 @@ export async function startGui(config: AppConfig, overrides: SessionOverrides, o
   await finished;
   // Background tasks and MCP handles could otherwise keep the process running.
   process.exit(0);
+}
+
+/** Opens the default browser. Windows: Start-Process; macOS: open; Linux/BSD: xdg-open. */
+export function openUrlCommand(url: string): string {
+  if (isWindows()) return `Start-Process '${url}'`;
+  return `${process.platform === "darwin" ? "open" : "xdg-open"} '${url}' >/dev/null 2>&1`;
 }

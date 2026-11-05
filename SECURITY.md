@@ -9,7 +9,7 @@ Depois de configurado, o modelo pode usar ferramentas que:
 - leem, criam, editam, movem e listam arquivos (caminhos relativos são resolvidos a partir do `cwd`);
 - buscam arquivos e conteúdo recursivamente;
 - excluem arquivos e pastas (`delete_path`);
-- executam qualquer comando PowerShell (`execute_command`) com os mesmos privilégios do usuário;
+- executam qualquer comando de shell (`execute_command`: PowerShell no Windows, `$SHELL` em Linux/Unix) com os mesmos privilégios do usuário;
 - iniciam os servidores MCP configurados, seja qual for o executável.
 
 **Não há sandbox.** O agente tem os mesmos privilégios de quem roda o `siliconflower`.
@@ -17,7 +17,7 @@ Depois de configurado, o modelo pode usar ferramentas que:
 ## Proteções embutidas
 
 - **`delete_path`** exige `confirm: true` em qualquer exclusão. Raízes de disco, a pasta do usuário, o diretório atual e as pastas acima deles não podem ser removidos por essa ferramenta.
-- **Caminhos sensíveis** (`C:\Windows\System32`, `SysWOW64`, `.ssh`, `.aws`, inclusive via junction ou link simbólico) são bloqueados no caminho passado às ferramentas de arquivo, busca e grep.
+- **Caminhos sensíveis** (`C:\Windows\System32`, `SysWOW64`, `/etc`, `/root`, `/boot`, `.ssh`, `.aws`, inclusive via junction ou link simbólico) são bloqueados no caminho passado às ferramentas de arquivo, busca e grep.
   - Nas buscas recursivas, `grep_content` sempre pula pastas ocultas.
   - `search_files` pula pastas ocultas, a menos que receba `includeHidden: true`; nesse caso pode **listar nomes** dentro delas, mas a leitura continua bloqueada.
 - **`web_fetch`** bloqueia:
@@ -34,7 +34,9 @@ Depois de configurado, o modelo pode usar ferramentas que:
 - **Modos `programação` e `sistema`** só mudam o foco do prompt. Nenhum dos dois limita privilégios.
 - **Regras do prompt de sistema** pedem ao modelo que trate conteúdo de arquivos, web e ferramentas como dado, não como instrução, e que confirme ações destrutivas. São orientações ao modelo, não barreiras: uma injeção de prompt ainda pode ter sucesso.
 - **Subagentes `research` e `plan`** seguem a allowlist do modo `plano`, imposta no código. Os demais papéis têm as mesmas ferramentas nativas do agente principal, exceto `run_task`.
-- **`execute_command`** é, por design, um shell arbitrário. As proteções das ferramentas de arquivo **não** se aplicam a comandos PowerShell.
+- **`config.json`**, que guarda a chave de API, é gravado com permissão `0600` em Linux/Unix, e um arquivo antigo mais aberto é corrigido ao ser lido. Um arquivo somente leitura (ex.: na store do Nix) continua como está, e com ele a permissão que tiver.
+- **`read_media`** envia o conteúdo do arquivo ao provedor configurado.
+- **`execute_command`** é, por design, um shell arbitrário. As proteções das ferramentas de arquivo **não** se aplicam a comandos de shell.
 
 ## Interface gráfica (`siliconflower gui`)
 
@@ -51,7 +53,7 @@ A página controla um agente que executa comandos, e qualquer site aberto no nav
 
 ## Conversas salvas
 
-A GUI e o app guardam as conversas em `~/.siliconflower/workspaces/<projeto>/sessions/`, **em texto puro**. Isso inclui suas mensagens e a saída das ferramentas: um arquivo `.env` que o agente tenha lido, por exemplo, fica nelas. A chave de API do provedor não é gravada, mas um segredo que passe pela conversa é. As permissões são as da sua conta no Windows. Apague pelo **×** na lateral o que não deve ficar guardado. De imagens, áudios e vídeos lidos com `read_media`, só o caminho é gravado; o conteúdo vai ao provedor, mas não para o disco.
+A GUI e o app guardam as conversas em `~/.siliconflower/workspaces/<projeto>/sessions/`, **em texto puro**. Isso inclui suas mensagens e a saída das ferramentas: um arquivo `.env` que o agente tenha lido, por exemplo, fica nelas. A chave de API do provedor não é gravada, mas um segredo que passe pela conversa é. Os arquivos ficam com as permissões da sua conta: em Linux/Unix, confira que `~/.siliconflower` não é legível por outros usuários (o `config.json` é gravado com `0600`, mas as conversas seguem a `umask`). Apague pelo **×** na lateral o que não deve ficar guardado. De imagens, áudios e vídeos lidos com `read_media`, só o caminho é gravado; o conteúdo vai ao provedor, mas não para o disco.
 
 ## App de desktop (`desktop/`)
 
@@ -67,7 +69,8 @@ A janela mostra a mesma página, com texto vindo do modelo e de repositórios, e
 
 - no app instalado, os *fuses* do Electron desligam o uso do executável como interpretador Node (`ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS`, `--inspect`), e ele só carrega o código de dentro do próprio pacote, com integridade verificada.
 
-**Limitação:** o instalador e o app ainda não são assinados, então não há como conferir a origem do arquivo, e o Windows SmartScreen pode avisar ao executá-lo. Baixe só de uma fonte em que confia.
+**Limitação:** o AppImage e o instalador do Windows ainda não são assinados, então não há como conferir a origem do arquivo (no Windows, o SmartScreen pode avisar ao executá-lo). Baixe só de uma fonte em que confia.
+
 
 ## Instruções de projeto vêm do repositório
 

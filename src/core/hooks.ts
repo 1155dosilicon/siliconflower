@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { readFile, access } from "node:fs/promises";
 import { log } from "../logger.js";
 import { getWorkspaceDataDir, getGlobalDataDir } from "../fs-util.js";
-import { runPowerShell, describeFailure } from "../shell.js";
+import { runShell, describeFailure } from "../shell.js";
 import { resolveWorkspaceRoot } from "../project.js";
 
 const HOOK_TIMEOUT_MS = 30_000;
@@ -91,7 +91,7 @@ export async function runHook(
       SILICONFLOWER_FILE_PATH: context.filePath || "",
     };
 
-    const res = await runPowerShell(command, { cwd: effectiveCwd, env, timeout: HOOK_TIMEOUT_MS });
+    const res = await runShell(command, { cwd: effectiveCwd, env, timeout: HOOK_TIMEOUT_MS });
     const output = (res.stdout + (res.stderr ? `\nStderr: ${res.stderr}` : "")).trim();
     const failure = describeFailure(res, HOOK_TIMEOUT_MS);
     if (failure) {

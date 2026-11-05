@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { log } from "../logger.js";
-import { startPowerShell, killProcessTree, describeFailure } from "../shell.js";
+import { startShell, killProcessTree, describeFailure } from "../shell.js";
 
 export type BackgroundTaskType = "command" | "subagent";
 export type BackgroundTaskStatus = "running" | "completed" | "failed" | "killed";
@@ -68,7 +68,7 @@ export function startBackgroundCommand(command: string, cwd: string = process.cw
   backgroundTasks.set(taskId, taskRecord);
   let child: ChildProcess;
   try {
-    const started = startPowerShell(command, { cwd, timeout });
+    const started = startShell(command, { cwd, timeout });
     child = started.child;
     void started.done.then((res) => {
       taskRecord.completedAt = new Date().toISOString();

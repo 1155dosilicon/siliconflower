@@ -1,0 +1,49 @@
+# Typecheck and tests on Windows and Linux: the same code runs on both, and a change made
+# on one system must not break the other (docs/PLATAFORMAS.md).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun test
+
+      - name: Install desktop
+        run: bun install --cwd desktop --frozen-lockfile
+
+      - name: Typecheck desktop
+        run: bun run typecheck:desktop
+
+      - name: Build agent
+        run: bun run build

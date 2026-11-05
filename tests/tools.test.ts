@@ -31,7 +31,10 @@ describe("tools", () => {
   });
 
   test("blocked paths prevent access to system directories", async () => {
-    const res = await runBuiltin("read_file", { path: "C:\\Windows\\System32\\config\\SAM" });
+    const blocked = process.platform === "win32"
+      ? "C:\\Windows\\System32\\config\\SAM"
+      : "/etc/passwd";
+    const res = await runBuiltin("read_file", { path: blocked });
     expect(res.isError).toBe(true);
     expect(res.result).toContain("bloqueado");
   });
@@ -45,7 +48,9 @@ describe("tools", () => {
   });
 
   test("execute_command runs shell commands and returns output", async () => {
-    const cmd = "Write-Output 'hello siliconflower'";
+    const cmd = process.platform === "win32"
+      ? "Write-Output 'hello siliconflower'"
+      : "echo 'hello siliconflower'";
     const res = await runBuiltin("execute_command", { command: cmd });
     expect(res.isError).toBe(false);
     expect(res.result).toContain("hello siliconflower");
@@ -100,12 +105,13 @@ describe("tools", () => {
   });
 
   describe("onEdit hook", () => {
+    const win = process.platform === "win32";
     const config = (onEdit: string) => ({ baseURL: "http://x/v1", apiKey: "k", model: "m", reasoning: "none" as const, hooks: { onEdit } });
-    const write = (onEdit: string, mode?: "plano") =>
-      runBuiltin("write_file", { path: join(tmpdir(), `sf-hook-${Date.now()}.txt`), content: "x" }, { config: config(onEdit), mode });
+    const write = (onEdit: string) =>
+      runBuiltin("write_file", { path: join(tmpdir(), `sf-hook-${Date.now()}.txt`), content: "x" }, { config: config(onEdit) });
 
     test("its output reaches the model", async () => {
-      const res = await write("Write-Output 'erro de tipo na linha 3'");
+      const res = await write(win ? "Write-Output 'erro de tipo na linha 3'" : "echo 'erro de tipo na linha 3'");
       expect(res.isError).toBe(false);
       expect(res.result).toContain("Arquivo escrito");
       expect(res.result).toContain("--- Hook onEdit ---");
@@ -113,19 +119,19 @@ describe("tools", () => {
     });
 
     test("a failing check does not turn the edit into an error", async () => {
-      const res = await write("Write-Output 'falhou aqui'; exit 3");
+      const res = await write(win ? "Write-Output 'falhou aqui'; exit 3" : "echo 'falhou aqui'; exit 3");
       expect(res.isError).toBe(false);
       expect(res.result).toContain("Hook onEdit falhou");
       expect(res.result).toContain("falhou aqui");
     });
 
     test("a silent check adds nothing", async () => {
-      const res = await write("$null = 1");
+      const res = await write(win ? "$null = 1" : "true");
       expect(res.result).not.toContain("Hook onEdit");
     });
 
     test("a long output is cut", async () => {
-      const res = await write("'y' * 20000");
+      const res = await write(win ? "'y' * 20000" : "head -c 20000 /dev/zero | tr '\\0' y");
       expect(res.result.length).toBeLessThan(9000);
       expect(res.result).toContain("TRUNCADA");
     });

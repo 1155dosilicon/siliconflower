@@ -13,14 +13,29 @@ function tempDir(): string {
   return mkdtempSync(join(tmpdir(), "sf-desktop-"));
 }
 
+const isWin = process.platform === "win32";
+
 describe("recent projects", () => {
-  test("keeps the latest first, without duplicates that differ only in case", () => {
+  test.skipIf(!isWin)("keeps the latest first, without duplicates that differ only in case", () => {
     const file = join(tempDir(), "sub", "projects.json");
     addRecent(file, "C:\\Projetos\\A");
     addRecent(file, "C:\\Projetos\\B");
     const recents = addRecent(file, "c:\\projetos\\a\\");
     expect(recents.map((p) => folderKey(p.path))).toEqual(["c:\\projetos\\a", "c:\\projetos\\b"]);
     expect(loadRecents(file)).toEqual(recents);
+  });
+
+  test.skipIf(isWin)("Unix: folders that differ only in case are different projects", () => {
+    const file = join(tempDir(), "sub", "projects.json");
+    addRecent(file, "/home/u/Projetos/A");
+    addRecent(file, "/home/u/projetos/a");
+    const recents = addRecent(file, "/home/u/Projetos/A/");
+    expect(recents.map((p) => folderKey(p.path))).toEqual(["/home/u/Projetos/A", "/home/u/projetos/a"]);
+  });
+
+  test("folderKey folds case only on Windows", () => {
+    expect(folderKey("/x/AbC", "linux")).toBe(resolve("/x/AbC"));
+    expect(folderKey("/x/AbC", "win32")).toBe(resolve("/x/AbC").toLowerCase());
   });
 
   test("limits the list and removes entries", () => {
@@ -121,9 +136,11 @@ describe("installer config", () => {
   const builder = readFileSync(join(desktop, "electron-builder.yml"), "utf8");
   const main = readFileSync(join(desktop, "src", "main.ts"), "utf8");
 
-  test("the agent ships where the app looks for it", () => {
+  test("the agent ships where the app looks for it, on each platform", () => {
     expect(builder).toContain("to: siliconflower.exe");
-    expect(main).toContain(`join(process.resourcesPath, "siliconflower.exe")`);
+    expect(builder).toMatch(/to: siliconflower$/m);
+    expect(main).toContain(`process.platform === "win32" ? "siliconflower.exe" : "siliconflower"`);
+    expect(main).toContain("join(process.resourcesPath, AGENT_EXE)");
   });
 
   test("the taskbar groups the app under the id of the installer", () => {

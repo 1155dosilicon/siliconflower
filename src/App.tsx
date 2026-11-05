@@ -7,7 +7,8 @@ import { estimateTokens, formatTokenCount } from "./context.js";
 import { MarkdownText } from "./MarkdownText.js";
 import { logFile } from "./logger.js";
 import type { AppConfig } from "./types.js";
-import { clearScreen, restoreTerminal, ANSI_CLEAR_SCREEN } from "./terminal.js";
+import { clearScreen, onExitSignal, restoreTerminal, enableSynchronizedOutput, ANSI_CLEAR_SCREEN } from "./terminal.js";
+import { killAllBackgroundTasks } from "./services/background-tasks.js";
 import { reasoningLabel } from "./reasoning.js";
 import { AgentSession, type SessionOverrides } from "./session.js";
 import { basename } from "node:path";
@@ -230,12 +231,19 @@ export const App: React.FC<AppProps> = ({ config, overrides }) => {
 
 export async function startApp(config: AppConfig, overrides: SessionOverrides) {
   clearScreen();
+  // Unix: commands run in their own process group, so nothing else ends them when the TUI
+  // closes (terminal closed, `kill`, ...). Windows ends them with the console.
+  onExitSignal(killAllBackgroundTasks);
+  // Terminals without synchronized output (e.g. VTE) flash on each full redraw.
+  const disableSync = enableSynchronizedOutput();
   try {
     // exitOnCtrlC must be off: with Ink's default, useInput never receives Ctrl+C, so the
     // app would exit instead of cancelling the current response.
     const app = render(<App config={config} overrides={overrides} />, { exitOnCtrlC: false });
     await app.waitUntilExit();
   } finally {
+    disableSync();
     restoreTerminal();
+    await killAllBackgroundTasks();
   }
 }

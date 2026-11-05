@@ -8,9 +8,10 @@ export interface RecentProject {
   lastOpened: string;
 }
 
-/** Windows paths are case-insensitive: this key identifies a folder. */
-export function folderKey(folder: string): string {
-  return resolve(folder).replace(/[\\/]+$/, "").toLowerCase();
+/** Identifies a folder. Windows paths are case-insensitive; Unix paths are not. */
+export function folderKey(folder: string, platform: NodeJS.Platform = process.platform): string {
+  const key = resolve(folder).replace(/[\\/]+$/, "");
+  return platform === "win32" ? key.toLowerCase() : key;
 }
 
 /** A damaged file only costs the list: it must never keep the app from opening. */

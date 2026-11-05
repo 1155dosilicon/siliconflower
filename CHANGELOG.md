@@ -6,74 +6,96 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
-## [0.5.0] - 2026-11-03
+## [0.7.0] - 2026-11-05
+
+Versões Windows (`siliconflower` 0.5.0) e Linux/Unix (`siliconflower-nix` 0.6.0) unificadas num só código e repositório (`siliconflower`), a partir da versão Linux/Unix, que já rodava nos dois sistemas. Agora a GUI e o app de desktop também existem no Linux. O que muda entre os sistemas está em `docs/PLATAFORMAS.md`.
+
+### Unificação
+- Repositório único `1155dosilicon/siliconflower`; `siliconflower-nix` deixa de receber mudanças.
+- CI em Windows e Linux: typecheck, testes e build do agente a cada push e PR (`.github/workflows/ci.yml`).
+- Release por tag `vX.Y.Z`: agente e app de desktop de cada sistema num rascunho de release (`.github/workflows/release.yml`).
+- Teste de órfãos no Windows (`Get-CimInstance`) volta a existir, ao lado do de Unix (`tests/regressions.test.ts`).
+- `desktop/package.json`: `dist` gera o pacote do sistema atual; `dist:win` e `dist:linux` escolhem; nenhum publica sozinho (`--publish never`).
 
 ### Added
-- Prompt de sistema: regras comuns a todos os modos sobre dados que não são instrução, ações destrutivas, escopo, verificação e escolha de ferramentas, além da data atual (`src/modes.ts`).
-- Subagentes recebem as instruções do projeto, o índice de memórias, as preferências, as skills, o idioma e o diretório de trabalho; antes, só o papel (`src/services/subagent.ts`).
-- Subagentes `research` e `plan` passam a ser somente leitura, com a mesma política do modo `plano`.
+- Comando `siliconflower gui`: interface gráfica no navegador, com ferramentas, tarefas, perguntas, cancelamento e conversas salvas por projeto (`src/gui/`, `src/services/conversations.ts`). Abre o navegador com `xdg-open` no Linux e `open` no macOS.
+- Opções `gui --port`, `--no-open`, `--managed` e `--resume-latest`.
+- App de desktop em Electron (`desktop/`): janela própria por projeto, seletor de pasta, projetos recentes, configurações com teste de conexão e aviso quando o agente para. `bun run desktop:dist` gera um AppImage no Linux e o instalador NSIS no Windows.
+- `docs/PLATAFORMAS.md`: as diferenças entre a versão Linux/Unix e a de Windows.
 
 ### Changed
-- O prompt de sistema foi reorganizado em seções, e as instruções do projeto entram delimitadas por `<instrucoes_do_projeto>`.
-- Cada papel de subagente agora define o formato da resposta final, e `verification` relata sem corrigir.
-- Descrições de `execute_command`, `run_task`, `grep_content`, `edit_file`, `apply_patch`, `read_file` e `read_logs` agora informam versão do PowerShell, limites e comportamento real (`src/tools.ts`).
-- A compactação do histórico desconta o prompt de sistema e os schemas do orçamento de 90 mil tokens (`src/llm.ts`).
-- A estimativa de tokens passa de 3,8 para 3,5 caracteres por token, e o contador da sessão inclui os schemas das ferramentas (`src/context.ts`, `src/session.ts`).
+- Conversa extraída de `App.tsx` para `AgentSession` (`src/session.ts`), usada pela TUI e pela GUI.
+- O modo `plano` cita também o seletor Modo da interface gráfica.
+- Barra de status da TUI igual à do Windows: sem a seção `MCPs:`, `Projeto:` com o arquivo do projeto e a contagem de tokens também na linha de status (desfaz o 0.6.0).
+- O texto em streaming chega à TUI a cada pedaço recebido, como no Windows, em vez de no máximo a cada 60 ms.
 
-### Fixed
-- O prompt dizia `Windows (Windows (PowerShell/Bun/Node))`.
-- O modo `plano` dava a entender que a autorização do usuário liberava edições; agora diz que elas seguem bloqueadas e como trocar de modo.
-- `grep_content` parava em 200 ocorrências sem avisar; agora informa o corte.
-- `edit_file` editava o primeiro trecho quando a correspondência flexível de espaços era ambígua; agora dá o erro previsto, sem alterar o arquivo (`src/services/smart-edit.ts`).
+### Linux/Unix
+- App de desktop: o agente é `siliconflower` (sem `.exe`), roda em grupo de processos próprio e, se não sair em 8 s, o grupo recebe `SIGKILL` (no Windows, `taskkill /T /F`).
+- App de desktop: projetos recentes diferenciam maiúsculas em Linux/Unix.
+- GUI: `SIGHUP` também encerra o agente e as tarefas em background.
 
-## [0.4.1] - 2026-11-02
+## [0.6.0] - 2026-11-05
 
-### Fixed
-- Stream encerrado sem `finish_reason`: a chamada de ferramenta incompleta dizia ao modelo para corrigir o JSON, e agora informa que a resposta foi interrompida; um texto interrompido parecia concluído, e agora termina com um aviso (`src/llm.ts`).
-- `write_file` informava caracteres como se fossem bytes (`src/tools.ts`).
+### Added
+- Barra de status: nova seção `MCPs`, que mostra se há servidores MCP ligados e quantos (`on (2)`, `on (1/2)` com falha, `off`).
 
-## [0.4.0] - 2026-11-02
+### Changed
+- Barra de status mais curta: `Projeto:` mostra só o nome da pasta ou `nenhum`, e a contagem de tokens não se repete na linha de status.
+
+## [0.5.0] - 2026-11-04
+
+Backport do Siliconflower para Windows (0.3.0 a 0.5.0) para a versão Linux/Unix, sem a GUI e o app de desktop, com as adaptações e correções próprias de Linux/Unix listadas abaixo.
 
 ### Added
 - Ferramenta `read_media`: o modelo vê imagens em qualquer provedor e ouve áudios e vê vídeos na API Xiaomi MiMo (`src/services/media.ts`).
+- Prompt de sistema: regras comuns a todos os modos sobre dados que não são instrução, ações destrutivas, escopo, verificação e escolha de ferramentas, além da data atual e do shell real (`src/modes.ts`).
+- Subagentes recebem as instruções do projeto, o índice de memórias, as preferências, as skills, o idioma e o diretório de trabalho; antes, só o papel (`src/services/subagent.ts`).
+- Subagentes `research` e `plan` passam a ser somente leitura, com a mesma política do modo `plano`.
 
 ### Changed
 - `save_memory`, `recall_memory` e `forget_memory` viraram a ferramenta `memory`, com o parâmetro `action`.
 - `create_artifact`, `read_artifact`, `list_artifacts` e `delete_artifact` viraram a ferramenta `artifact`, com o parâmetro `action`.
 - `manage_hooks` passou a se chamar `show_hooks`: ela só exibe a configuração.
+- O prompt de sistema foi reorganizado em seções, e as instruções do projeto entram delimitadas por `<instrucoes_do_projeto>`.
+- Cada papel de subagente agora define o formato da resposta final, e `verification` relata sem corrigir.
+- Fechar a TUI encerra os comandos em background e o que eles iniciaram; antes, continuavam rodando (`src/App.tsx`, `src/terminal.ts`).
+- TUI volta a desenhar a conversa inteira (logo, histórico e resposta completa em streaming) no quadro dinâmico; o `<Static>` e o corte da resposta em andamento (`src/LiveResponse.tsx`) foram removidos. Em terminais sem saída sincronizada (ex.: VTE) a tela pisca ao gerar respostas longas.
+- O limite de saída por resposta subiu de 16384 para 32768 tokens; se o provedor recusar o valor, a requisição é repetida com 16384 (`src/llm.ts`).
 - A saída do hook `onEdit` agora volta para o modelo junto com o resultado da edição; antes era descartada (`src/tools.ts`).
-- O limite de saída por resposta subiu de 16384 para 32768 tokens; se o provedor recusar o valor, a requisição é repetida com 16384.
+- A compactação do histórico desconta o prompt de sistema e os schemas do orçamento de 90 mil tokens (`src/llm.ts`).
+- A estimativa de tokens passa de 3,8 para 3,5 caracteres por token, e o contador da TUI inclui os schemas das ferramentas (`src/context.ts`, `src/App.tsx`).
+- Descrições de `execute_command`, `run_task`, `grep_content`, `edit_file`, `apply_patch`, `read_file` e `read_logs` agora informam limites e comportamento real (`src/tools.ts`).
+- Gravação de `config.json` agora é atômica: uma queda no meio não perde a chave de API; links simbólicos são mantidos (`src/config.ts`).
 
 ### Fixed
-- GUI: o indicador "Pensando..." sumia depois do primeiro texto do turno e a tela ficava sem sinal de atividade; agora fica até o fim do turno, exceto durante ferramentas e perguntas.
-- Chamada de ferramenta cortada no limite de tokens de saída não executa mais: o modelo recebe o erro e o motivo. Antes, `write_file` criava um arquivo vazio chamado `undefined` e relatava sucesso.
-- `write_file` recusa chamadas sem `path` ou `content`; sem `content`, esvaziava o arquivo existente.
-- Resposta de texto cortada no limite de tokens de saída agora avisa o usuário; antes terminava sem nenhum sinal.
-
-## [0.3.0] - 2026-11-02
-
-### Added
-- Conversas salvas por projeto na GUI e no app: lateral com a lista, nova conversa, retomar e apagar (`src/services/conversations.ts`).
-- Tela de configurações no app, com teste de conexão: provedor, endereço, chave, modelo, pensamento, prompt de sistema e MCP (`desktop/src/settings.ts`).
-- Primeira execução do app sem terminal: o formulário substitui o assistente.
-- Opção `gui --resume-latest`: reabre a conversa mais recente do projeto.
-- Comando `siliconflower gui`: interface gráfica no navegador (Firefox ou outro), com ferramentas, tarefas, perguntas e cancelamento (`src/gui/`).
-- App de desktop em Electron (`desktop/`): janela própria por projeto, seletor de pasta, projetos recentes e aviso quando o agente para.
-- Instalador para Windows (`bun run desktop:dist`): atalhos no menu Iniciar e na área de trabalho, sem pedir administrador, e desinstalação pelo Windows.
-- Opção `gui --managed`: eventos JSON no stdout e encerramento ao fechar o stdin, para o app de desktop controlar o agente.
-
-### Changed
-- Conversa extraída de `App.tsx` para `AgentSession` (`src/session.ts`), usada pela TUI e pela GUI.
-- Gravação de `config.json` agora é atômica: uma queda no meio não perde a chave de API (`src/config.ts`).
-
-### Fixed
+- `config.json` ficava legível por outros usuários em Linux/Unix: agora é gravado com `0600`, e um arquivo antigo é corrigido ao ser lido (`src/config.ts`).
+- `killProcessTree` em Unix ignorava filhos que sobreviveram ao shell e não mandava `SIGKILL` se o shell morresse antes; agora espera o grupo acabar (`src/shell.ts`).
 - Cancelar uma resposta deixava ferramentas já recebidas executarem e guardava o turno como concluído, com status "pronto": agora o turno é interrompido de verdade (`src/llm.ts`).
-- Mudar o modo ou o raciocínio e enviar uma mensagem logo depois fazia o status voltar a "pronto" durante a resposta (`src/session.ts`).
+- Mudar o modo ou o raciocínio e enviar uma mensagem logo depois fazia o status voltar a "pronto" durante a resposta (`src/App.tsx`).
 - HTTP 400 só com "Request failed", que o Xiaomi MiMo devolve às vezes para pedidos válidos, agora é repetido uma vez em vez de virar erro na conversa (`src/llm.ts`).
-- Fechar a GUI deixava comandos em background rodando como órfãos: agora a árvore de processos é encerrada antes de sair (`src/gui/index.ts`).
-- `siliconflower gui` sem terminal e sem configuração ficava parado para sempre no assistente: agora mostra um erro claro (`src/index.tsx`).
+- Chamada de ferramenta cortada no limite de tokens de saída não executa mais: o modelo recebe o erro e o motivo. Antes, `write_file` criava um arquivo vazio chamado `undefined` e relatava sucesso (`src/llm.ts`).
+- `write_file` recusa chamadas sem `path` ou `content`; sem `content`, esvaziava o arquivo existente (`src/tools.ts`).
+- Resposta de texto cortada no limite de tokens de saída agora avisa o usuário; antes terminava sem nenhum sinal (`src/llm.ts`).
+- Stream encerrado sem `finish_reason`: a chamada de ferramenta incompleta dizia ao modelo para corrigir o JSON, e agora informa que a resposta foi interrompida; um texto interrompido parecia concluído, e agora termina com um aviso (`src/llm.ts`).
+- `write_file` informava caracteres como se fossem bytes (`src/tools.ts`).
+- O prompt aninhava o rótulo do sistema em parênteses, como `(Linux/Unix (linux, ...))` (`src/modes.ts`).
+- O modo `plano` dava a entender que a autorização do usuário liberava edições; agora diz que elas seguem bloqueadas e como trocar de modo (`src/modes.ts`).
+- `grep_content` parava em 200 ocorrências sem avisar; agora informa o corte (`src/tools.ts`).
+- `edit_file` editava o primeiro trecho quando a correspondência flexível de espaços era ambígua; agora dá o erro previsto, sem alterar o arquivo (`src/services/smart-edit.ts`).
+- O texto em streaming é repassado à TUI no máximo a cada 60 ms, em vez de a cada pedaço recebido.
+- Cada quadro é enviado entre marcadores de saída sincronizada (DEC 2026), para os terminais com suporte desenharem tudo de uma vez; `SILICONFLOWER_NO_SYNC_OUTPUT=1` desativa.
 
-## [0.2.9] - 2026-10-29
+## [0.2.9] - 2026-10-31
+
+Backport das correções do Siliconflower para Windows (0.2.7 a 0.2.9) para a versão Linux/Unix. Os itens das seções 0.2.7–0.2.9 abaixo valem para todas as plataformas, salvo os marcados como Windows; as adaptações para Linux/Unix estão nesta lista.
+
+### Linux/Unix
+- Execução de shell unificada em `src/shell.ts` (`runShell`/`startShell`): PowerShell no Windows, `$SHELL -c` (ou `/bin/bash`) em Unix, não interativo e sem login, então `.bashrc`/`.zshrc`/`.profile` não são carregados (equivalente ao `-NoProfile`).
+- Kill de comandos em Unix: o shell roda como líder de um novo grupo de processos e o grupo inteiro recebe `SIGTERM` (e `SIGKILL` após 2 s) em timeout, cancelamento ou estouro de buffer; antes só o shell morria e os filhos ficavam órfãos.
+- `killProcessTree`/`shellExecOptions` saíram de `src/platform.ts`; `execute_command`, hooks e tarefas em background passam todos por `src/shell.ts`.
+- Testes do executor de shell rodam em Windows e Unix, com regressão para processos órfãos (`tests/regressions.test.ts`).
+- Não se aplicam em Unix (código continua só no Windows): UTF-8/CLIXML do PowerShell, `attrib +h` e BOM do `install.ps1`.
+- Documentação (README, AGENTS.md, docs/ARCHITECTURE.md, SECURITY.md, CONTRIBUTING.md) adaptada para Windows, Linux e macOS/Unix.
 
 ### Fixed
 - Logo quebrava em janelas estreitas: agora escolhe a versão completa, "SILICON/FLOWER" empilhado ou texto simples conforme a largura (`src/ascii.ts`).
@@ -127,6 +149,16 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 - Valores inválidos de `--reasoning`/`--mode` eram ignorados.
 - `install.ps1` sem BOM mostrava acentos corrompidos no PowerShell 5.1.
 - (de 0.2.6) Spam de log por delta de `tool_call`; `read_skill` indisponível em subagentes; tipagem de `stdout`/`stderr`.
+
+## [0.2.6-nix] - 2026-10-25
+
+### Added
+- **Suporte a Linux/Unix (`src/platform.ts` e adaptadores):** O Siliconflower agora roda em Windows, Linux e macOS/Unix. Shell padrão: PowerShell no Windows; `$SHELL` (ou `/bin/bash`) em Unix. `execute_command`, hooks e background tasks usam a plataforma atual. Skills embutidas incluem `unix-backup.md` e `unix-system.md` (as skills `windows-*` só são sincronizadas no Windows).
+- **Build e instalação multiplataforma (`build.ts`, `scripts/install.sh`, `scripts/install-bin.js`):** `bun run build` gera `dist/siliconflower` no Linux/macOS ou `dist/siliconflower.exe` no Windows conforme a plataforma. `npm run install:bin` roteia para `scripts/install.sh` (`~/.local/bin`) em Unix e `scripts/install.ps1` no Windows. `package.json` aceita `win32`, `darwin` e `linux`.
+
+### Changed
+- **Persona e prompts de modo (`src/modes.ts`):** Identificam o SO e o shell ativos em vez de assumir Windows/PowerShell. O modo `sistema` foca em systemd/pacotes/shell em Unix e mantém PowerShell/registro no Windows.
+- **Testes e documentação:** Suíte de testes cross-platform; `README.md`, `LLMS.md` e `SECURITY.md` descrevem Windows, Linux e macOS/Unix.
 
 ## [0.2.6] - 2026-10-17
 
@@ -270,11 +302,10 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 - First-run wizard with provider presets for SiliconFlow, OpenRouter,
   OpenAI, and Anthropic.
 
-[Unreleased]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.4.1...HEAD
-[0.4.1]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.4.0...siliconflower-0.4.1
-[0.4.0]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.3.0...siliconflower-0.4.0
-[0.3.0]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.2.9...siliconflower-0.3.0
-[0.2.9]: https://github.com/1155dosilicon/siliconflower/compare/siliconflower-0.2.6...siliconflower-0.2.9
+[0.6.0]: https://github.com/1155dosilicon/siliconflower-nix/commits/main
+[0.5.0]: https://github.com/1155dosilicon/siliconflower-nix/commit/aa0a483
+[0.2.9]: https://github.com/1155dosilicon/siliconflower-nix/commits/main
+[0.2.6-nix]: https://github.com/1155dosilicon/siliconflower-nix/commit/84a2e90
 [0.2.6]: https://github.com/1155dosilicon/siliconflower/compare/0.2.5...siliconflower-0.2.6
 [0.2.5]: https://github.com/1155dosilicon/siliconflower/compare/0.2.4...0.2.5
 [0.2.4]: https://github.com/1155dosilicon/siliconflower/compare/0.2.3...0.2.4

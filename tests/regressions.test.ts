@@ -2,7 +2,7 @@ import { describe, expect, test, afterAll } from "bun:test";
 import { writeFile, readFile, rm, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runPowerShell, decodeClixml } from "../src/shell.js";
+import { runShell, decodeClixml } from "../src/shell.js";
 import { htmlToMarkdown, isPrivateAddress, webFetch } from "../src/services/web.js";
 import { buildOpenAIMessages, isOfficialOpenAIEndpoint, streamChat } from "../src/llm.js";
 import { normalize } from "../src/config.js";
@@ -21,15 +21,17 @@ afterAll(async () => {
   await rm(tmp, { recursive: true, force: true }).catch(() => {});
 });
 
-describe("PowerShell runner", () => {
-  test("returns UTF-8 output (accents are not corrupted by the OEM codepage)", async () => {
-    const res = await runPowerShell(`Write-Output 'ação ç "aspas"'`);
+const isWin = process.platform === "win32";
+
+describe("shell runner", () => {
+  test("returns UTF-8 output (accents are not corrupted)", async () => {
+    const res = await runShell(isWin ? `Write-Output 'ação ç "aspas"'` : `printf '%s\\n' 'ação ç "aspas"'`);
     expect(res.exitCode).toBe(0);
     expect(res.stdout).toContain('ação ç "aspas"');
   });
 
   test("returns stderr as plain text and the real exit code", async () => {
-    const res = await runPowerShell(`Write-Error 'falhou é'; exit 3`);
+    const res = await runShell(isWin ? `Write-Error 'falhou é'; exit 3` : `echo 'falhou é' >&2; exit 3`);
     expect(res.exitCode).toBe(3);
     expect(res.stderr).toContain("falhou é");
     expect(res.stderr).not.toContain("CLIXML");
@@ -38,9 +40,20 @@ describe("PowerShell runner", () => {
 
   test("timeout kills the command", async () => {
     const started = Date.now();
-    const res = await runPowerShell("Start-Sleep -Seconds 20", { timeout: 1000 });
+    const res = await runShell(isWin ? "Start-Sleep -Seconds 20" : "sleep 20", { timeout: 1000 });
     expect(res.timedOut).toBe(true);
     expect(Date.now() - started).toBeLessThan(15000);
+  });
+
+  test.skipIf(isWin)("timeout kills child processes too (no orphans)", async () => {
+    const marker = `29.${Date.now() % 100000}`; // unique sleep argument to find the child in ps
+    // The subshell keeps the pipes open, so the runner only returns once the whole group dies.
+    const started = Date.now();
+    const res = await runShell(`sleep ${marker} & wait`, { timeout: 800 });
+    expect(res.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(10000);
+    const ps = await runShell(`ps -eo args | grep -v grep | grep -c "sleep ${marker}" || true`);
+    expect(ps.stdout.trim()).toBe("0");
   });
 
   test("decodes CLIXML error records", () => {
@@ -219,28 +232,34 @@ describe("a provider that refuses a valid request without explaining", () => {
   });
 });
 
-describe("closing the app", () => {
+describe.skipIf(isWin)("closing the app", () => {
+  const start = async (build: (marker: string) => string) => {
+    const marker = `29.${Date.now() % 100000}${Math.floor(Math.random() * 1000)}`; // unique sleep argument, to find it in ps
+    const count = async () => Number((await runShell(`ps -eo args | grep -v grep | grep -c "sleep ${marker}" || true`)).stdout.trim());
+    const id = startBackgroundCommand(build(marker), process.cwd(), 120_000);
+    for (let i = 0; i < 50 && (await count()) === 0; i++) await Bun.sleep(50);
+    expect(await count()).toBeGreaterThan(0);
+    return { id, count };
+  };
+
   test("background commands and what they started do not survive as orphans", async () => {
-    const marker = `sf-orphan-${process.pid}-${Date.now()}`;
-    const countSleepers = async () => {
-      const res = await runPowerShell(
-        `@(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -match '${marker}' }).Count`
-      );
-      return Number(res.stdout.trim());
-    };
-    // The grandchild is another PowerShell: only killing the whole tree reaches it.
-    const id = startBackgroundCommand(
-      `powershell.exe -NoProfile -Command "Start-Sleep 60 # ${marker}"`,
-      process.cwd(),
-      120_000
-    );
-    for (let i = 0; i < 50 && (await countSleepers()) === 0; i++) await Bun.sleep(100);
-    expect(await countSleepers()).toBeGreaterThan(0);
-
+    const { id, count } = await start((m) => `sleep ${m} & wait`);
     await killAllBackgroundTasks();
-
-    expect(await countSleepers()).toBe(0);
+    expect(await count()).toBe(0);
     expect(getBackgroundTask(id)?.status).toBe("killed");
+  }, 30_000);
+
+  test("reaches a child that outlived the shell", async () => {
+    const { count } = await start((m) => `sleep ${m} &`);
+    await killAllBackgroundTasks();
+    expect(await count()).toBe(0);
+  }, 30_000);
+
+  test("a command that ignores SIGTERM gets SIGKILL", async () => {
+    const { count } = await start((m) => `trap '' TERM; sleep ${m} & wait`);
+    await killAllBackgroundTasks();
+    await Bun.sleep(100);
+    expect(await count()).toBe(0);
   }, 30_000);
 });
 
@@ -542,4 +561,30 @@ describe("repo map and grep", () => {
     expect(all.isError).toBe(false);
     expect((await readFile(path, "utf8")).match(/if \(y\)/g)?.length).toBe(2);
   });
+});
+
+// Windows: the Unix tests above count `sleep` with ps; here the tree is counted with CIM.
+describe.skipIf(!isWin)("closing the app (Windows)", () => {
+  test("background commands and what they started do not survive as orphans", async () => {
+    const marker = `sf-orphan-${process.pid}-${Date.now()}`;
+    const countSleepers = async () => {
+      const res = await runShell(
+        `@(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.CommandLine -match '${marker}' }).Count`
+      );
+      return Number(res.stdout.trim());
+    };
+    // The grandchild is another PowerShell: only killing the whole tree reaches it.
+    const id = startBackgroundCommand(
+      `powershell.exe -NoProfile -Command "Start-Sleep 60 # ${marker}"`,
+      process.cwd(),
+      120_000
+    );
+    for (let i = 0; i < 50 && (await countSleepers()) === 0; i++) await Bun.sleep(100);
+    expect(await countSleepers()).toBeGreaterThan(0);
+
+    await killAllBackgroundTasks();
+
+    expect(await countSleepers()).toBe(0);
+    expect(getBackgroundTask(id)?.status).toBe("killed");
+  }, 30_000);
 });

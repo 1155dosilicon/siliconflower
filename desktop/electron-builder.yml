@@ -7,10 +7,6 @@ directories:
 files:
   - build/**/*
   - package.json
-# Outside the asar: Windows cannot run an executable from inside an archive.
-extraResources:
-  - from: ../dist/siliconflower.exe
-    to: siliconflower.exe
 electronLanguages:
   - pt-BR
   - en-US
@@ -21,9 +17,24 @@ electronFuses:
   enableNodeCliInspectArguments: false
   onlyLoadAppFromAsar: true
   enableEmbeddedAsarIntegrityValidation: true
+# The agent goes outside the asar: an executable cannot run from inside an archive.
 win:
   target: nsis
   icon: resources/icon.ico
+  extraResources:
+    - from: ../dist/siliconflower.exe
+      to: siliconflower.exe
+linux:
+  target: AppImage
+  icon: resources/icon.png
+  category: Development
+  executableName: siliconflower-desktop
+  # Links the running window to the .desktop entry (WM_CLASS / Wayland app_id).
+  syncDesktopName: true
+  artifactName: Siliconflower-${version}-${arch}.${ext}
+  extraResources:
+    - from: ../dist/siliconflower
+      to: siliconflower
 nsis:
   # One click, no administrator: installs for the current user only.
   oneClick: true

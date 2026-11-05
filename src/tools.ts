@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import { resolve, isAbsolute, dirname, basename, parse, relative } from "node:path";
 import { homedir } from "node:os";
 import { ensureDir } from "./fs-util.js";
-import { runPowerShell, describeFailure } from "./shell.js";
+import { runShell, describeFailure } from "./shell.js";
 import { search } from "./glob-util.js";
 import { GREP_MAX_MATCHES, searchContent } from "./grep.js";
 import { setTodos } from "./todo.js";
@@ -21,6 +21,7 @@ import { enterWorktree, exitWorktree, listWorktrees } from "./services/worktree.
 import { runHook, loadHooksConfig } from "./core/hooks.js";
 import { processToolOutput } from "./context.js";
 import { tailLogs } from "./logger.js";
+import { getShellLabel, isWindows } from "./platform.js";
 import type { AppConfig, McpTool, Mode, TodoItem, ToolResult } from "./types.js";
 import { log } from "./logger.js";
 
@@ -979,12 +980,16 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   },
   {
     name: "execute_command",
-    description:
-      "Executa um comando no Windows PowerShell 5.1, sem perfil e sem interação (não existem &&, ||, ?: nem ??; use ';' ou if ($?) { ... }). Retorna stdout e stderr. Use runInBackground=true para o que pode passar de 2 minutos.",
+    description: isWindows()
+      ? "Executa um comando no Windows PowerShell 5.1, sem perfil e sem interação (não existem &&, ||, ?: nem ??; use ';' ou if ($?) { ... }). Retorna stdout e stderr. Use runInBackground=true para o que pode passar de 2 minutos."
+      : `Executa um comando em ${getShellLabel()}, com -c, sem carregar .bashrc/.zshrc/.profile e sem interação. Retorna stdout e stderr. Use runInBackground=true para o que pode passar de 2 minutos.`,
     inputSchema: {
       type: "object",
       properties: {
-        command: { type: "string", description: "Comando PowerShell a ser executado" },
+        command: {
+          type: "string",
+          description: isWindows() ? "Comando PowerShell a ser executado" : "Comando de shell a ser executado",
+        },
         cwd: { type: "string", description: "Diretório de execução (padrão: diretório atual)" },
         timeout: { type: "number", description: "Tempo limite em ms. Padrão: 30000; máximo: 120000. Em background, padrão: 300000; máximo: 3600000" },
         runInBackground: { type: "boolean", description: "Não aguarda o término; acompanhe com manage_background_task" },
@@ -1012,7 +1017,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       const rawTimeout = Number(a.timeout);
       const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.min(rawTimeout, 120000) : 30000;
       await log("info", `execute_command: ${cmd} (cwd=${workDir})`);
-      const res = await runPowerShell(cmd, { cwd: workDir, timeout, signal: ctx?.signal });
+      const res = await runShell(cmd, { cwd: workDir, timeout, signal: ctx?.signal });
       const outStr = res.stdout.trim();
       const errStr = res.stderr.trim();
       const failure = describeFailure(res, timeout);
