@@ -5,7 +5,7 @@ Referência para quem vai mudar o código. Comandos, regras e mapa resumido est�
 ## Fluxo de uma mensagem
 
 1. **`index.tsx`** carrega a configuração efetiva (`config.json` + variáveis de ambiente), aplica as flags da CLI e inicia a GUI (`gui`, ou `gui --managed` no app de desktop). Se a configuração estiver incompleta, abre o assistente no terminal; no `--managed`, avisa o app com `config_required`. Sem subcomando, só mostra a ajuda.
-2. **`AgentSession`** (`session.ts`), ao iniciar, carrega as skills e conecta os servidores MCP. Uma falha de MCP vai para o log e para a barra de status, sem bloquear as ferramentas nativas.
+2. **`AgentSession`** (`session.ts`), ao iniciar, carrega as skills e conecta os servidores MCP. Uma falha de MCP vai para o log e aparece como aviso na interface, sem bloquear as ferramentas nativas.
 3. **A cada mensagem**, monta o prompt de sistema (`modes.ts`):
    - identidade, foco do modo e regras comuns;
    - instruções do projeto, delimitadas por `<instrucoes_do_projeto>`, e índice de memórias (`buildMemorySystemPrompt`);
@@ -27,8 +27,6 @@ Saídas de ferramenta acima de 32 mil caracteres são truncadas (início e fim).
 - às chamadas MCP;
 - a uma pergunta pendente de `ask_question`.
 
-Ao fechar a GUI, inclusive por `SIGINT`, `SIGTERM` ou `SIGHUP`, `killAllBackgroundTasks` encerra as tarefas em background: elas rodam em grupo de processos próprio e sobreviveriam ao app. `killProcessTree` espera o grupo acabar e usa `SIGKILL` após 2 s.
-
 ## Sessão e interfaces
 
 `AgentSession` (`session.ts`) concentra a conversa e não depende de interface: histórico da API, despacho de ferramentas, modo `plano`, cancelamento e `ask_question`. As interfaces leem `getState()` (objeto substituído a cada mudança, nunca alterado), assinam `subscribe`/`onStreamEvent` e chamam as ações (`send`, `cancel`, `answer`, `setMode`, `setReasoning`).
@@ -37,7 +35,7 @@ Ao fechar a GUI, inclusive por `SIGINT`, `SIGTERM` ou `SIGHUP`, `killAllBackgrou
 
 **Protocolo do WebSocket** (JSON). Servidor: `hello` (estado e ferramentas, para uma página nova ou recarregada), `state` (só as chaves que mudaram, agrupadas a cada 33 ms) e `tool`. O texto do raciocínio não vai para a página. Página: `send`, `answer`, `cancel`, `mode`, `reasoning`; valores inválidos são ignorados.
 
-**Ciclo de vida**: sem nenhuma página conectada por 15 s, o app encerra. A tolerância existe para a página recarregar sem perder a sessão. Cada processo tem uma sessão e uma pasta de trabalho; vários projetos significam vários processos, o que também isola o estado global (`todo.ts`, tarefas em background, subagentes). Ao encerrar (fim da página, `SIGINT`, `SIGTERM`, `SIGHUP` em Unix ou `SIGBREAK` no Windows), a GUI mata a árvore de processos das tarefas em background.
+**Ciclo de vida**: sem nenhuma página conectada por 15 s, o app encerra. A tolerância existe para a página recarregar sem perder a sessão. Cada processo tem uma sessão e uma pasta de trabalho; vários projetos significam vários processos, o que também isola o estado global (`todo.ts`, tarefas em background, subagentes). Ao encerrar (fim da página ou sinal; os sinais por SO estão em [PLATAFORMAS.md](PLATAFORMAS.md)), `killAllBackgroundTasks` mata a árvore de processos das tarefas em background, que de outro modo sobreviveriam ao agente.
 
 **App de desktop** (`desktop/`): uma casca Electron em volta da GUI, em projeto separado, que não reescreve o agente. O processo principal (`main.ts`) cuida das janelas, e `agent-process.ts` inicia um `siliconflower gui --managed` (`siliconflower.exe` no Windows) por projeto, sem console, com a pasta do projeto como `cwd`. O agente roda fora do Node do Electron para isolar a pasta e o estado por projeto e para que operações pesadas não travem a janela.
 
@@ -47,7 +45,7 @@ Protocolo de `--managed` (`gui/managed.ts`), uma linha JSON no stdout: `{"event"
 
 **Conversas salvas** (`services/conversations.ts`): `AgentSession` recebe um `ConversationStore` por dependência. A GUI passa um, em `getWorkspaceDataDir(cwd)/sessions`; sem ele (subagentes, testes), nada é salvo. Cada `<id>.jsonl` tem uma linha de resumo, para listar sem ler históricos inteiros, e uma de conteúdo: histórico da API, mensagens exibidas, cartões de ferramentas e tarefas. A gravação é atômica e acontece só depois de `commitTurn`, então o arquivo nunca tem turno incompleto; `completeHistory` ainda corta o histórico ao carregar, por garantia. Fechar no meio de uma resposta aborta o turno e `close()` espera ele ser salvo. Arquivo danificado vira um aviso e fica de fora da lista. O protocolo do WebSocket ganha `new`, `resume` e `delete`; ao trocar de conversa, o servidor reenvia `hello` e a página redesenha tudo.
 
-**Pacotes** (`desktop/electron-builder.yml`): no Linux, um `.deb` e um AppImage (`bun run desktop:dist` ou `dist:linux` em `desktop/`). O `.deb` instala em `/opt/Siliconflower` e, no `postinst` do `electron-builder`, ajusta o `chrome-sandbox` e o perfil do AppArmor. O AppImage pode ser instalado por usuário com `scripts/install-appimage.sh`, que o extrai (sem FUSE) para `~/.local/share/siliconflower-desktop`, cria o atalho e o ícone e só usa `--no-sandbox` quando o sistema bloqueia *user namespaces*. Os três usam o nome `siliconflower-desktop` (`desktopName`, `executableName`, `StartupWMClass`), para o menu associar a janela aberta ao ícone; no Windows, NSIS por usuário, em `%LOCALAPPDATA%\Programs\siliconflower-desktop`, pasta que vem do `name` em `desktop/package.json` e precisa ser diferente de `Programs\siliconflower`, usada pelo CLI (`scripts/install.ps1`). O agente vai em `resources/`, fora do asar, porque um executável não roda de dentro dele. Projetos recentes são identificados por `folderKey`, que ignora maiúsculas só no Windows. O ícone é gerado por `desktop/scripts/make-icon.ts` (`.ico` no Windows, `icon.png` no Linux).
+**Pacotes** (`desktop/electron-builder.yml`): no Linux, um `.deb` e um AppImage (`bun run desktop:dist` ou `dist:linux` em `desktop/`). O `.deb` instala em `/opt/Siliconflower` e, no `postinst` do `electron-builder`, ajusta o `chrome-sandbox` e o perfil do AppArmor. O AppImage pode ser instalado por usuário com `scripts/install-appimage.sh`, que o extrai (sem FUSE) para `~/.local/share/siliconflower-desktop`, cria o atalho e o ícone e só usa `--no-sandbox` quando o sistema bloqueia *user namespaces*. Os três usam o nome `siliconflower-desktop` (`desktopName`, `executableName`, `StartupWMClass`), para o menu associar a janela aberta ao ícone. No Windows, NSIS por usuário em `%LOCALAPPDATA%\Programs\siliconflower-desktop`: a pasta vem do `name` em `desktop/package.json` e precisa ser diferente de `Programs\siliconflower`, a do agente avulso (`scripts/install.ps1`). O agente vai em `resources/`, fora do asar, porque um executável não roda de dentro dele. O ícone é gerado por `desktop/scripts/make-icon.ts` (`.ico` no Windows, `icon.png` no Linux).
 
 As proteções de acesso estão no [SECURITY.md](../SECURITY.md). O Markdown do modelo vira uma árvore de nós em `client/markdown.js` e só depois DOM, com `textContent` e tags fixas; a página nunca usa `innerHTML`.
 
@@ -67,19 +65,7 @@ Quando o provedor rejeita `reasoning_effort` ou o parâmetro de tokens, a requis
 
 ## Execução de shell (`shell.ts`)
 
-`runShell`/`startShell` são usados por `execute_command`, hooks e tarefas em background. O shell vem de `platform.ts` (`getDefaultShell`).
-
-**Windows:**
-
-- executam `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand`, o que evita problemas de aspas (acima de ~30 mil caracteres, usam `-Command`);
-- forçam UTF-8 na saída;
-- convertem o stderr CLIXML em texto;
-- em timeout, abort ou estouro de buffer, rodam `taskkill /T /F` **antes** de matar o processo pai, para não deixar filhos órfãos.
-
-**Linux/macOS/Unix:**
-
-- executam `$SHELL -c <comando>` (ou `/bin/bash`), não interativo e sem login, então `.bashrc`/`.zshrc`/`.profile` não são carregados;
-- o shell é iniciado como líder de um novo grupo de processos (`detached`); em timeout, abort ou estouro de buffer, o grupo inteiro recebe `SIGTERM` (e `SIGKILL` após 2 s se ainda estiver vivo), para não deixar filhos órfãos.
+`runShell`/`startShell` são usados por `execute_command`, hooks, tarefas em background e para abrir o navegador. O shell vem de `platform.ts` (`getDefaultShell`): PowerShell 5.1 no Windows, `$SHELL -c` em Unix. Em timeout, abort ou estouro de buffer, a árvore de processos inteira é encerrada antes do processo pai, para não deixar filhos órfãos. Os detalhes de cada sistema (codificação, UTF-8, CLIXML, grupos de processos) estão em [PLATAFORMAS.md](PLATAFORMAS.md#execução-de-comandos).
 
 ## Projetos e memória
 
@@ -176,6 +162,4 @@ Os schemas em `src/tools.ts` são a fonte de verdade; esta tabela só indica ond
 - **Conversas salvas**: `stripMediaData` grava só o caminho, nunca o conteúdo.
 - **Recusa do provedor**: um HTTP 400, 413, 415 ou 422 num pedido com mídia faz `rejectMedia` trocar os arquivos por uma nota e repetir o pedido. Sem isso, o arquivo ficaria no histórico e todos os pedidos seguintes da conversa falhariam.
 
-Limites de segurança e o que **não** é protegido (comandos de shell, MCP): veja [SECURITY.md](../SECURITY.md).
-
-Diferenças entre Linux/Unix e Windows: [PLATAFORMAS.md](PLATAFORMAS.md).
+Limites de segurança e o que **não** é protegido (comandos de shell, MCP): [SECURITY.md](../SECURITY.md).
