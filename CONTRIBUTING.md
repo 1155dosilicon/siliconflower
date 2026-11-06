@@ -14,7 +14,7 @@ cd siliconflower
 bun install
 bun run typecheck
 bun test
-bun run dev
+bun run dev -- gui   # sem subcomando, só mostra a ajuda
 ```
 
 Requisitos: Windows, Linux ou macOS/Unix, Bun >= 1.3 (recomendado) ou Node >= 20 com `tsx`.
@@ -26,7 +26,7 @@ bun install --cwd desktop
 bun run typecheck:desktop
 bun run build          # uma vez, ou quando o agente mudar: o app usa dist/siliconflower (dist/siliconflower.exe no Windows)
 bun run desktop
-bun run desktop:dist   # gera o pacote da plataforma atual em dist-desktop/ (AppImage no Linux)
+bun run desktop:dist   # gera o pacote da plataforma atual em dist-desktop/ (.deb e AppImage no Linux, instalador .exe no Windows)
 ```
 
 O mesmo código roda em Windows e Linux/Unix. O que é próprio de cada sistema passa por `src/platform.ts` e está listado em `docs/PLATAFORMAS.md`. O CI roda typecheck e testes nos dois; se você não tem um dos sistemas, deixe o CI testar e diga isso no PR.

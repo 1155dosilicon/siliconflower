@@ -65,14 +65,11 @@ A janela mostra a mesma página, com texto vindo do modelo e de repositórios, e
 - a janela só navega na origem do seu servidor local. Links abrem no navegador padrão, e só `http` e `https`;
 - todas as permissões são negadas, menos escrever na área de transferência (botão **Copiar**), e downloads são cancelados;
 - cada projeto tem sessão própria, em memória, então o cookie de um não chega ao outro;
-- a URL com o token só passa pelo pipe entre o app e o agente e nunca vai para o log.
-
-- no app instalado, os *fuses* do Electron desligam o uso do executável como interpretador Node (`ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS`, `--inspect`), e ele só carrega o código de dentro do próprio pacote, com integridade verificada.
-
+- a URL com o token só passa pelo pipe entre o app e o agente e nunca vai para o log;
+- no app instalado, os *fuses* do Electron desligam o uso do executável como interpretador Node (`ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS`, `--inspect`), e ele só carrega o código de dentro do próprio pacote, com integridade verificada;
 - no Linux, o sandbox do Chromium fica ligado no `.deb` e no `scripts/install-appimage.sh`. O script só passa `--no-sandbox` quando o sistema impede *user namespaces* sem privilégio (e avisa); nesse caso, prefira o `.deb`, que configura o `chrome-sandbox`.
 
 **Limitação:** o `.deb`, o AppImage e o instalador do Windows ainda não são assinados, então não há como conferir a origem do arquivo (no Windows, o SmartScreen pode avisar ao executá-lo). Baixe só de uma fonte em que confia.
-
 
 ## Instruções de projeto vêm do repositório
 
@@ -80,7 +77,7 @@ A janela mostra a mesma página, com texto vindo do modelo e de repositórios, e
 
 ## O que você ainda deve fazer
 
-- **Trate a chave de API como senha.** `show` mostra a chave mascarada, mas `~/.siliconflower/config.json` é texto puro. Para manter a chave fora desse arquivo, deixe o campo vazio e use `SILICONFLOWER_API_KEY`. Valores de ambiente nunca são gravados no `config.json`, nem pelo assistente `config`.
+- **Trate a chave de API como senha.** `show` mostra a chave mascarada, mas `~/.siliconflower/config.json` é texto puro. Para manter a chave fora desse arquivo, deixe o campo vazio e use `SILICONFLOWER_API_KEY`. Valores de ambiente nunca são gravados no `config.json`, nem pelo assistente `config`. Chaves de servidores MCP (campo `env` em `mcpServers`) também ficam em texto puro no `config.json`.
 - **Não use `--mode` como barreira de permissão.** Ele só define o foco do modelo.
 - **Revise o log** (`siliconflower logs`) de vez em quando, principalmente depois de sessões longas.
 - **Servidores MCP de terceiros não são auditados por este projeto.** Ao configurar um, você confia nele.

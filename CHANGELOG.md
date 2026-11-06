@@ -6,6 +6,9 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Changed
+- Documentação enxugada: README sem repetições, ARCHITECTURE e PLATAFORMAS sem trechos duplicados, e o README explica o `env` do MCP e o erro de PATH com `npx` do nvm no app.
+
 ## [0.8.0] - 2026-11-05
 
 A interface de terminal (TUI) saiu: as interfaces agora são o app de desktop e a GUI no navegador (`siliconflower gui`). O executável `siliconflower` continua: ele é o motor do app e mantém os subcomandos `gui`, `config`, `show`, `init`, `ensure`, `skills`, `sync` e `logs`.

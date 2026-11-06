@@ -4,16 +4,12 @@ O Siliconflower tem um único código para Windows, Linux e macOS/Unix. As funç
 
 Esta lista é tudo o que **deve** ser diferente entre os sistemas. Fora daqui, o comportamento é o mesmo. O código específico de SO passa por `src/platform.ts` (`isWindows()`), e os testes que dependem dele escolhem o lado pela plataforma. Ao criar ou remover uma diferença, atualize este arquivo.
 
-Até a 0.6.0 havia dois repositórios: `siliconflower` (Windows) e `siliconflower-nix` (Linux/Unix). A 0.7.0 os unificou a partir do segundo, que já rodava nos dois sistemas.
-
 ## Execução de comandos
 
 | Ponto | Windows | Linux/Unix | Onde |
 | :--- | :--- | :--- | :--- |
-| Shell | Windows PowerShell 5.1, `-NoProfile`, saída forçada em UTF-8, CLIXML decodificado | `$SHELL -c` (ou `/bin/bash`), não interativo e sem login: `.bashrc`/`.zshrc`/`.profile` não são carregados | `src/shell.ts` |
-| API do executor | `runPowerShell` / `startPowerShell` | `runShell` / `startShell` (no Windows, continuam chamando o PowerShell) | `src/shell.ts`, `tools.ts`, `core/hooks.ts`, `services/background-tasks.ts` |
-| Matar comandos | `taskkill /T /F` na árvore | o shell é líder de um grupo de processos (`detached`); o grupo recebe `SIGTERM` e, após 2 s, `SIGKILL`, esperando o grupo acabar | `src/shell.ts` |
-| Detecção de SO e shell | não existe | `isWindows()`, `getDefaultShell()`, `getShellLabel()`, `getOsLabel()` | `src/platform.ts` |
+| Shell | `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand` (acima de ~30 mil caracteres, `-Command`); saída forçada em UTF-8, stderr CLIXML convertido em texto | `$SHELL -c` (ou `/bin/bash`), não interativo e sem login: `.bashrc`/`.zshrc`/`.profile` não são carregados | `src/shell.ts`, `src/platform.ts` |
+| Matar comandos | `taskkill /T /F` na árvore, antes do processo pai | o shell é líder de um grupo de processos (`detached`); o grupo recebe `SIGTERM` e, após 2 s, `SIGKILL`, esperando o grupo acabar | `src/shell.ts` |
 
 ## Prompt, ferramentas e skills
 
@@ -56,7 +52,7 @@ Até a 0.6.0 havia dois repositórios: `siliconflower` (Windows) e `siliconflowe
 
 ## Requisitos mínimos
 
-Medidos nos binários da 0.7.0 (maior versão de símbolo da glibc com `objdump -T`): o Electron (app de desktop) exige glibc 2.25 e o agente (Bun) exige glibc 2.17. Pela documentação do Bun, o agente roda em kernel 3.10 ou mais novo e precisa de SSE4.2, não de AVX2 (o binário x64 escolhe AVX2 sozinho quando existe). A tabela completa, com as distribuições, está no README (Requisitos do sistema). Ao subir a versão do Electron ou do Bun, meça de novo:
+A tabela está no README (Requisitos no Linux). As versões de glibc (2.25 no app, 2.17 no agente) foram medidas nos binários da 0.8.0; kernel e CPU vêm da [documentação do Bun](https://bun.sh/docs/installation). Ao subir a versão do Electron ou do Bun, meça de novo:
 
 ```bash
 objdump -T dist-desktop/linux-unpacked/siliconflower-desktop | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1
@@ -67,12 +63,6 @@ objdump -T dist/siliconflower | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1
 
 Os testes que dependem do shell ou de caminhos escolhem o lado pela plataforma (`process.platform === "win32"`). Os de processos órfãos contam `sleep` com `ps` em Unix e `powershell.exe` com `Get-CimInstance` no Windows (`tests/regressions.test.ts`). Só em Unix: `tests/config-save.test.ts` (permissão `0600` e links simbólicos) e o teste de `folderKey` que mantém maiúsculas. Só no Windows: o de `folderKey` sem distinção de maiúsculas (`tests/desktop.test.ts`).
 
-## Removido na unificação
+## Histórico
 
-Ajustes que existiam só na versão Linux/Unix e não eram de plataforma. Saíram ao unificar com a versão Windows (veja o CHANGELOG da 0.7.0). Se voltarem, valem para todos os sistemas.
-
-- Seção `MCPs:` da barra de status da TUI (`on (2)`, `on (1/2)`, `off`) e `mcpStatusLabel` em `src/mcp.ts` (0.6.0).
-- Barra de status curta: `Projeto:` só com o nome da pasta, e a contagem de tokens fora da linha de status (0.6.0). Agora, como no Windows: `Projeto: <pasta> (<arquivo>)` e tokens repetidos na linha de status.
-- Texto em streaming repassado à TUI no máximo a cada 60 ms (0.5.0). A TUI passou a redesenhar a cada pedaço recebido, como no Windows.
-
-Na 0.8.0 a TUI (interface de terminal em Ink) saiu de todos os sistemas, e com ela as diferenças de sinais, tarefas em background ao sair e saída sincronizada (DEC 2026) que ela tinha. As interfaces agora são a GUI no navegador e o app de desktop.
+Até a 0.6.0 havia dois repositórios, `siliconflower` (Windows) e `siliconflower-nix` (Linux/Unix); a 0.7.0 os unificou. A 0.8.0 removeu a TUI (interface de terminal), e com ela as diferenças de sinais e saída sincronizada que ela tinha. Detalhes no [CHANGELOG](../CHANGELOG.md).
