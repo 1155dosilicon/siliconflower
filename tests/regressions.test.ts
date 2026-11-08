@@ -1,10 +1,12 @@
 import { describe, expect, test, afterAll } from "bun:test";
-import { writeFile, readFile, rm, readdir } from "node:fs/promises";
+import { writeFile, readFile, rm, readdir, mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runShell, decodeClixml } from "../src/shell.js";
 import { htmlToMarkdown, isPrivateAddress, webFetch } from "../src/services/web.js";
-import { buildOpenAIMessages, isOfficialOpenAIEndpoint, streamChat } from "../src/llm.js";
+import { buildOpenAIMessages, isOfficialOpenAIEndpoint, NOT_RUN_AFTER_CANCEL, streamChat } from "../src/llm.js";
+import { AgentSession } from "../src/session.js";
 import { normalize } from "../src/config.js";
 import { createArtifact, readArtifact, listArtifacts, deleteArtifact, getArtifactsDir } from "../src/services/artifact.js";
 import { smartEditFile } from "../src/services/smart-edit.js";
@@ -569,5 +571,248 @@ describe.skipIf(!isWin)("closing the app (Windows)", () => {
 
     expect(await countSleepers()).toBe(0);
     expect(getBackgroundTask(id)?.status).toBe("killed");
+  }, 30_000);
+});
+
+/** Scripted OpenAI-compatible provider: `reply` decides each response from the request body. */
+type Reply = { text: string } | { tools: { name: string; args: Record<string, unknown> }[] } | { status: number; message: string };
+type SentMessage = { role: string; content?: string; tool_calls?: { function: { name: string } }[] };
+type SentBody = { messages: SentMessage[] };
+
+function fakeProvider(reply: (body: SentBody) => Reply) {
+  const requests: SentBody[] = [];
+  let ids = 0;
+  const chunk = (delta: unknown, finish_reason: string | null = null) => ({
+    id: "x",
+    object: "chat.completion.chunk",
+    model: "m",
+    choices: [{ index: 0, delta, finish_reason }],
+  });
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      const body = (await req.json()) as SentBody;
+      requests.push(body);
+      const r = reply(body);
+      if ("status" in r) return Response.json({ error: { message: r.message } }, { status: r.status });
+      const chunks = "text" in r
+        ? [chunk({ content: r.text }), chunk({}, "stop")]
+        : [
+            chunk({ tool_calls: r.tools.map((t, index) => ({ index, id: `c${++ids}`, type: "function", function: { name: t.name, arguments: JSON.stringify(t.args) } })) }),
+            chunk({}, "tool_calls"),
+          ];
+      return new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n", {
+        headers: { "Content-Type": "text/event-stream" },
+      });
+    },
+  });
+  const config: AppConfig = { baseURL: `http://127.0.0.1:${server.port}/v1`, apiKey: "k", model: "m", reasoning: "none", mcpServers: {} };
+  return { config, requests, stop: () => server.stop(true) };
+}
+
+/** What a request carried besides the system prompt. */
+const conversation = (body: SentBody | undefined) => (body?.messages ?? []).filter((m) => m.role !== "system");
+const toolResults = (body: SentBody | undefined) => conversation(body).filter((m) => m.role === "tool");
+
+async function until(check: () => boolean, ms = 10_000): Promise<void> {
+  for (const end = Date.now() + ms; !check(); await Bun.sleep(10)) {
+    if (Date.now() > end) throw new Error("condition not reached");
+  }
+}
+
+describe("an interrupted turn keeps what its tools did", () => {
+  // The model used to get only "[Erro: ...]": it redid edits and commands it did not know about.
+  test("a provider error after a tool step keeps that step for the next turn", async () => {
+    const target = join(tmp, `passo-${Date.now()}.txt`);
+    let n = 0;
+    const provider = fakeProvider(() => {
+      n++;
+      if (n === 1) return { tools: [{ name: "write_file", args: { path: target, content: "conteudo" } }] };
+      if (n === 2) return { status: 400, message: "falha do provedor" };
+      return { text: "ok" };
+    });
+    try {
+      const session = new AgentSession(provider.config);
+      await session.send("crie o arquivo");
+      expect(await readFile(target, "utf8")).toBe("conteudo");
+      await session.send("continue");
+      const sent = conversation(provider.requests[2]);
+      expect(sent.map((m) => m.role)).toEqual(["user", "assistant", "tool", "assistant", "user"]);
+      expect(sent[1]!.tool_calls![0]!.function.name).toBe("write_file");
+      expect(sent[3]!.content).toContain("[Erro:");
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("cancelling in the middle of a step keeps what ran and answers the calls that did not", async () => {
+    const target = join(tmp, `nao-roda-${Date.now()}.txt`);
+    let n = 0;
+    const provider = fakeProvider(() =>
+      ++n === 1
+        ? {
+            tools: [
+              { name: "execute_command", args: { command: isWin ? "Start-Sleep -Seconds 30" : "sleep 30" } },
+              { name: "write_file", args: { path: target, content: "x" } },
+            ],
+          }
+        : { text: "ok" }
+    );
+    try {
+      const session = new AgentSession(provider.config);
+      const turn = session.send("rode");
+      await until(() => session.getState().status.includes("execute_command"));
+      session.cancel();
+      await turn;
+      expect(existsSync(target)).toBe(false);
+      await session.send("e agora?");
+      const sent = conversation(provider.requests[1]);
+      expect(sent.map((m) => m.role)).toEqual(["user", "assistant", "tool", "tool", "assistant", "user"]);
+      expect(sent[3]!.content).toBe(NOT_RUN_AFTER_CANCEL);
+      expect(sent[4]!.content).toContain("interrompido pelo usuário");
+    } finally {
+      provider.stop();
+    }
+  }, 30_000);
+});
+
+describe("tool results are bounded wherever they come from", () => {
+  // MCP servers, background task status and subagents skipped processToolOutput: one big
+  // result made the compaction cut the user's request and every other message.
+  test("a 3 MB result reaches the model truncated, with the full text saved", async () => {
+    let n = 0;
+    const provider = fakeProvider(() => (++n === 1 ? { tools: [{ name: "mcp_x", args: {} }] } : { text: "ok" }));
+    try {
+      const events: { type: string; result?: string }[] = [];
+      for await (const ev of streamChat({
+        config: provider.config,
+        messages: [{ role: "user", content: "oi" }],
+        tools: [],
+        reasoning: "none",
+        executeTool: async () => ({ result: "x".repeat(3_000_000), isError: false }),
+      })) {
+        events.push(ev as (typeof events)[number]);
+      }
+      const result = events.find((e) => e.type === "tool_result")!.result!;
+      expect(result).toContain("SAÍDA GRANDE TRUNCADA");
+      expect(result.length).toBeLessThan(40_000);
+      expect(toolResults(provider.requests[1])[0]!.content!.length).toBeLessThan(40_000);
+    } finally {
+      provider.stop();
+    }
+  });
+});
+
+describe("subagents", () => {
+  const isSubagent = (body: SentBody) => String(body.messages[0]?.content ?? "").startsWith("# Papel");
+
+  test("cannot replace the user's checklist nor run tools they were not offered", async () => {
+    const provider = fakeProvider((body) => {
+      const done = toolResults(body).length;
+      if (isSubagent(body)) {
+        return done === 0
+          ? {
+              tools: [
+                { name: "todowrite", args: { todos: [{ content: "do subagente", status: "pending", priority: "low" }] } },
+                { name: "run_task", args: { description: "outro", prompt: "recursão" } },
+              ],
+            }
+          : { text: "pesquisa pronta" };
+      }
+      if (done === 0) return { tools: [{ name: "todowrite", args: { todos: [{ content: "do usuário", status: "pending", priority: "high" }] } }] };
+      if (done === 1) return { tools: [{ name: "run_task", args: { description: "pesquisa", prompt: "investigue", role: "research" } }] };
+      return { text: "fim" };
+    });
+    const session = new AgentSession(provider.config);
+    try {
+      await session.start();
+      await session.send("planeje e pesquise");
+      expect(session.getState().todos.map((t) => t.content)).toEqual(["do usuário"]);
+      const answered = provider.requests.find((b) => isSubagent(b) && toolResults(b).length > 0);
+      expect(toolResults(answered).map((m) => m.content)).toEqual([
+        "Ferramenta todowrite não disponível no subagente",
+        "Ferramenta run_task não disponível no subagente",
+      ]);
+    } finally {
+      await session.close();
+      provider.stop();
+    }
+  });
+});
+
+describe("long searches and cancel", () => {
+  test("grep, search, find_symbol and repo_map stop when the turn is cancelled", async () => {
+    const dir = join(tmp, `busca-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    for (let i = 0; i < 30; i++) await writeFile(join(dir, `f${i}.ts`), `export function alvo${i}() {}\n`);
+    const signal = AbortSignal.abort();
+    const calls: [string, Record<string, unknown>][] = [
+      ["grep_content", { path: dir, pattern: "alvo" }],
+      ["search_files", { path: dir, pattern: "**/*.ts" }],
+      ["find_symbol", { symbolName: "alvo" }],
+      ["repo_map", {}],
+    ];
+    for (const [name, args] of calls) {
+      const res = await runBuiltin(name, args, { signal });
+      expect(res).toMatchObject({ isError: true });
+      expect(res.result).toContain("cancelada");
+    }
+  });
+
+  test("find_symbol refuses an empty name, which matched every symbol", async () => {
+    expect((await runBuiltin("find_symbol", { symbolName: "  " })).isError).toBe(true);
+  });
+
+  test("search_files skips .ssh and .aws even with includeHidden", async () => {
+    const dir = join(tmp, `ocultos-${Date.now()}`);
+    await mkdir(join(dir, ".ssh"), { recursive: true });
+    await mkdir(join(dir, ".config"), { recursive: true });
+    await writeFile(join(dir, ".ssh", "id_rsa"), "segredo");
+    await writeFile(join(dir, ".config", "app.ini"), "ok");
+    const res = await runBuiltin("search_files", { path: dir, pattern: "**/*", includeHidden: true });
+    expect(res.result).toContain("app.ini");
+    expect(res.result).not.toContain("id_rsa");
+  });
+});
+
+describe("hooks", () => {
+  const config: AppConfig = { baseURL: "http://127.0.0.1:9/v1", apiKey: "k", model: "m", reasoning: "none", mcpServers: {} };
+
+  // Any command the agent ran in a cloned repository (even `git status`) ran the repo's hook.
+  test("a hooks.json inside a cloned repository never runs", async () => {
+    const repo = join(tmp, `repo-${Date.now()}`);
+    const marker = join(repo, "EXECUTOU");
+    await mkdir(join(repo, ".siliconflower"), { recursive: true });
+    const touch = isWin ? `New-Item -ItemType File -Path '${marker}' -Force | Out-Null` : `touch '${marker}'`;
+    await writeFile(join(repo, ".siliconflower", "hooks.json"), JSON.stringify({ onCommand: touch, preTool: touch }));
+    const res = await runBuiltin("execute_command", { command: "echo ok", cwd: repo }, { config });
+    expect(res.result).toContain("ok");
+    expect(existsSync(marker)).toBe(false);
+  }, 30_000);
+
+  // The whole content went to SILICONFLOWER_TOOL_ARGS: E2BIG on Linux at 128 KB, sooner on Windows.
+  test("still run when the tool's arguments are too big for an environment variable", async () => {
+    const path = join(tmp, `grande-${Date.now()}.txt`);
+    const res = await runBuiltin(
+      "write_file",
+      { path, content: "x".repeat(200_000) },
+      { config: { ...config, hooks: { onEdit: "echo formatado" } }, mode: "programação" }
+    );
+    expect(res.result).toContain("formatado");
+    expect(res.result).not.toContain("falhou");
+  }, 30_000);
+});
+
+describe("background task list", () => {
+  test("shows only the start of each output, so one big task does not hide the others", async () => {
+    const id = startBackgroundCommand(isWin ? "'x' * 50000" : "head -c 50000 /dev/zero | tr '\\0' 'x'", process.cwd(), 30_000);
+    await until(() => getBackgroundTask(id)?.status !== "running");
+    const list = await runBuiltin("manage_background_task", { action: "list" });
+    expect(list.result).toContain(id);
+    expect(list.result).toContain("action='status'");
+    expect(list.result.length).toBeLessThan(20_000);
+    const status = await runBuiltin("manage_background_task", { action: "status", taskId: id });
+    expect(status.result.length).toBeGreaterThan(50_000);
   }, 30_000);
 });

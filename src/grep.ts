@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { globToRegex } from "./glob-util.js";
-import { IGNORED_SOURCE_DIRS } from "./fs-util.js";
+import { IGNORED_SOURCE_DIRS, isPathBlocked } from "./fs-util.js";
 
 export const GREP_MAX_MATCHES = 200;
 
@@ -10,6 +10,8 @@ interface GrepOptions {
   pattern: string;
   includePattern?: string;
   maxMatches?: number;
+  /** Stops the walk: a search from a big folder can take minutes. */
+  signal?: AbortSignal;
 }
 
 interface GrepMatch {
@@ -28,7 +30,7 @@ function matchesGlob(relPath: string, filename: string, pattern?: string): boole
 }
 
 export async function searchContent(opts: GrepOptions): Promise<GrepMatch[]> {
-  const { basePath, pattern, includePattern, maxMatches = GREP_MAX_MATCHES } = opts;
+  const { basePath, pattern, includePattern, maxMatches = GREP_MAX_MATCHES, signal } = opts;
   let regex: RegExp;
   try {
     regex = new RegExp(pattern, "i");
@@ -40,7 +42,7 @@ export async function searchContent(opts: GrepOptions): Promise<GrepMatch[]> {
   const root = resolve(basePath);
 
   async function walk(dir: string) {
-    if (matches.length >= maxMatches) return;
+    if (matches.length >= maxMatches || signal?.aborted) return;
     let entries;
     try {
       entries = await readdir(dir, { withFileTypes: true });
@@ -49,11 +51,11 @@ export async function searchContent(opts: GrepOptions): Promise<GrepMatch[]> {
     }
 
     for (const entry of entries) {
-      if (matches.length >= maxMatches) break;
+      if (matches.length >= maxMatches || signal?.aborted) break;
       const fullPath = join(dir, entry.name);
 
       if (entry.isDirectory()) {
-        if (!IGNORED_SOURCE_DIRS.has(entry.name) && !entry.name.startsWith(".")) {
+        if (!IGNORED_SOURCE_DIRS.has(entry.name) && !entry.name.startsWith(".") && !isPathBlocked(fullPath)) {
           await walk(fullPath);
         }
       } else if (entry.isFile()) {

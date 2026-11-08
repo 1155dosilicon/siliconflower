@@ -3,7 +3,7 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { resolve, isAbsolute, dirname, basename, parse, relative } from "node:path";
 import { homedir } from "node:os";
-import { ensureDir } from "./fs-util.js";
+import { ensureDir, isPathBlocked } from "./fs-util.js";
 import { runShell, describeFailure } from "./shell.js";
 import { search } from "./glob-util.js";
 import { GREP_MAX_MATCHES, searchContent } from "./grep.js";
@@ -18,7 +18,7 @@ import { saveMemory, recallMemories, forgetMemory } from "./services/memory.js";
 import { loadMedia } from "./services/media.js";
 import { isXiaomiMimoEndpoint } from "./reasoning.js";
 import { enterWorktree, exitWorktree, listWorktrees } from "./services/worktree.js";
-import { runHook, loadHooksConfig } from "./core/hooks.js";
+import { runHook, loadHooksConfig, ignoredRepoHooksFile, workspaceHooksFile } from "./core/hooks.js";
 import { processToolOutput } from "./context.js";
 import { tailLogs } from "./logger.js";
 import { getShellLabel, isWindows } from "./platform.js";
@@ -32,6 +32,7 @@ const CANCELLABLE_BUILTINS = new Set(["execute_command", "web_fetch", "web_searc
 // still cancelled through the parent abort signal (the interface's cancel).
 
 const MAX_HOOK_OUTPUT_CHARS = 8000;
+const LIST_RESULT_PREVIEW_CHARS = 300;
 
 export interface ToolContext {
   config?: AppConfig;
@@ -49,6 +50,11 @@ export interface BuiltinTool {
   run: (args: Record<string, unknown>, ctx?: ToolContext) => Promise<ToolResult>;
 }
 
+/** Result of a tool stopped by the turn's cancel: the turn is ending, nothing more to say. */
+function cancelled(what: string): ToolResult {
+  return { result: `${what} cancelada pelo usuário.`, isError: true };
+}
+
 /** Tools that group several actions have optional fields in the schema: each action checks its own. */
 function missingFields(args: Record<string, unknown>, fields: string[]): string {
   return fields.filter((field) => args[field] === undefined || args[field] === null || args[field] === "").join(", ");
@@ -56,25 +62,6 @@ function missingFields(args: Record<string, unknown>, fields: string[]): string 
 
 function toAbs(p: string): string {
   return isAbsolute(p) ? resolve(p) : resolve(process.cwd(), p);
-}
-
-const BLOCKED_PATHS = [
-  "c:\\windows\\system32",
-  "c:\\windows\\syswow64",
-  "/etc",
-  "/root",
-  "/boot",
-];
-
-function isPathBlocked(p: string): boolean {
-  const normalized = p.toLowerCase().replace(/\\/g, "/");
-  for (const blocked of BLOCKED_PATHS) {
-    const normalizedBlocked = blocked.toLowerCase().replace(/\\/g, "/").replace(/\/$/, "");
-    if (normalized === normalizedBlocked || normalized.startsWith(`${normalizedBlocked}/`)) return true;
-  }
-  if (normalized.includes("/.ssh/") || normalized.endsWith("/.ssh")) return true;
-  if (normalized.includes("/.aws/") || normalized.endsWith("/.aws")) return true;
-  return false;
 }
 
 async function isPathBlockedSafe(p: string): Promise<boolean> {
@@ -193,14 +180,15 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       },
       required: ["pattern"],
     },
-    run: async (a) => {
+    run: async (a, ctx) => {
       const basePath = toAbs(String(a.path ?? "."));
       const pattern = String(a.pattern);
       const include = a.include ? String(a.include) : undefined;
 
       if (await isPathBlockedSafe(basePath)) return { result: `Acesso bloqueado: ${basePath}`, isError: true };
       try {
-        const matches = await searchContent({ basePath, pattern, includePattern: include });
+        const matches = await searchContent({ basePath, pattern, includePattern: include, signal: ctx?.signal });
+        if (ctx?.signal?.aborted) return cancelled("Busca");
         if (matches.length === 0) {
           return { result: "Nenhuma ocorrência encontrada.", isError: false };
         }
@@ -460,7 +448,14 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       if (action === "list") {
         const tasks = listBackgroundTasks();
         if (tasks.length === 0) return { result: "Nenhuma tarefa em background registrada.", isError: false };
-        return { result: JSON.stringify(tasks, null, 2), isError: false };
+        // Only the start of each output: one task with megabytes would hide all the others.
+        const summary = tasks.map((task) => ({
+          ...task,
+          ...(task.result && task.result.length > LIST_RESULT_PREVIEW_CHARS
+            ? { result: `${task.result.slice(0, LIST_RESULT_PREVIEW_CHARS)}... [saída completa com action='status']` }
+            : {}),
+        }));
+        return { result: JSON.stringify(summary, null, 2), isError: false };
       }
 
       if (action === "status") {
@@ -490,10 +485,11 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
         maxFiles: { type: "number", description: "Limite máximo de arquivos no mapa (padrão: 50)" },
       },
     },
-    run: async (a) => {
+    run: async (a, ctx) => {
       const focusPath = a.focusPath ? String(a.focusPath) : undefined;
       const maxFiles = a.maxFiles ? Number(a.maxFiles) : 50;
-      const res = await generateRepoMap(process.cwd(), { focusPath, maxFiles });
+      const res = await generateRepoMap(process.cwd(), { focusPath, maxFiles, signal: ctx?.signal });
+      if (ctx?.signal?.aborted) return cancelled("Geração do mapa");
       return { result: res.mapText, isError: false };
     },
   },
@@ -507,9 +503,12 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       },
       required: ["symbolName"],
     },
-    run: async (a) => {
-      const name = String(a.symbolName);
-      const matches = await findSymbolInRepo(name, process.cwd());
+    run: async (a, ctx) => {
+      const name = typeof a.symbolName === "string" ? a.symbolName.trim() : "";
+      // An empty name matches every symbol of the repository.
+      if (!name) return { result: "find_symbol exige symbolName com pelo menos um caractere.", isError: true };
+      const matches = await findSymbolInRepo(name, process.cwd(), ctx?.signal);
+      if (ctx?.signal?.aborted) return cancelled("Busca de símbolo");
       if (matches.length === 0) {
         return { result: `Nenhum símbolo encontrado para '${name}'.`, isError: false };
       }
@@ -789,12 +788,13 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       },
       required: ["path", "pattern"],
     },
-    run: async (a) => {
+    run: async (a, ctx) => {
       const path = toAbs(String(a.path));
       const includeHidden = Boolean(a.includeHidden);
       if (await isPathBlockedSafe(path)) return { result: `Acesso bloqueado: ${path}`, isError: true };
       try {
-        const matches = await search(path, String(a.pattern), includeHidden);
+        const matches = await search(path, String(a.pattern), includeHidden, ctx?.signal);
+        if (ctx?.signal?.aborted) return cancelled("Busca");
         if (!matches.length) return { result: "(nenhum arquivo encontrado)", isError: false };
         const shown = matches.slice(0, 200).join("\n");
         const note = matches.length > 200
@@ -972,10 +972,14 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
     },
     run: async (_, ctx) => {
       const cfg = ctx?.config?.hooks || (await loadHooksConfig());
+      const ignored = await ignoredRepoHooksFile();
+      const note = ignored
+        ? `\n\nAviso: ${ignored} fica dentro do repositório e não roda (um projeto clonado poderia executar comandos assim). Para usar esses hooks, mova o arquivo para ${workspaceHooksFile()}.`
+        : "";
       if (!cfg || Object.keys(cfg).length === 0) {
-        return { result: "Nenhum hook configurado em ~/.siliconflower/workspaces/<workspace-id>/hooks.json ou ~/.siliconflower/hooks.json.", isError: false };
+        return { result: `Nenhum hook configurado em ~/.siliconflower/workspaces/<workspace-id>/hooks.json ou ~/.siliconflower/hooks.json.${note}`, isError: false };
       }
-      return { result: JSON.stringify(cfg, null, 2), isError: false };
+      return { result: JSON.stringify(cfg, null, 2) + note, isError: false };
     },
   },
   {
@@ -1002,9 +1006,11 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       const workDir = a.cwd ? toAbs(String(a.cwd)) : process.cwd();
 
       // onCommand: inline config.json value first; otherwise runHook falls back to hooks.json
-      // (workspace -> legacy project -> global).
+      // (workspace -> global; never one inside the repository, see core/hooks.ts).
       const inlineHooks = ctx?.config?.hooks?.onCommand?.trim() ? ctx.config.hooks : undefined;
-      await runHook("onCommand", inlineHooks, { command: cmd, cwd: workDir });
+      await runHook("onCommand", inlineHooks, { command: cmd, cwd: workDir }, ctx?.signal);
+      // Cancelled while the hook ran: a background command would otherwise still start.
+      if (ctx?.signal?.aborted) return cancelled("Execução do comando");
 
       if (a.runInBackground) {
         const taskId = startBackgroundCommand(cmd, workDir, a.timeout ? Number(a.timeout) : 300000);
@@ -1064,10 +1070,14 @@ export async function runBuiltin(
       : undefined;
   const hookCtx = { toolName: name, toolArgs: args, cwd: process.cwd(), filePath };
   const hooksEnabled = Boolean(ctx?.config?.hooks && ctx.mode !== "plano");
+  // Hooks get the turn's signal: cancelling stops a hook that is still running.
+  const turnSignal = ctx?.signal;
 
   // Pre-tool hook
   if (hooksEnabled && ctx?.config?.hooks) {
-    await runHook("preTool", ctx.config.hooks, hookCtx);
+    await runHook("preTool", ctx.config.hooks, hookCtx, turnSignal);
+    // Cancelled during the hook: the tool must not run after it (a write would still happen).
+    if (turnSignal?.aborted) return cancelled(`Execução de ${name}`);
   }
 
   const rawTimeout = Number(args?.timeout);
@@ -1098,7 +1108,7 @@ export async function runBuiltin(
     // On-edit and Post-tool hooks
     if (!timedOut && hooksEnabled && ctx?.config?.hooks) {
       if (!res.isError && ["edit_file", "write_file", "apply_patch", "move_path", "delete_path"].includes(name)) {
-        const hook = await runHook("onEdit", ctx.config.hooks, hookCtx);
+        const hook = await runHook("onEdit", ctx.config.hooks, hookCtx, turnSignal);
         // The edit itself worked, so isError stays false; the model reads what the check found.
         if (hook.error || hook.output) {
           const title = hook.error ? `Hook onEdit falhou (${hook.error})` : "Hook onEdit";
@@ -1106,7 +1116,7 @@ export async function runBuiltin(
           res = { ...res, result: `${res.result}\n\n--- ${title} ---\n${output}`.trimEnd() };
         }
       }
-      await runHook("postTool", ctx.config.hooks, hookCtx);
+      await runHook("postTool", ctx.config.hooks, hookCtx, turnSignal);
     }
 
     return res;

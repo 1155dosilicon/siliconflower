@@ -143,10 +143,7 @@ export class McpManager {
         undefined,
         { signal, timeout: MCP_CALL_TIMEOUT_MS }
       );
-      const content = (res.content as unknown[]) ?? [];
-      const text = content
-        .map((c) => (c && typeof c === "object" && "text" in c ? String((c as { text: unknown }).text) : JSON.stringify(c)))
-        .join("\n");
+      const text = mcpContentText((res.content as unknown[]) ?? []);
       // MCP servers report tool failures in-band via `isError`, not by rejecting the call.
       return { result: text || "(empty content)", isError: res.isError === true };
     }
@@ -169,6 +166,31 @@ export class McpManager {
     );
     this.servers.clear();
   }
+}
+
+const MEDIA_NAMES: Record<string, string> = { image: "imagem", audio: "áudio" };
+
+/**
+ * The text the model gets from a tool's content blocks. Images and audio arrive in Base64:
+ * as text they are only noise that fills the context (a screenshot is megabytes).
+ */
+export function mcpContentText(content: unknown[]): string {
+  return content
+    .map((c) => {
+      if (!c || typeof c !== "object") return String(c);
+      const block = c as { type?: unknown; text?: unknown; data?: unknown; mimeType?: unknown; resource?: { uri?: unknown; text?: unknown; mimeType?: unknown } };
+      if ("text" in block) return String(block.text);
+      if (block.type === "resource" && block.resource) {
+        if (typeof block.resource.text === "string") return block.resource.text;
+        return `[recurso ${String(block.resource.uri ?? "")} omitido: conteúdo binário (${String(block.resource.mimeType ?? "tipo desconhecido")})]`;
+      }
+      if (typeof block.data === "string") {
+        const kind = MEDIA_NAMES[String(block.type)] ?? String(block.type ?? "conteúdo");
+        return `[${kind} omitido(a) (${String(block.mimeType ?? "tipo desconhecido")}, ${block.data.length} caracteres em Base64): o modelo não recebe esse conteúdo]`;
+      }
+      return JSON.stringify(c);
+    })
+    .join("\n");
 }
 
 export function qualifyMcpToolName(server: string, tool: string): string {

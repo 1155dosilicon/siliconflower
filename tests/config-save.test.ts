@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { chmod, lstat, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { configFile, loadStoredConfig, saveConfig } from "../src/config.js";
+import { ConfigFileError, configFile, loadConfig, loadStoredConfig, saveConfig } from "../src/config.js";
 import type { AppConfig } from "../src/types.js";
 
 const config: AppConfig = { baseURL: "https://x/v1", apiKey: "chave", model: "m", reasoning: "none" };
@@ -46,5 +46,45 @@ describe("saveConfig", () => {
       await rm(configFile(), { force: true });
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// A damaged file used to look like a missing one: the wizard or the settings form then saved a
+// new file over it, losing what only the file had (hooks, MCP servers).
+describe("a config.json that cannot be used", () => {
+  async function withFile(text: string, check: () => Promise<void>) {
+    await mkdir(dirname(configFile()), { recursive: true });
+    await writeFile(configFile(), text, "utf8");
+    try {
+      await check();
+    } finally {
+      await rm(configFile(), { force: true });
+    }
+  }
+
+  test("is an error, not a missing file, and is left untouched", async () => {
+    const broken = '{ "apiKey": "k", "hooks": { "onEdit": "npm run lint" }, }';
+    await withFile(broken, async () => {
+      await expect(loadStoredConfig()).rejects.toBeInstanceOf(ConfigFileError);
+      await expect(loadConfig()).rejects.toThrow("não é um JSON válido");
+      expect(await readFile(configFile(), "utf8")).toBe(broken);
+    });
+    await withFile("[]", async () => {
+      await expect(loadStoredConfig()).rejects.toBeInstanceOf(ConfigFileError);
+    });
+  });
+
+  test("a missing file is still no config", async () => {
+    await rm(configFile(), { force: true });
+    expect(await loadStoredConfig()).toBeNull();
+  });
+
+  test("accepts the BOM of Windows editors and ignores fields of the wrong type", async () => {
+    const odd = { apiKey: "k", model: 5, mode: 3, system: ["x"], hooks: { onEdit: "lint", postTool: 1 }, mcpServers: [] };
+    await withFile(`\uFEFF${JSON.stringify(odd)}`, async () => {
+      const cfg = await loadStoredConfig();
+      expect(cfg).toMatchObject({ apiKey: "k", model: "", mode: "programação", hooks: { onEdit: "lint" }, mcpServers: {} });
+      expect(cfg?.system).toBeUndefined();
+    });
   });
 });

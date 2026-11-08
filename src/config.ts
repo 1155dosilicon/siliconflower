@@ -50,15 +50,38 @@ export async function loadStoredConfig(): Promise<AppConfig | null> {
   return readConfigFile(false);
 }
 
-async function readConfigFile(applyEnv: boolean): Promise<AppConfig | null> {
-  try {
-    const raw = await readFile(CONFIG_FILE, "utf8");
-    await restrictConfigAccess();
-    const data = JSON.parse(raw);
-    return normalize(data, { applyEnv });
-  } catch {
-    return null;
+/**
+ * config.json exists but cannot be used. Never treated as a missing file: the wizard or the
+ * settings form would then save a new one over it, losing what only the file had (hooks, MCP).
+ */
+export class ConfigFileError extends Error {
+  constructor(detail: string) {
+    super(`O arquivo de configuração ${CONFIG_FILE} ${detail}. Ele não foi alterado: corrija-o num editor de texto, ou apague-o para configurar do zero.`);
+    this.name = "ConfigFileError";
   }
+}
+
+/** Null only when the file does not exist; throws ConfigFileError when it cannot be used. */
+async function readConfigFile(applyEnv: boolean): Promise<AppConfig | null> {
+  let raw: string;
+  try {
+    raw = await readFile(CONFIG_FILE, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new ConfigFileError(`não pôde ser lido (${e instanceof Error ? e.message : String(e)})`);
+  }
+  await restrictConfigAccess();
+  let data: unknown;
+  try {
+    // Notepad and other Windows editors may save UTF-8 with a BOM.
+    data = JSON.parse(raw.replace(/^\uFEFF/, ""));
+  } catch (e) {
+    throw new ConfigFileError(`não é um JSON válido (${e instanceof Error ? e.message : String(e)})`);
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new ConfigFileError("precisa conter um objeto JSON ({ ... })");
+  }
+  return normalize(data as Partial<AppConfig>, { applyEnv });
 }
 
 /** Fixes files saved by older versions. May fail on a read-only target (Nix store): that is fine. */
@@ -96,16 +119,24 @@ export async function saveConfig(config: AppConfig): Promise<void> {
   }
 }
 
+/** A hand-edited file may have any type in any field: a wrong one must not stop the app. */
+const text = (value: unknown): string => (typeof value === "string" ? value : "");
+
+function stringValues(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+}
+
 export function normalize(data: Partial<AppConfig>, opts: { applyEnv?: boolean } = {}): AppConfig {
   const applyEnv = opts.applyEnv ?? true;
   const env = (name: string) => (applyEnv ? process.env[name]?.trim() : undefined);
-  const apiKey = (env("SILICONFLOWER_API_KEY") || data.apiKey || "").trim();
-  const baseURL = (env("SILICONFLOWER_BASE_URL") || data.baseURL || "").trim();
-  const model = (env("SILICONFLOWER_MODEL") || data.model || "").trim();
+  const apiKey = (env("SILICONFLOWER_API_KEY") || text(data.apiKey)).trim();
+  const baseURL = (env("SILICONFLOWER_BASE_URL") || text(data.baseURL)).trim();
+  const model = (env("SILICONFLOWER_MODEL") || text(data.model)).trim();
   const reasoning = data.reasoning && REASONING_LEVELS.includes(data.reasoning) ? data.reasoning : "high";
-  
+
   let mode: Mode = "programação";
-  if (data.mode) {
+  if (typeof data.mode === "string") {
     const rawMode = data.mode.toLowerCase().trim();
     if (rawMode === "programacao" || rawMode === "programação" || rawMode === "prog") {
       mode = "programação";
@@ -123,9 +154,11 @@ export function normalize(data: Partial<AppConfig>, opts: { applyEnv?: boolean }
     model,
     reasoning,
     mode,
-    system: data.system?.trim() || undefined,
-    mcpServers: (data.mcpServers ?? {}) as Record<string, McpServerConfig>,
-    hooks: data.hooks ? { ...data.hooks } : undefined,
+    system: text(data.system).trim() || undefined,
+    mcpServers: (data.mcpServers && typeof data.mcpServers === "object" && !Array.isArray(data.mcpServers)
+      ? data.mcpServers
+      : {}) as Record<string, McpServerConfig>,
+    hooks: stringValues(data.hooks),
   };
 }
 

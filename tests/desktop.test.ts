@@ -1,10 +1,11 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { AgentStartError, childEnv, startAgentProcess } from "../desktop/src/agent-process.js";
 import { addRecent, folderKey, loadRecents, MAX_RECENTS, removeRecent } from "../desktop/src/projects.js";
-import { applyInput, maskKey, parseInput, parseMcp, testConnection, type SettingsInput } from "../desktop/src/settings.js";
+import { applyInput, isConfigured, maskKey, parseInput, parseMcp, readSettings, testConnection, writeSettings, type SettingsInput } from "../desktop/src/settings.js";
+import { configFile } from "../src/config.js";
 
 const ENTRY = resolve(import.meta.dir, "..", "src", "index.tsx");
 const AGENT_ARGS = ["run", ENTRY, "gui", "--managed"];
@@ -240,10 +241,44 @@ describe("agent process", () => {
     expect(await Promise.race([agent.exited.then(() => "exited"), Bun.sleep(5_000).then(() => "alive")])).toBe("exited");
   }, 20_000);
 
+  test("a damaged config is reported, and the file is left as it was", async () => {
+    const damaged = tempDir();
+    const broken = '{ "apiKey": "k", }';
+    writeFileSync(join(damaged, "config.json"), broken);
+    try {
+      const agent = startAgentProcess({ exe: process.execPath, args: AGENT_ARGS, cwd: project, env: envFor(damaged) });
+      const error = await agent.ready.catch((e) => e);
+      expect(error.failure).toBe("exited");
+      expect(error.detail).toContain("não é um JSON válido");
+      expect(readFileSync(join(damaged, "config.json"), "utf8")).toBe(broken);
+    } finally {
+      rmSync(damaged, { recursive: true, force: true });
+    }
+  }, 20_000);
+
   test("a missing executable is an error, not a crash", async () => {
     const agent = startAgentProcess({ exe: join(project, "nao-existe.exe"), cwd: project });
     const error = await agent.ready.catch((e) => e);
     expect(error.failure).toBe("spawn_failed");
     await agent.stop();
+  });
+});
+
+describe("settings form with a damaged config.json", () => {
+  // The form used to open empty and saving replaced the file: hooks and MCP servers were lost.
+  test("shows the problem and never saves over the file", async () => {
+    const broken = '{ "baseURL": "https://a.example/v1", "apiKey": "chave-salva-muito-longa", "model": "m", "hooks": { "onEdit": "lint" }, }';
+    mkdirSync(dirname(configFile()), { recursive: true });
+    writeFileSync(configFile(), broken);
+    try {
+      expect((await readSettings({})).fileError).toContain("não é um JSON válido");
+      expect(await isConfigured()).toBe(false);
+      const res = await writeSettings({ baseURL: "https://b.example/v1", apiKey: "outra-chave-1234567", model: "n", reasoning: "high", system: "", mcp: "" });
+      expect(res.ok).toBe(false);
+      expect(res.fileError).toContain("não foi alterado");
+      expect(readFileSync(configFile(), "utf8")).toBe(broken);
+    } finally {
+      rmSync(configFile(), { force: true });
+    }
   });
 });

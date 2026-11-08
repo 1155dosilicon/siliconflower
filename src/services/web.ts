@@ -16,67 +16,116 @@ const NAMED_ENTITIES: Record<string, string> = {
   hellip: "…",
 };
 
+/** Lowercases ASCII only, so every index still points to the same character of the original. */
+function asciiLower(text: string): string {
+  return text.replace(/[A-Z]+/g, (s) => s.toLowerCase());
+}
+
+/** Index of the next `<tag` (or `</tag`) that really is that tag, not `<tagname`; -1 if none. */
+function findTag(lower: string, tag: string, from: number): number {
+  for (let i = lower.indexOf(tag, from); i !== -1; i = lower.indexOf(tag, i + 1)) {
+    const next = lower[i + tag.length];
+    if (next === undefined || !/[a-z0-9-]/.test(next)) return i;
+  }
+  return -1;
+}
+
 /**
- * Converts raw HTML into clean readable Markdown/text.
+ * Replaces each `<tag ...>inner</tag>` with `render(inner, openingTag)` in one pass over the
+ * page; `undefined` keeps the element as it is. Lazy regexes such as `<li>(.*?)</li>` rescan
+ * the rest of the page for every element left unclosed, which is quadratic: a 0.3 MB page
+ * froze the whole agent for seconds, and web_fetch reads up to 3 MB. An unclosed element is
+ * left for the generic tag removal, as the regexes did.
+ */
+function replaceElements(html: string, tag: string, render: (inner: string, open: string) => string | undefined): string {
+  const lower = asciiLower(html);
+  let out = "";
+  let pos = 0;
+  while (pos < html.length) {
+    const start = findTag(lower, `<${tag}`, pos);
+    if (start === -1) break;
+    const openEnd = lower.indexOf(">", start);
+    if (openEnd === -1) break;
+    const close = findTag(lower, `</${tag}`, openEnd + 1);
+    if (close === -1) break; // no closing tag anywhere after: nothing else can match
+    const closeEnd = lower.indexOf(">", close);
+    const after = closeEnd === -1 ? html.length : closeEnd + 1;
+    out += html.slice(pos, start) + (render(html.slice(openEnd + 1, close), html.slice(start, openEnd + 1)) ?? html.slice(start, after));
+    pos = after;
+  }
+  return out + html.slice(pos);
+}
+
+function removeComments(html: string): string {
+  let out = "";
+  let pos = 0;
+  for (let start = html.indexOf("<!--"); start !== -1; start = html.indexOf("<!--", pos)) {
+    out += html.slice(pos, start);
+    const end = html.indexOf("-->", start + 4);
+    if (end === -1) return out; // an unclosed comment runs to the end, as in a browser
+    pos = end + 3;
+  }
+  return out + html.slice(pos);
+}
+
+// Inner tags are removed with [^<>]: with [^>]+, every "<" without a ">" after it made the
+// regex rescan the rest of the page (quadratic as well).
+const stripTags = (html: string, by = "") => html.replace(/<[^<>]+>/g, by);
+const MAX_LINK_TEXT_CHARS = 2_000;
+
+/**
+ * Converts raw HTML into clean readable Markdown/text, in time linear in the size of the page.
  */
 export function htmlToMarkdown(html: string): string {
   let text = html;
 
   // Remove scripts, styles, head, noscript, svg, canvas, iframe, and comments
-  text = text.replace(/<script\b[^<]*>([\s\S]*?)<\/script>/gi, "");
-  text = text.replace(/<style\b[^<]*>([\s\S]*?)<\/style>/gi, "");
-  text = text.replace(/<noscript\b[^<]*>([\s\S]*?)<\/noscript>/gi, "");
-  text = text.replace(/<svg\b[^<]*>([\s\S]*?)<\/svg>/gi, "");
-  text = text.replace(/<canvas\b[^<]*>([\s\S]*?)<\/canvas>/gi, "");
-  text = text.replace(/<iframe\b[^<]*>([\s\S]*?)<\/iframe>/gi, "");
-  text = text.replace(/<head\b[^<]*>([\s\S]*?)<\/head>/gi, "");
-  text = text.replace(/<!--[\s\S]*?-->/g, "");
+  for (const tag of ["script", "style", "noscript", "svg", "canvas", "iframe", "head"]) {
+    text = replaceElements(text, tag, () => "");
+  }
+  text = removeComments(text);
 
-  // Convert code blocks: <pre><code ...>...</code></pre>
-  text = text.replace(/<pre\b[^>]*><code\b[^>]*>([\s\S]*?)<\/code><\/pre>/gi, (_, code) => {
-    return `\n\`\`\`\n${code.replace(/<[^>]+>/g, "").trim()}\n\`\`\`\n`;
-  });
-  text = text.replace(/<pre\b[^>]*>([\s\S]*?)<\/pre>/gi, (_, code) => {
-    return `\n\`\`\`\n${code.replace(/<[^>]+>/g, "").trim()}\n\`\`\`\n`;
-  });
-  text = text.replace(/<code\b[^>]*>(.*?)<\/code>/gi, (_, code) => {
-    const clean = code.replace(/<[^>]+>/g, "").trim();
+  // Convert code blocks: <pre>, with or without <code> inside, then inline <code>
+  text = replaceElements(text, "pre", (code) => `\n\`\`\`\n${stripTags(code).trim()}\n\`\`\`\n`);
+  text = replaceElements(text, "code", (code) => {
+    if (code.includes("\n")) return undefined; // not inline code
+    const clean = stripTags(code).trim();
     return clean ? `\`${clean}\`` : "";
   });
 
-  // Convert headers
-  text = text.replace(/<h1\b[^>]*>(.*?)<\/h1>/gi, "\n\n# $1\n");
-  text = text.replace(/<h2\b[^>]*>(.*?)<\/h2>/gi, "\n\n## $1\n");
-  text = text.replace(/<h3\b[^>]*>(.*?)<\/h3>/gi, "\n\n### $1\n");
-  text = text.replace(/<h[4-6]\b[^>]*>(.*?)<\/h[4-6]>/gi, "\n\n#### $1\n");
+  // Convert headers (one line each, so links inside them still convert below)
+  for (let level = 1; level <= 6; level++) {
+    const marks = "#".repeat(Math.min(level, 4));
+    text = replaceElements(text, `h${level}`, (inner) => `\n\n${marks} ${inner.replace(/\s*\n\s*/g, " ").trim()}\n`);
+  }
 
   // Convert blockquotes
-  text = text.replace(/<blockquote\b[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, bq) => {
-    const clean = bq.replace(/<[^>]+>/g, " ").trim();
-    return `\n> ${clean}\n`;
-  });
+  text = replaceElements(text, "blockquote", (bq) => `\n> ${stripTags(bq, " ").trim()}\n`);
 
-  // Convert bold and italic
-  text = text.replace(/<(?:strong|b)\b[^>]*>(.*?)<\/(?:strong|b)>/gi, "**$1**");
-  text = text.replace(/<(?:em|i)\b[^>]*>(.*?)<\/(?:em|i)>/gi, "*$1*");
+  // Convert bold and italic: opening and closing tags separately, which is linear
+  text = text.replace(/<\/?(?:strong|b)\b[^<>]*>/gi, "**");
+  text = text.replace(/<\/?(?:em|i)\b[^<>]*>/gi, "*");
 
   // Convert paragraph and break tags
-  text = text.replace(/<p\b[^>]*>/gi, "\n\n");
+  text = text.replace(/<p\b[^<>]*>/gi, "\n\n");
   text = text.replace(/<br\s*\/?>/gi, "\n");
   text = text.replace(/<hr\s*\/?>/gi, "\n---\n");
 
   // Convert links: <a href="url">text</a> -> [text](url)
-  text = text.replace(/<a\b[^>]*href=["']([^"']+)["'][^>]*>(.*?)<\/a>/gi, (_, href, content) => {
-    const cleanContent = content.replace(/<[^>]+>/g, "").trim();
+  text = replaceElements(text, "a", (content, open) => {
+    const href = /\bhref\s*=\s*["']([^"']+)["']/i.exec(open)?.[1];
+    if (!href || content.length > MAX_LINK_TEXT_CHARS) return undefined;
+    const cleanContent = stripTags(content).replace(/\s+/g, " ").trim();
     if (!cleanContent || href.startsWith("javascript:") || href.startsWith("#")) return cleanContent;
     return `[${cleanContent}](${href})`;
   });
 
-  // Convert list items
-  text = text.replace(/<li\b[^>]*>(.*?)<\/li>/gi, "\n* $1");
+  // Convert list items (</li> is optional in HTML)
+  text = text.replace(/<li\b[^<>]*>/gi, "\n* ");
+  text = text.replace(/<\/li\s*>/gi, "");
 
   // Remove remaining HTML tags
-  text = text.replace(/<[^>]+>/g, " ");
+  text = stripTags(text, " ");
 
   // Decode common HTML entities
   // Single pass so "&amp;lt;" becomes the literal "&lt;" instead of being decoded twice.
@@ -159,10 +208,10 @@ export async function webFetch(
       const { text: rawText, truncated } = await readResponseTextLimited(response, rawLimit, controller.signal);
 
       let extractedTitle = "";
-      const matchTitle = /<title\b[^>]*>(.*?)<\/title>/gis.exec(rawText);
-      if (matchTitle && matchTitle[1]) {
-        extractedTitle = matchTitle[1].replace(/<[^>]+>/g, "").trim();
-      }
+      replaceElements(rawText.slice(0, 200_000), "title", (inner) => {
+        extractedTitle ||= stripTags(inner).trim();
+        return undefined;
+      });
 
       let markdown = isHtml ? htmlToMarkdown(rawText) : rawText;
 
@@ -181,7 +230,9 @@ export async function webFetch(
       options.signal?.removeEventListener("abort", onExternalAbort);
     }
   } catch (err: any) {
-    const errorMsg = err.name === "AbortError" ? `Tempo limite de ${timeoutMs}ms excedido` : err.message || String(err);
+    const errorMsg = err.name !== "AbortError"
+      ? err.message || String(err)
+      : options.signal?.aborted ? "cancelado pelo usuário" : `Tempo limite de ${timeoutMs}ms excedido`;
     await log("error", `[web_fetch erro] ${targetUrl}: ${errorMsg}`);
     return {
       url: targetUrl,
@@ -204,7 +255,7 @@ async function fetchPublicWithRedirects(
 ): Promise<Response> {
   let current = new URL(initialUrl);
   for (let redirect = 0; redirect <= 5; redirect++) {
-    await assertPublicUrl(current);
+    await assertPublicUrl(current, signal);
     const response = await fetch(current, { signal, headers, redirect: "manual" });
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     const location = response.headers.get("location");
@@ -215,7 +266,26 @@ async function fetchPublicWithRedirects(
   throw new Error("Limite de redirecionamentos excedido");
 }
 
-async function assertPublicUrl(url: URL): Promise<void> {
+/**
+ * dns.lookup takes no signal: without this race a slow resolver (offline machine, captive
+ * portal) outlived both the timeout of web_fetch and the cancel of the turn.
+ */
+export function lookupAll(
+  hostname: string,
+  signal: AbortSignal,
+  resolver: (hostname: string, options: { all: true }) => Promise<{ address: string }[]> = lookup
+): Promise<{ address: string }[]> {
+  if (signal.aborted) return Promise.reject(new DOMException("Abortado", "AbortError"));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(new DOMException("Abortado", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    resolver(hostname, { all: true })
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
+async function assertPublicUrl(url: URL, signal: AbortSignal): Promise<void> {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error(`Protocolo não permitido: ${url.protocol}`);
   }
@@ -223,7 +293,7 @@ async function assertPublicUrl(url: URL): Promise<void> {
   if (hostname === "localhost" || hostname.endsWith(".localhost")) {
     throw new Error("Acesso a localhost não é permitido");
   }
-  const addresses = isIP(hostname) ? [{ address: hostname }] : await lookup(hostname, { all: true });
+  const addresses = isIP(hostname) ? [{ address: hostname }] : await lookupAll(hostname, signal);
   if (addresses.length === 0 || addresses.some(({ address }) => isPrivateAddress(address))) {
     throw new Error("Acesso a endereço de rede privado ou reservado não é permitido");
   }

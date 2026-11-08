@@ -145,18 +145,21 @@ export class ConversationStore {
     };
   }
 
-  /** Saves run one at a time: two renames of the same file could otherwise cross. */
-  save(summary: ConversationSummary, body: ConversationBody): Promise<void> {
-    const write = async () => {
-      const target = this.file(summary.id);
+  /** Writes run one at a time: two renames of the same file could otherwise cross. */
+  private enqueue(task: () => Promise<void>): Promise<void> {
+    const run = this.queue.then(task, task);
+    this.queue = run.catch(() => {});
+    return run;
+  }
+
+  async save(summary: ConversationSummary, body: ConversationBody): Promise<void> {
+    const target = this.file(summary.id);
+    return this.enqueue(async () => {
       await mkdir(this.dir, { recursive: true });
       const temp = `${target}.${process.pid}.tmp`;
       await writeFile(temp, `${JSON.stringify(summary)}\n${JSON.stringify(body)}\n`, "utf8");
       await this.replace(temp, target);
-    };
-    const run = this.queue.then(write, write);
-    this.queue = run.catch(() => {});
-    return run;
+    });
   }
 
   /** An antivirus or indexer holding the old file makes the rename fail for a moment. */
@@ -175,7 +178,9 @@ export class ConversationStore {
     }
   }
 
+  /** Waits for the saves already queued: one finishing later would bring the file back. */
   async remove(id: string): Promise<void> {
-    await rm(this.file(id), { force: true });
+    const target = this.file(id);
+    return this.enqueue(() => rm(target, { force: true }));
   }
 }

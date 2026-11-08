@@ -10,6 +10,7 @@ import {
   sendSubagentMessage,
   subagentTools,
 } from "../src/services/subagent.js";
+import { killBackgroundTask } from "../src/services/background-tasks.js";
 import type { AppConfig } from "../src/types.js";
 
 describe("subagent service", () => {
@@ -64,6 +65,36 @@ describe("subagent service", () => {
       expect(names).toContain("execute_command");
       expect(names).not.toContain("run_task");
       expect(isSubagentToolAllowed(role, "write_file")).toBe(true);
+    }
+  });
+
+  // send_subagent_message started more agents (recursion); todowrite replaced the user's list.
+  test("no role gets the tools that belong to the main agent", () => {
+    for (const role of ["general", "research", "verification", "plan", "coder", "custom"] as const) {
+      const names = subagentTools(role).map((t) => t.name);
+      for (const name of ["run_task", "send_subagent_message", "todowrite"]) expect(names).not.toContain(name);
+    }
+  });
+
+  test("refuses a follow-up while the subagent is still working", async () => {
+    // A provider that never answers keeps the background subagent running.
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, idleTimeout: 0, fetch: () => new Promise<Response>(() => {}) });
+    try {
+      const started = await runSubagentTask({
+        config: { ...mockConfig, baseURL: `http://127.0.0.1:${server.port}/v1` },
+        description: "lento",
+        prompt: "x",
+        role: "research",
+        runInBackground: true,
+      });
+      const id = /ID do Subagente: (sub_[a-zA-Z0-9_]+)/.exec(started)![1]!;
+      const followUp = await sendSubagentMessage(id, "e então?", mockConfig);
+      expect(followUp.isError).toBe(true);
+      expect(followUp.result).toContain("ainda está trabalhando");
+      expect(getSubagentSession(id)?.history.map((m) => m.content)).toEqual(["x"]);
+      killBackgroundTask(id);
+    } finally {
+      server.stop(true);
     }
   });
 

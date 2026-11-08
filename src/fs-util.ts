@@ -23,6 +23,30 @@ export const IGNORED_SOURCE_DIRS = new Set([
   "__pycache__",
 ]);
 
+const BLOCKED_PATHS = [
+  "c:\\windows\\system32",
+  "c:\\windows\\syswow64",
+  "/etc",
+  "/root",
+  "/boot",
+];
+
+/**
+ * Sensitive folders the file, search and grep tools never touch: neither as the path they get
+ * nor when a recursive walk reaches them. Use isPathBlockedSafe (tools.ts) for a path from the
+ * model, which also resolves links.
+ */
+export function isPathBlocked(p: string): boolean {
+  const normalized = p.toLowerCase().replace(/\\/g, "/");
+  for (const blocked of BLOCKED_PATHS) {
+    const normalizedBlocked = blocked.toLowerCase().replace(/\\/g, "/").replace(/\/$/, "");
+    if (normalized === normalizedBlocked || normalized.startsWith(`${normalizedBlocked}/`)) return true;
+  }
+  if (normalized.includes("/.ssh/") || normalized.endsWith("/.ssh")) return true;
+  if (normalized.includes("/.aws/") || normalized.endsWith("/.aws")) return true;
+  return false;
+}
+
 /**
  * Returns the global siliconflower data and configuration directory (~/.siliconflower).
  */

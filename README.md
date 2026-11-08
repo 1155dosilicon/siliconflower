@@ -148,7 +148,7 @@ Tudo fica em `~/.siliconflower/` (ou em `SILICONFLOWER_DATA_DIR`, se definida):
 
 - **Variáveis de ambiente:** `SILICONFLOWER_API_KEY`, `SILICONFLOWER_BASE_URL` e `SILICONFLOWER_MODEL` substituem os campos do `config.json` sem serem gravadas nele.
 - **MCP:** cada servidor sobe por stdio. As ferramentas aparecem para o modelo como `mcp_<servidor>_<ferramenta>_<hash>`.
-- **Hooks:** `preTool`, `postTool`, `onEdit`, `onCommand`, `onSessionStart` e `onSessionEnd`. Quando cada um roda e as variáveis que recebe: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#hooks-corehooksts).
+- **Hooks:** `preTool`, `postTool`, `onEdit`, `onCommand`, `onSessionStart` e `onSessionEnd`, no `config.json` ou num `hooks.json` em `workspaces/<workspace-id>/` ou na raiz de `~/.siliconflower/`; um `hooks.json` dentro do repositório não roda. Quando cada um roda e as variáveis que recebe: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#hooks-corehooksts).
 - **Skills:** arquivos Markdown em `~/.siliconflower/skills/`, lidos pelo agente com `read_skill` quando relevantes.
 - **Projeto:** `siliconflower init` cria `SILICONFLOWER.md` na pasta atual. Sem esse arquivo (ou `AGENTS.md`) na pasta ou acima dela, a memória de projeto fica desligada.
 - **Xiaomi MiMo:** com `baseURL` em `xiaomimimo.com`, o raciocínio vira desligado/ligado (`none`/`high`), enviado como `thinking.type`.
@@ -187,6 +187,8 @@ O agente não tem sandbox: leia o [SECURITY.md](SECURITY.md) antes de dar acesso
 O log fica em `~/.siliconflower/logs/siliconflower.log` (`siliconflower logs --level error`), também para o app.
 
 - **HTTP 401:** confira a chave no `config.json` e em `SILICONFLOWER_API_KEY`.
+- **`config.json` com erro:** a CLI e o app mostram o problema e não mexem no arquivo, para não perder hooks e servidores MCP. Corrija-o num editor (no app, depois clique em **Recarregar o arquivo**) ou apague-o para configurar do zero.
+- **Hooks pararam depois de atualizar:** `<projeto>/.siliconflower/hooks.json` não roda mais, porque um repositório clonado poderia executar comandos assim. Mova o arquivo para `~/.siliconflower/workspaces/<workspace-id>/hooks.json`; `show_hooks` mostra o caminho exato.
 - **HTTP 404:** confira o endereço base (normalmente termina em `/v1`) e o nome exato do modelo.
 - **MCP não conecta:** a interface mostra o aviso e as ferramentas nativas continuam. `Executable not found in $PATH` no log quer dizer que o agente não acha o `command` (comum com `npx` do nvm no app aberto pelo menu): use o caminho completo, por exemplo `"command": "/home/você/.nvm/versions/node/<versão>/bin/node"` com o script do servidor em `args`, ou acerte o `PATH` (veja [App de desktop](#app-de-desktop)).
 - **Alias ou função do shell não funciona em `execute_command` (Linux/Unix):** os comandos rodam com `$SHELL -c`, sem carregar `.bashrc`/`.zshrc`. Use caminhos completos.

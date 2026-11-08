@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { rm, access } from "node:fs/promises";
-import { ensureDir, hidePathOnWindows, getWorkspaceId, getWorkspaceDataDir, getGlobalDataDir } from "../src/fs-util.js";
+import { ensureDir, hidePathOnWindows, getWorkspaceId, getWorkspaceDataDir, getGlobalDataDir, isPathBlocked } from "../src/fs-util.js";
 
 describe("fs-util", () => {
   test("getWorkspaceId generates consistent hash and slug", () => {
@@ -59,5 +59,14 @@ describe("fs-util", () => {
     await ensureDir(testDir);
     await expect(hidePathOnWindows(testDir)).resolves.toBeUndefined();
     await rm(testDir, { recursive: true, force: true });
+  });
+
+  test("isPathBlocked covers the sensitive folders and what is inside them", () => {
+    for (const path of ["/etc", "/etc/passwd", "/root/.bashrc", "/boot/grub", "/home/u/.ssh", "/home/u/.ssh/id_rsa", "/home/u/.aws/credentials", "C:\\Windows\\System32\\drivers", "c:/windows/syswow64"]) {
+      expect(isPathBlocked(path)).toBe(true);
+    }
+    for (const path of ["/etc2", "/home/u/projeto", "/home/u/.sshx", "C:\\Windows\\Temp"]) {
+      expect(isPathBlocked(path)).toBe(false);
+    }
   });
 });

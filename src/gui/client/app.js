@@ -2,6 +2,8 @@ import { parseMarkdown } from "/markdown.js";
 
 const $ = (id) => document.getElementById(id);
 const MAX_RECONNECT_ATTEMPTS = 20;
+// gui/server.ts closes the connection above this size (MAX_MESSAGE_BYTES), and the text was lost.
+const MAX_MESSAGE_BYTES = 1024 * 1024;
 const STICK_TO_BOTTOM_PX = 80;
 const REASONING_NAMES = { off: "desligado", on: "ligado", low: "baixo", med: "médio", high: "alto" };
 
@@ -14,6 +16,8 @@ let renderScheduled = false;
 let forceScroll = false;
 let questionShown = null;
 let workingFolder = "";
+/** A problem found here, before anything reached the server (e.g. a message too large). */
+let localError = null;
 const toolCards = new Map();
 
 /* --------------------------------- DOM helpers --------------------------------- */
@@ -332,8 +336,9 @@ function renderChrome() {
   $("stats").textContent = `${state.model} · ${state.toolCount} ferramentas · ${state.skillCount} skills · ${formatTokens(tokens)} tokens`;
 
   const error = $("error");
-  error.hidden = !state.error;
-  error.textContent = state.error ?? "";
+  const message = localError ?? state.error;
+  error.hidden = !message;
+  error.textContent = message ?? "";
 
   const stopping = state.streaming;
   const action = $("action");
@@ -391,8 +396,18 @@ function setComposerEnabled(enabled) {
 
 /* ---------------------------------- Connection ---------------------------------- */
 
+/** False when the message was not sent: the caller keeps what the user typed. */
 function sendToServer(message) {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+  if (socket?.readyState !== WebSocket.OPEN) return false;
+  const payload = JSON.stringify(message);
+  const bytes = new TextEncoder().encode(payload).length;
+  if (bytes > MAX_MESSAGE_BYTES) {
+    localError = `Mensagem grande demais (${(bytes / 1048576).toFixed(1)} MB; o limite é 1 MB). Salve o texto num arquivo e peça ao agente para lê-lo.`;
+    scheduleRender();
+    return false;
+  }
+  socket.send(payload);
+  return true;
 }
 
 function fillSelect(select, options) {
@@ -484,7 +499,8 @@ function submitComposer() {
   }
   const input = $("input");
   if (!input.value.trim() || socket?.readyState !== WebSocket.OPEN) return;
-  sendToServer({ type: "send", text: input.value });
+  if (!sendToServer({ type: "send", text: input.value })) return;
+  localError = null;
   input.value = "";
   fitInput();
   forceScroll = true;
@@ -499,7 +515,13 @@ $("composer-form").addEventListener("submit", (event) => {
   submitComposer();
 });
 
-$("input").addEventListener("input", fitInput);
+$("input").addEventListener("input", () => {
+  fitInput();
+  if (localError) {
+    localError = null;
+    scheduleRender();
+  }
+});
 $("input").addEventListener("keydown", (event) => {
   if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
   event.preventDefault();

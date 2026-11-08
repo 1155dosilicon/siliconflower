@@ -23,6 +23,9 @@ textarea { display: block; resize: vertical; }
 .settings > .help, details .help { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
 .settings > .field-error, details .field-error { margin: 4px 0 0; color: var(--danger); font-size: 12px; }
 .settings > .note { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
+.settings > .file-error { margin: 0 0 8px; border-color: var(--danger); overflow-wrap: anywhere; }
+.file-error p { margin: 0 0 8px; }
+.file-error button { padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); }
 
 details { margin-top: 16px; }
 summary { color: var(--muted); font-size: 13px; cursor: pointer; }

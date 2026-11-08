@@ -6,6 +6,10 @@ import { runShell, describeFailure } from "../shell.js";
 import { resolveWorkspaceRoot } from "../project.js";
 
 const HOOK_TIMEOUT_MS = 30_000;
+// Environment values are limited (128 KB each on Linux, 32,767 characters on Windows): above
+// that the hook does not even start. A write_file of a big file would pass it in TOOL_ARGS.
+const MAX_HOOK_ENV_CHARS = 16_000;
+const MAX_HOOK_ARG_CHARS = 2_000;
 
 export type HookEvent = "preTool" | "postTool" | "onEdit" | "onCommand" | "onSessionStart" | "onSessionEnd";
 
@@ -25,10 +29,6 @@ export interface HookResult {
   error?: string;
 }
 
-/**
- * Discovers and loads hook configurations from workspace (~/.siliconflower/workspaces/<workspace-id>/hooks.json),
- * legacy repo (.siliconflower/hooks.json), or global (~/.siliconflower/hooks.json).
- */
 async function readHooksFile(path: string): Promise<HookConfig | undefined> {
   try {
     await access(path);
@@ -47,51 +47,96 @@ async function readHooksFile(path: string): Promise<HookConfig | undefined> {
   }
 }
 
-export async function loadHooksConfig(cwd: string = process.cwd()): Promise<HookConfig | undefined> {
-  const workspaceHooksFile = join(getWorkspaceDataDir(cwd), "hooks.json");
-  const legacyHooksFile = join(resolveWorkspaceRoot(cwd), ".siliconflower", "hooks.json");
-  const globalHooksFile = join(getGlobalDataDir(), "hooks.json");
+const warnedRepoHooks = new Set<string>();
 
-  return (
-    (await readHooksFile(workspaceHooksFile)) ??
-    (await readHooksFile(legacyHooksFile)) ??
-    (await readHooksFile(globalHooksFile))
-  );
+/**
+ * A hooks.json inside the repository (`<root>/.siliconflower/hooks.json`, read by older
+ * versions) is never run: a cloned project could otherwise run its own commands as soon as
+ * the agent ran anything there. Returns its path when there is one, to tell the user.
+ */
+export async function ignoredRepoHooksFile(cwd: string = process.cwd()): Promise<string | undefined> {
+  const repoFile = join(resolveWorkspaceRoot(cwd), ".siliconflower", "hooks.json");
+  try {
+    await access(repoFile);
+  } catch {
+    return undefined;
+  }
+  if (!warnedRepoHooks.has(repoFile)) {
+    warnedRepoHooks.add(repoFile);
+    await log("warn", `hooks.json do repositorio ignorado: ${repoFile}. Para manter esses hooks, mova o arquivo para ${workspaceHooksFile(cwd)}`);
+  }
+  return repoFile;
+}
+
+export function workspaceHooksFile(cwd: string = process.cwd()): string {
+  return join(getWorkspaceDataDir(cwd), "hooks.json");
 }
 
 /**
- * Runs a configured hook shell command for a given event.
+ * Hooks from the user's data folder only: the workspace's
+ * (~/.siliconflower/workspaces/<workspace-id>/hooks.json), else the global one (~/.siliconflower/hooks.json).
+ */
+export async function loadHooksConfig(cwd: string = process.cwd()): Promise<HookConfig | undefined> {
+  await ignoredRepoHooksFile(cwd);
+  return (await readHooksFile(workspaceHooksFile(cwd))) ?? (await readHooksFile(join(getGlobalDataDir(), "hooks.json")));
+}
+
+/** The tool's arguments as JSON, short enough to fit in an environment variable. */
+export function hookToolArgs(args: Record<string, unknown>): string {
+  const full = JSON.stringify(args);
+  if (full.length <= MAX_HOOK_ENV_CHARS) return full;
+  const shortened = JSON.stringify(args, (_key, value: unknown) =>
+    typeof value === "string" && value.length > MAX_HOOK_ARG_CHARS
+      ? `${value.slice(0, MAX_HOOK_ARG_CHARS)}... [${value.length - MAX_HOOK_ARG_CHARS} caracteres omitidos]`
+      : value
+  );
+  if (shortened.length <= MAX_HOOK_ENV_CHARS) return shortened;
+  // Still too long (e.g. many apply_patch blocks): only the short top-level values.
+  const short = Object.entries(args).filter(([, v]) => v === null || (typeof v !== "object" && String(v).length <= MAX_HOOK_ARG_CHARS));
+  return JSON.stringify({ ...Object.fromEntries(short), _truncado: true });
+}
+
+function capEnv(value: string): string {
+  return value.length <= MAX_HOOK_ENV_CHARS
+    ? value
+    : `${value.slice(0, MAX_HOOK_ENV_CHARS)}... [${value.length - MAX_HOOK_ENV_CHARS} caracteres omitidos]`;
+}
+
+/**
+ * Runs a configured hook shell command for a given event. `signal` is the turn's: cancelling
+ * it stops the hook too.
  */
 export async function runHook(
   event: HookEvent,
   config?: HookConfig,
-  context: { toolName?: string; toolArgs?: Record<string, unknown>; command?: string; cwd?: string; filePath?: string } = {}
+  context: { toolName?: string; toolArgs?: Record<string, unknown>; command?: string; cwd?: string; filePath?: string } = {},
+  signal?: AbortSignal
 ): Promise<HookResult> {
   const effectiveCwd = context.cwd || process.cwd();
-  
+
   // If no explicit config provided, try loading from workspace/global
   const effectiveConfig = config || (await loadHooksConfig(effectiveCwd));
   if (!effectiveConfig) return { executed: false };
 
-  const command = effectiveConfig[event];
-  if (!command || !command.trim()) {
+  const command: unknown = effectiveConfig[event];
+  if (typeof command !== "string" || !command.trim()) {
     return { executed: false };
   }
 
   try {
     await log("info", `Executando hook [${event}]: ${command}`);
-    
+
     // Pass hook context as environment variables
     const env = {
       ...process.env,
       SILICONFLOWER_EVENT: event,
       SILICONFLOWER_TOOL_NAME: context.toolName || "",
-      SILICONFLOWER_TOOL_ARGS: context.toolArgs ? JSON.stringify(context.toolArgs) : "",
-      SILICONFLOWER_COMMAND: context.command || "",
+      SILICONFLOWER_TOOL_ARGS: context.toolArgs ? hookToolArgs(context.toolArgs) : "",
+      SILICONFLOWER_COMMAND: capEnv(context.command || ""),
       SILICONFLOWER_FILE_PATH: context.filePath || "",
     };
 
-    const res = await runShell(command, { cwd: effectiveCwd, env, timeout: HOOK_TIMEOUT_MS });
+    const res = await runShell(command, { cwd: effectiveCwd, env, timeout: HOOK_TIMEOUT_MS, signal });
     const output = (res.stdout + (res.stderr ? `\nStderr: ${res.stderr}` : "")).trim();
     const failure = describeFailure(res, HOOK_TIMEOUT_MS);
     if (failure) {

@@ -219,3 +219,84 @@ describe("session with saved conversations", () => {
     expect(readdirSync(dir)).toEqual([]);
   });
 });
+
+/**
+ * A store whose saves take a while to answer, like a big conversation or an antivirus holding
+ * the file. The write itself is queued at once, in call order, as in the real store.
+ */
+class SlowStore extends ConversationStore {
+  slow = false;
+  override save(summary: Parameters<ConversationStore["save"]>[0], body: ConversationBody): Promise<void> {
+    const written = super.save(summary, body);
+    return this.slow ? written.then(() => Bun.sleep(150)) : written;
+  }
+}
+
+describe("saving while the user switches conversations", () => {
+  // The id used to be set after the write: a conversation opened meanwhile took it, and its
+  // next turn was saved over the other conversation's file.
+  test("opening another conversation during a save does not make it overwrite the first", async () => {
+    const store = new SlowStore(tempDir());
+    const session = new AgentSession(CONFIG, {}, { store, stream: echoStream() });
+    await session.send("conversa A");
+    const idA = session.getState().conversationId!;
+    session.newConversation();
+    await session.send("conversa B");
+    const idB = session.getState().conversationId!;
+    await session.resumeConversation(idA);
+
+    store.slow = true;
+    const turn = session.send("mais uma em A");
+    await Bun.sleep(30); // the turn is over (the sidebar is enabled again), the save is not
+    expect(session.getState().streaming).toBe(false);
+    expect(await session.resumeConversation(idB)).toBe(true);
+    await turn;
+    store.slow = false;
+    expect(session.getState().conversationId).toBe(idB);
+
+    await session.send("mais uma em B");
+    expect((await store.load(idA)).messages.map((m) => m.content)).toContain("mais uma em A");
+    expect((await store.load(idA)).messages.map((m) => m.content)).not.toContain("mais uma em B");
+    expect((await store.load(idB)).messages.map((m) => m.content)).toContain("mais uma em B");
+  });
+
+  test("a new conversation started during a save gets its own file", async () => {
+    const store = new SlowStore(tempDir());
+    const session = new AgentSession(CONFIG, {}, { store, stream: echoStream() });
+    store.slow = true;
+    const turn = session.send("primeira");
+    await Bun.sleep(30);
+    session.newConversation();
+    await turn;
+    store.slow = false;
+    expect(session.getState().conversationId).toBeNull();
+    await session.send("outra");
+    expect(session.getState().conversations).toHaveLength(2);
+  });
+
+  test("deleting a conversation that is still being saved does not bring it back", async () => {
+    const dir = tempDir();
+    const store = new SlowStore(dir);
+    const session = new AgentSession(CONFIG, {}, { store, stream: echoStream() });
+    store.slow = true;
+    const turn = session.send("apague-me");
+    await Bun.sleep(30);
+    const deleted = session.getState().conversationId!;
+    await session.deleteConversation(deleted);
+    await turn;
+    store.slow = false;
+    expect(session.getState().conversationId).toBeNull();
+    await session.send("outra conversa");
+    expect(session.getState().conversationId).not.toBe(deleted);
+    expect(existsSync(join(dir, `${deleted}.jsonl`))).toBe(false);
+  });
+
+  test("a removal waits for the saves already queued for the same file", async () => {
+    const dir = tempDir();
+    const store = new ConversationStore(dir);
+    const saving = store.save(summary("a"), emptyBody());
+    const removing = store.remove("a");
+    await Promise.all([saving, removing]);
+    expect(existsSync(join(dir, "a.jsonl"))).toBe(false);
+  });
+});

@@ -1,6 +1,6 @@
 import { readdir, readFile } from "fs/promises";
 import { join, relative, extname, resolve, isAbsolute } from "path";
-import { IGNORED_SOURCE_DIRS } from "../fs-util.js";
+import { IGNORED_SOURCE_DIRS, isPathBlocked } from "../fs-util.js";
 
 export interface SymbolInfo {
   name: string;
@@ -132,16 +132,19 @@ export function extractSymbols(content: string, fileOrExt: string): SymbolInfo[]
 }
 
 /**
- * Recursively scans directory for source files.
+ * Recursively scans directory for source files. `signal` stops it: from a big folder (the home
+ * folder, for instance) it can take minutes.
  */
-async function scanDirectoryFiles(dir: string, baseDir: string, fileList: string[] = []): Promise<string[]> {
+async function scanDirectoryFiles(dir: string, fileList: string[] = [], signal?: AbortSignal): Promise<string[]> {
+  if (signal?.aborted) return fileList;
   try {
     const entries = await readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
+      if (signal?.aborted) break;
       if (IGNORED_SOURCE_DIRS.has(entry.name) || entry.name.startsWith(".")) continue;
       const fullPath = join(dir, entry.name);
       if (entry.isDirectory()) {
-        await scanDirectoryFiles(fullPath, baseDir, fileList);
+        if (!isPathBlocked(fullPath)) await scanDirectoryFiles(fullPath, fileList, signal);
       } else if (entry.isFile()) {
         const ext = extname(entry.name).toLowerCase();
         if (SUPPORTED_EXTS.has(ext)) {
@@ -160,7 +163,7 @@ async function scanDirectoryFiles(dir: string, baseDir: string, fileList: string
  */
 export async function generateRepoMap(
   rootDir: string = process.cwd(),
-  options: { maxFiles?: number; focusPath?: string } = {}
+  options: { maxFiles?: number; focusPath?: string; signal?: AbortSignal } = {}
 ): Promise<{ mapText: string; fileCount: number; symbolCount: number }> {
   const maxFilesRaw = Number(options.maxFiles);
   const maxFiles = Number.isFinite(maxFilesRaw) ? Math.min(500, Math.max(1, Math.floor(maxFilesRaw))) : 50;
@@ -171,14 +174,14 @@ export async function generateRepoMap(
     return { mapText: "Caminho de foco fora do repositório não é permitido.", fileCount: 0, symbolCount: 0 };
   }
 
-  const files = await scanDirectoryFiles(targetDir, rootDir);
+  const files = await scanDirectoryFiles(targetDir, [], options.signal);
 
   const resultMap: FileSymbolMap[] = [];
   let totalSymbols = 0;
 
   // maxFiles counts files that actually contribute symbols, not files merely scanned.
   for (const filePath of files) {
-    if (resultMap.length >= maxFiles) break;
+    if (resultMap.length >= maxFiles || options.signal?.aborted) break;
     try {
       const content = await readFile(filePath, "utf8");
       const ext = extname(filePath).toLowerCase();
@@ -217,14 +220,16 @@ export async function generateRepoMap(
  */
 export async function findSymbolInRepo(
   symbolName: string,
-  rootDir: string = process.cwd()
+  rootDir: string = process.cwd(),
+  signal?: AbortSignal
 ): Promise<FileSymbolMap[]> {
-  const files = await scanDirectoryFiles(rootDir, rootDir);
+  const files = await scanDirectoryFiles(rootDir, [], signal);
   const matches: FileSymbolMap[] = [];
 
   const lowerTarget = symbolName.toLowerCase();
 
   for (const filePath of files) {
+    if (signal?.aborted) break;
     try {
       const content = await readFile(filePath, "utf8");
       const ext = extname(filePath).toLowerCase();

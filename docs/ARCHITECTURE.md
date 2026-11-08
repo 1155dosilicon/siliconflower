@@ -4,7 +4,7 @@ Referência para quem vai mudar o código. Comandos, regras e mapa resumido est�
 
 ## Fluxo de uma mensagem
 
-1. **`index.tsx`** carrega a configuração efetiva (`config.json` + variáveis de ambiente), aplica as flags da CLI e inicia a GUI (`gui`, ou `gui --managed` no app de desktop). Se a configuração estiver incompleta, abre o assistente no terminal; no `--managed`, avisa o app com `config_required`. Sem subcomando, só mostra a ajuda.
+1. **`index.tsx`** carrega a configuração efetiva (`config.json` + variáveis de ambiente), aplica as flags da CLI e inicia a GUI (`gui`, ou `gui --managed` no app de desktop). Se a configuração estiver incompleta, abre o assistente no terminal; no `--managed`, avisa o app com `config_required`. Um `config.json` que existe mas não pode ser lido (JSON inválido, sem permissão) é um erro (`ConfigFileError`) e nunca é tratado como ausente: o assistente ou o formulário gravariam um arquivo novo por cima, perdendo hooks e MCP. Sem subcomando, só mostra a ajuda.
 2. **`AgentSession`** (`session.ts`), ao iniciar, carrega as skills e conecta os servidores MCP. Uma falha de MCP vai para o log e aparece como aviso na interface, sem bloquear as ferramentas nativas.
 3. **A cada mensagem**, monta o prompt de sistema (`modes.ts`):
    - identidade, foco do modo e regras comuns;
@@ -12,19 +12,21 @@ Referência para quem vai mudar o código. Comandos, regras e mapa resumido est�
    - prompt personalizado do usuário;
    - lista de skills e, por último, data, diretório atual e shell.
 4. **`llm.ts`** (`streamChat`) roda o loop:
-   - antes de **cada** requisição, recompacta o histórico (`compressHistory`: acima de 90 mil tokens estimados, descontados o prompt de sistema e os schemas, ou de 40 mensagens, reduz o conteúdo antigo e descarta turnos inteiros);
-   - faz o streaming e executa as chamadas de ferramenta em sequência;
+   - antes de **cada** requisição, recompacta o histórico (`compressHistory`: acima de 90 mil tokens estimados, descontados o prompt de sistema e os schemas, ou de 40 mensagens, reduz o conteúdo antigo e descarta turnos inteiros). Acima do orçamento, encurta primeiro os resultados de ferramenta, depois as mensagens do modelo e por último as do usuário, com o pedido atual no fim da fila; os argumentos das chamadas continuam um objeto JSON válido (`shrinkToolArguments`), e no Xiaomi MiMo o raciocínio das mensagens com chamadas fica, encurtado;
+   - faz o streaming e executa as chamadas de ferramenta em sequência; cada passo concluído (a mensagem com as chamadas, um resultado para cada uma e o anexo de mídia) sai como evento `step`;
    - repete até a resposta não ter mais ferramentas ou até `MAX_STEPS` (50). No limite, avisa o usuário.
-5. **O evento `done`** traz em `messages` o que o turno produziu: `assistant` com `toolCalls`, resultados `tool` e a resposta final. A sessão acrescenta isso ao histórico da API, separado das mensagens exibidas. Turnos cancelados ou com erro guardam só o texto visível.
+5. **O evento `done`** traz em `messages` o que o turno produziu: `assistant` com `toolCalls`, resultados `tool` e a resposta final. A sessão acrescenta isso ao histórico da API, separado das mensagens exibidas. Turnos cancelados ou com erro guardam os passos concluídos (eventos `step`) e, depois deles, o texto do passo interrompido com o motivo (`[Erro: ...]` ou `[interrompido pelo usuário]`): o modelo continua sabendo o que suas ferramentas já fizeram. Um passo cortado pelo cancelamento é fechado com o resultado `NOT_RUN_AFTER_CANCEL` para as chamadas que não rodaram. Chamadas de uma resposta ainda em recepção não entram, porque não rodaram.
 6. **`buildOpenAIMessages`** descarta resultados `tool` cuja chamada foi compactada, evitando HTTP 400 por mensagem órfã.
 
-Saídas de ferramenta acima de 32 mil caracteres são truncadas (início e fim). O conteúdo completo vai para `~/.siliconflower/outputs/` e o caminho aparece na resposta (`processToolOutput`).
+Saídas de ferramenta acima de 32 mil caracteres são truncadas (início e fim). O conteúdo completo vai para `~/.siliconflower/outputs/` e o caminho aparece na resposta (`processToolOutput`). O corte é feito em `llm.ts`, para todo resultado: ferramentas nativas, MCP e subagentes. Imagens e áudios devolvidos por MCP viram uma nota curta (`mcpContentText`), em vez de Base64 como texto.
 
 **Cancelamento**: `Esc` ou **Parar** na interface chama `AgentSession.cancel()`, que aborta o `AbortController` do turno. O SDK da OpenAI encerra o stream em silêncio ao abortar, então `llm.ts` confere o sinal depois do stream e antes de cada ferramenta: um turno cancelado nunca conta como concluído nem executa as chamadas já recebidas. O sinal chega:
 - à requisição HTTP;
 - aos comandos, que têm a árvore de processos encerrada;
 - aos subagentes e às ferramentas deles;
 - às chamadas MCP;
+- às buscas recursivas (`grep_content`, `search_files`, `repo_map`, `find_symbol`) e à consulta DNS do `web_fetch`;
+- aos hooks (uma ferramenta cancelada durante o `preTool` não roda);
 - a uma pergunta pendente de `ask_question`.
 
 ## Sessão e interfaces
@@ -41,9 +43,9 @@ Saídas de ferramenta acima de 32 mil caracteres são truncadas (início e fim).
 
 Protocolo de `--managed` (`gui/managed.ts`), uma linha JSON no stdout: `{"event":"ready","url":...}` ou `{"event":"error","code":"config_required"}`. Nesse modo não há assistente nem navegador, e o encerramento por falta de página é desligado: quem decide é o app. Ele fecha o stdin para pedir a saída limpa, com hooks e MCP, e força o fim se o agente não sair em 8 s: no Windows com `taskkill /T /F`; em Unix o agente é líder do próprio grupo de processos (`detached`) e o grupo recebe `SIGKILL`. Como o stdin também fecha quando o app morre, o agente não fica órfão nesse caso. Se o agente morrer, a janela oferece reabrir com `--resume-latest`.
 
-**Configurações** (`desktop/src/settings.ts`): rodam no processo principal, reaproveitando `src/config.ts` no bundle (gravação atômica com `0600` em Unix), e a chave não sai de lá. O app só inicia o agente com configuração válida; sem ela, abre o formulário e depois segue para o que foi pedido. Um agente em execução mantém a configuração com que iniciou, então aplicar uma mudança é reiniciá-lo: o app oferece isso ao salvar, e a conversa volta com `--resume-latest`.
+**Configurações** (`desktop/src/settings.ts`): rodam no processo principal, reaproveitando `src/config.ts` no bundle (gravação atômica com `0600` em Unix), e a chave não sai de lá. O app só inicia o agente com configuração válida; sem ela, abre o formulário e depois segue para o que foi pedido. Com um `config.json` danificado, o formulário mostra o erro, não salva por cima e oferece recarregar o arquivo depois de corrigido. Um agente em execução mantém a configuração com que iniciou, então aplicar uma mudança é reiniciá-lo: o app oferece isso ao salvar, e a conversa volta com `--resume-latest`.
 
-**Conversas salvas** (`services/conversations.ts`): `AgentSession` recebe um `ConversationStore` por dependência. A GUI passa um, em `getWorkspaceDataDir(cwd)/sessions`; sem ele (subagentes, testes), nada é salvo. Cada `<id>.jsonl` tem uma linha de resumo, para listar sem ler históricos inteiros, e uma de conteúdo: histórico da API, mensagens exibidas, cartões de ferramentas e tarefas. A gravação é atômica e acontece só depois de `commitTurn`, então o arquivo nunca tem turno incompleto; `completeHistory` ainda corta o histórico ao carregar, por garantia. Fechar no meio de uma resposta aborta o turno e `close()` espera ele ser salvo. Arquivo danificado vira um aviso e fica de fora da lista. O protocolo do WebSocket ganha `new`, `resume` e `delete`; ao trocar de conversa, o servidor reenvia `hello` e a página redesenha tudo.
+**Conversas salvas** (`services/conversations.ts`): `AgentSession` recebe um `ConversationStore` por dependência. A GUI passa um, em `getWorkspaceDataDir(cwd)/sessions`; sem ele (subagentes, testes), nada é salvo. Cada `<id>.jsonl` tem uma linha de resumo, para listar sem ler históricos inteiros, e uma de conteúdo: histórico da API, mensagens exibidas, cartões de ferramentas e tarefas. A gravação é atômica e acontece só depois de `commitTurn`, então o arquivo nunca tem turno incompleto. O id de uma conversa nova é definido antes de gravar, e apagar entra na mesma fila das gravações: trocar ou apagar a conversa enquanto ela é salva não faz outra conversa gravar por cima nem traz a apagada de volta; `completeHistory` ainda corta o histórico ao carregar, por garantia. Fechar no meio de uma resposta aborta o turno e `close()` espera ele ser salvo. Arquivo danificado vira um aviso e fica de fora da lista. O protocolo do WebSocket ganha `new`, `resume` e `delete`; ao trocar de conversa, o servidor reenvia `hello` e a página redesenha tudo.
 
 **Pacotes** (`desktop/electron-builder.yml`): no Linux, um `.deb` e um AppImage (`bun run desktop:dist` ou `dist:linux` em `desktop/`). O `.deb` instala em `/opt/Siliconflower` e, no `postinst` do `electron-builder`, ajusta o `chrome-sandbox` e o perfil do AppArmor. O AppImage pode ser instalado por usuário com `scripts/install-appimage.sh`, que o extrai (sem FUSE) para `~/.local/share/siliconflower-desktop`, cria o atalho e o ícone e só usa `--no-sandbox` quando o sistema bloqueia *user namespaces*. Os três usam o nome `siliconflower-desktop` (`desktopName`, `executableName`, `StartupWMClass`), para o menu associar a janela aberta ao ícone. No Windows, NSIS por usuário em `%LOCALAPPDATA%\Programs\siliconflower-desktop`: a pasta vem do `name` em `desktop/package.json` e precisa ser diferente de `Programs\siliconflower`, a do agente avulso (`scripts/install.ps1`). O agente vai em `resources/`, fora do asar, porque um executável não roda de dentro dele. O ícone é gerado por `desktop/scripts/make-icon.ts` (`.ico` no Windows, `icon.png` no Linux).
 
@@ -98,17 +100,17 @@ Quando o provedor rejeita `reasoning_effort` ou o parâmetro de tokens, a requis
 | :--- | :--- | :--- |
 | `preTool`, `postTool` | Antes e depois de cada ferramenta nativa (não no modo `plano`) | `hooks` do `config.json` |
 | `onEdit` | Depois de `write_file`, `edit_file`, `apply_patch`, `move_path` e `delete_path` bem-sucedidos | `config.json` |
-| `onCommand` | Antes de `execute_command` | `hooks.onCommand` inline; se ausente, o primeiro `hooks.json` em: workspace → `<raiz>/.siliconflower/` → `~/.siliconflower/` |
+| `onCommand` | Antes de `execute_command` | `hooks.onCommand` inline; se ausente, o primeiro `hooks.json` em: workspace → `~/.siliconflower/` |
 | `onSessionStart`, `onSessionEnd` | Abertura e fechamento da sessão (GUI ou app), inclusive no modo `plano` | `config.json` |
 
 Os hooks rodam via `shell.ts`, com timeout de 30 s, e recebem estas variáveis:
 - `SILICONFLOWER_EVENT`;
 - `SILICONFLOWER_TOOL_NAME`;
-- `SILICONFLOWER_TOOL_ARGS` (JSON);
-- `SILICONFLOWER_COMMAND`;
+- `SILICONFLOWER_TOOL_ARGS` (JSON; textos acima de 2 mil caracteres são encurtados, e o todo fica em até 16 mil, para caber numa variável de ambiente);
+- `SILICONFLOWER_COMMAND` (até 16 mil caracteres);
 - `SILICONFLOWER_FILE_PATH`.
 
-O resultado de um hook não bloqueia a ferramenta. A saída do `onEdit` é acrescentada ao resultado da edição (até 8 mil caracteres), que continua sem erro mesmo se o hook falhar. `show_hooks` mostra a configuração em vigor.
+Um `hooks.json` dentro do repositório (`<raiz>/.siliconflower/hooks.json`, lido até a 0.8.0) nunca roda, porque um projeto clonado executaria comandos seus: ele vira um aviso no log e em `show_hooks`, que indica para onde movê-lo. O resultado de um hook não bloqueia a ferramenta. A saída do `onEdit` é acrescentada ao resultado da edição (até 8 mil caracteres), que continua sem erro mesmo se o hook falhar. `show_hooks` mostra a configuração em vigor.
 
 ## Modo `plano` e MCP
 
@@ -137,12 +139,12 @@ Os schemas em `src/tools.ts` são a fonte de verdade; esta tabela só indica ond
 | `delete_path` | `tools.ts` | Exige `confirm: true`; protege raízes de disco, a pasta do usuário, o cwd e as pastas acima deles |
 | `edit_file` | `services/smart-edit.ts` | Correspondência exata → quebras de linha normalizadas → espaços flexíveis (erro se ambíguo); preserva CRLF |
 | `apply_patch` | `tools.ts` | Vários blocos, gravação única; preserva CRLF |
-| `search_files` | `glob-util.ts` | No máximo 1000 resultados, 200 exibidos com aviso |
-| `grep_content` | `grep.ts` | Regex sem distinção de maiúsculas; ignora `IGNORED_SOURCE_DIRS`, pastas ocultas, binários e arquivos acima de 2 MB; para em 200 ocorrências e avisa |
-| `repo_map`, `find_symbol` | `services/repomap.ts` | Extração por regex: TS/JS, Python, Go, Rust |
+| `search_files` | `glob-util.ts` | No máximo 1000 resultados, 200 exibidos com aviso; não entra nas pastas bloqueadas, nem com `includeHidden` |
+| `grep_content` | `grep.ts` | Regex sem distinção de maiúsculas; ignora `IGNORED_SOURCE_DIRS`, pastas ocultas e bloqueadas, binários e arquivos acima de 2 MB; para em 200 ocorrências e avisa |
+| `repo_map`, `find_symbol` | `services/repomap.ts` | Extração por regex: TS/JS, Python, Go, Rust; não entram nas pastas bloqueadas; `find_symbol` exige um nome |
 | `execute_command` | `tools.ts` + `shell.ts` | Timeout de até 120 s; `runInBackground` cria tarefa com timeout de até 1 h |
 | `manage_background_task` | `services/background-tasks.ts` | `list`, `status`, `kill` |
-| `run_task`, `send_subagent_message` | `services/subagent.ts` | Sem timeout fixo, cancelável; subagentes não têm `run_task` nem MCP, recebem o contexto do projeto (`buildSubagentPrompt`), e `research` e `plan` são somente leitura |
+| `run_task`, `send_subagent_message` | `services/subagent.ts` | Sem timeout fixo, cancelável; subagentes não têm `run_task`, `send_subagent_message`, `todowrite` nem MCP e só executam as ferramentas oferecidas a eles; recebem o contexto do projeto (`buildSubagentPrompt`), e `research` e `plan` são somente leitura; `send_subagent_message` recusa um subagente ainda em execução |
 | `ask_question` | `tools.ts` + `session.ts` | Pausa e espera a resposta na interface; sem interface, pede ao modelo que repasse a pergunta |
 | `todowrite` | `todo.ts` | Checklist da sessão |
 | `memory` | `services/memory.ts` | `save`, `recall`, `forget`; veja "Projetos e memória" |

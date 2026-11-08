@@ -27,9 +27,19 @@ function showResult(ok, message) {
   result.textContent = message ?? "";
 }
 
+// config.json exists but is damaged: saving would replace it and lose what the form does not show.
+let fileBlocked = false;
+
+function showFileError(message) {
+  fileBlocked = Boolean(message);
+  $("file-error").hidden = !fileBlocked;
+  $("file-error-text").textContent = message ?? "";
+  $("save").disabled = fileBlocked;
+}
+
 function setBusy(busy) {
   $("test").disabled = busy;
-  $("save").disabled = busy;
+  $("save").disabled = busy || fileBlocked;
 }
 
 function syncPreset() {
@@ -81,7 +91,8 @@ $("form").addEventListener("submit", async (event) => {
   setBusy(true);
   showResult(true, "");
   try {
-    const { ok, errors } = await api.saveSettings(readForm());
+    const { ok, errors, fileError } = await api.saveSettings(readForm());
+    if (fileError) showFileError(fileError);
     if (!ok) showErrors(errors);
     else showErrors();
   } catch {
@@ -91,11 +102,12 @@ $("form").addEventListener("submit", async (event) => {
   }
 });
 
-void (async () => {
+async function load() {
   const settings = await api.getSettings();
-  const firstRun = !settings.keyHint && !settings.baseURL;
+  showFileError(settings.fileError);
+  const firstRun = !settings.keyHint && !settings.baseURL && !settings.fileError;
   $("welcome").hidden = !firstRun;
-  if (firstRun) $("title").textContent = "Bem-vindo ao Siliconflower";
+  $("title").textContent = firstRun ? "Bem-vindo ao Siliconflower" : "Configurações";
   $("baseURL").value = settings.baseURL || $("preset").value;
   $("model").value = settings.model;
   $("system").value = settings.system;
@@ -109,5 +121,10 @@ void (async () => {
   }
   syncPreset();
   await fillReasoning(settings.reasoning);
-  $(firstRun ? "apiKey" : "model").focus();
-})();
+  $(settings.fileError ? "reload" : firstRun ? "apiKey" : "model").focus();
+}
+
+// After fixing the file in an editor: the form fills with what it has now.
+$("reload").addEventListener("click", () => void load());
+
+void load();

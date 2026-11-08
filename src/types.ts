@@ -71,6 +71,11 @@ export type StreamEvent =
   | { type: "tool_result"; id: string; name: string; result: string; isError: boolean }
   | { type: "usage"; totalTokens?: number; promptTokens?: number; completionTokens?: number }
   | { type: "error"; message: string }
+  /**
+   * A finished tool step: the assistant message with its calls, a result for each call and the
+   * media attachment, if any. Always complete, so it can be kept even if the turn fails later.
+   */
+  | { type: "step"; messages: ChatMessage[] }
   /** `messages` holds the messages produced in this turn (tool calls, tool results, final answer). */
   | { type: "done"; content: string; reasoning: string; messages?: ChatMessage[] };
 

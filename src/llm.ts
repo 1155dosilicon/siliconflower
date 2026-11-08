@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { log } from "./logger.js";
-import { CONTEXT_TOKEN_BUDGET, compressHistory, estimateTokens } from "./context.js";
+import { CONTEXT_TOKEN_BUDGET, compressHistory, estimateTokens, processToolOutput } from "./context.js";
 import type { AppConfig, ChatMessage, MediaAttachment, McpTool, ReasoningLevel, StreamEvent, ToolResult } from "./types.js";
 import { isXiaomiMimoEndpoint } from "./reasoning.js";
 import { hasMediaData, mediaNote, pruneMedia, rejectMedia, userContent } from "./services/media.js";
@@ -207,6 +207,9 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("Abortado", "AbortError");
 }
 
+/** Result of the calls of a step that never ran: every call needs one, or the history is invalid. */
+export const NOT_RUN_AFTER_CANCEL = "Não executada: o usuário cancelou o turno antes desta chamada.";
+
 async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   const { config, messages, tools, reasoning, executeTool, signal } = opts;
   const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey });
@@ -237,7 +240,8 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
 
   for (let step = 0; step < MAX_STEPS; step++) {
     throwIfAborted(signal);
-    const buildRequest = () => buildOpenAIMessages(config, compressHistory(pruneMedia(history), historyBudget));
+    const buildRequest = () =>
+      buildOpenAIMessages(config, compressHistory(pruneMedia(history), historyBudget, { keepToolCallReasoning: isXiaomiMimo }));
     let working = buildRequest();
     let content = "";
     let thinking = "";
@@ -434,14 +438,26 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       // MiMo requires reasoning_content on the assistant message preceding tool results.
       ...(isXiaomiMimo ? { reasoning: thinking } : {}),
     };
-    history.push(assistantMsg);
-    turn.push(assistantMsg);
+    const stepMessages: ChatMessage[] = [];
+    const record = (message: ChatMessage) => {
+      history.push(message);
+      turn.push(message);
+      stepMessages.push(message);
+    };
+    record(assistantMsg);
 
     void log("info", `LLM step ${step}: executando ${pendingCalls.length} tool(s): ${pendingCalls.map(c => c.name).join(", ")}`);
 
     const stepMedia: MediaAttachment[] = [];
-    for (const call of pendingCalls) {
-      throwIfAborted(signal);
+    for (const [index, call] of pendingCalls.entries()) {
+      if (signal?.aborted) {
+        // What already ran must not be forgotten: close the step so the turn can keep it.
+        for (const skipped of pendingCalls.slice(index)) {
+          record({ role: "tool", toolCallId: skipped.id, toolName: skipped.name, content: NOT_RUN_AFTER_CANCEL });
+        }
+        yield { type: "step", messages: stepMessages };
+        throwIfAborted(signal);
+      }
       void log("info", `LLM step ${step}: ->${call.name}(${call.args.slice(0, 200)})`);
       yield { type: "tool_call", id: call.id, name: call.name, args: call.args };
       const parsed = parseToolArgs(call.args);
@@ -453,7 +469,8 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       } else {
         try {
           const r = await executeTool(call.name, parsed);
-          result = r.result;
+          // Here and not in each tool: MCP servers and subagents can return megabytes too.
+          result = await processToolOutput(String(r.result ?? ""));
           isError = r.isError;
           if (r.media) stepMedia.push(...r.media);
         } catch (err) {
@@ -463,16 +480,13 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       }
       void log(isError ? "warn" : "info", `LLM step ${step}: <- ${call.name} isError=${isError} result=${result.slice(0, 200)}`);
       yield { type: "tool_result", id: call.id, name: call.name, result, isError };
-      const toolMsg: ChatMessage = { role: "tool", toolCallId: call.id, toolName: call.name, content: result };
-      history.push(toolMsg);
-      turn.push(toolMsg);
+      record({ role: "tool", toolCallId: call.id, toolName: call.name, content: result });
     }
     // After every result of the step: the API requires them right after the tool calls.
     if (stepMedia.length) {
-      const mediaMsg: ChatMessage = { role: "user", content: mediaNote(stepMedia), media: stepMedia };
-      history.push(mediaMsg);
-      turn.push(mediaMsg);
+      record({ role: "user", content: mediaNote(stepMedia), media: stepMedia });
     }
+    yield { type: "step", messages: stepMessages };
     void log("info", `LLM step ${step}: histórico agora: ${history.length} mensagens`);
     // loop continues: model sees tool results and may respond or call again.
   }

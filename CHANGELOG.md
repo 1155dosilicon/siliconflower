@@ -9,6 +9,29 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 ### Changed
 - Documentação enxugada: README sem repetições, ARCHITECTURE e PLATAFORMAS sem trechos duplicados, e o README explica o `env` do MCP e o erro de PATH com `npx` do nvm no app.
 
+### Fixed
+- Trocar de conversa, começar outra ou apagar a atual enquanto ela era salva fazia o turno seguinte gravar por cima de outra conversa ou trazia a apagada de volta (`src/session.ts`, `src/services/conversations.ts`).
+- Um erro do provedor ou um cancelamento no meio do turno apagava da memória do modelo os passos de ferramenta já concluídos, e ele refazia edições e comandos sem saber; agora esses passos ficam no histórico, e as chamadas que não rodaram recebem um resultado dizendo isso (`src/llm.ts`, `src/session.ts`, `src/services/subagent.ts`).
+- Resultados de MCP, `manage_background_task`, `find_symbol`, `repo_map`, `list_directory` e subagentes não eram cortados em 32 mil caracteres; o corte agora vale para toda ferramenta (`src/llm.ts`).
+- Imagens e áudios devolvidos por servidores MCP chegavam ao modelo como Base64 em texto, megabytes por captura de tela; agora viram uma nota curta (`src/mcp.ts`).
+- A compactação do histórico encurtava o pedido atual do usuário antes dos resultados de ferramenta e deixava JSON inválido nos argumentos das chamadas, que faz provedores recusarem os pedidos seguintes (`src/context.ts`).
+- Xiaomi MiMo: a compactação removia o `reasoning_content` das mensagens com chamadas de ferramenta, que o MiMo exige; agora ele fica, encurtado (`src/context.ts`).
+- Subagentes usavam `todowrite`, que substituía a lista de tarefas do usuário, e `send_subagent_message`, que contornava a proibição de recursão, e executavam ferramentas que não lhes foram oferecidas (`src/services/subagent.ts`).
+- `send_subagent_message` para um subagente ainda em execução rodava a mesma sessão duas vezes ao mesmo tempo e embaralhava o histórico dela; agora é recusado.
+- **Parar** não interrompia `grep_content`, `search_files`, `repo_map`, `find_symbol` nem os hooks, e uma ferramenta cancelada durante o `preTool` rodava mesmo assim (`src/grep.ts`, `src/glob-util.ts`, `src/services/repomap.ts`, `src/core/hooks.ts`, `src/tools.ts`).
+- A consulta DNS do `web_fetch` ficava fora do timeout e do cancelamento, e um DNS lento travava a ferramenta (`src/services/web.ts`).
+- Um `config.json` com erro de sintaxe era tratado como inexistente, e o assistente ou o formulário do app gravavam um novo por cima, perdendo hooks e servidores MCP; agora o erro aparece e o arquivo fica como está (`src/config.ts`, `desktop/src/settings.ts`).
+- Um `config.json` salvo com BOM (Bloco de Notas) ou com um campo de tipo errado era descartado inteiro (`src/config.ts`).
+- Hooks não rodavam para arquivos grandes: o conteúdo inteiro ia em `SILICONFLOWER_TOOL_ARGS` e estourava o limite de variável de ambiente (`E2BIG`); os textos longos agora são encurtados (`src/core/hooks.ts`).
+- A conversão de HTML do `web_fetch` levava tempo quadrático em tags sem fechamento e congelava o agente inteiro por segundos ou minutos em algumas páginas (`src/services/web.ts`).
+- `grep_content`, `search_files`, `repo_map` e `find_symbol` entravam em `/etc`, `/root`, `/boot`, `System32`, `.ssh` e `.aws` a partir de uma pasta acima delas (`src/fs-util.ts`).
+- `find_symbol` com nome vazio devolvia todos os símbolos do repositório.
+- `manage_background_task` com `list` trazia a saída inteira de cada tarefa, e uma só com megabytes escondia as outras; agora mostra o começo de cada uma (`src/tools.ts`).
+- Uma mensagem acima de 1 MB na GUI fechava a conexão e sumia da caixa de texto; agora ela fica e a página explica o limite (`src/gui/client/app.js`).
+
+### Security
+- Um `.siliconflower/hooks.json` dentro do repositório não roda mais: um projeto clonado executava comandos seus a cada `execute_command`, mesmo num `git status`. O arquivo vira um aviso no log e em `show_hooks`, que indica para onde movê-lo (`src/core/hooks.ts`).
+
 ## [0.8.0] - 2026-11-05
 
 A interface de terminal (TUI) saiu: as interfaces agora são o app de desktop e a GUI no navegador (`siliconflower gui`). O executável `siliconflower` continua: ele é o motor do app e mantém os subcomandos `gui`, `config`, `show`, `init`, `ensure`, `skills`, `sync` e `logs`.

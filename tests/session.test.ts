@@ -69,7 +69,7 @@ describe("AgentSession", () => {
     expect(seen[0]).toEqual([{ role: "user", content: "linha 1\nlinha 2\n\tfim" }]);
   });
 
-  test("a cancelled turn keeps only the visible text in the history", async () => {
+  test("a turn cancelled before finishing any tool step keeps only the visible text", async () => {
     const { session, seen } = makeSession([
       async function* (opts) {
         yield { type: "text", text: "parcial" };

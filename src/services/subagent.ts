@@ -27,7 +27,15 @@ export interface SubagentSession {
   history: ChatMessage[];
   createdAt: string;
   customPrompt?: string;
+  /** A run in progress: a second one at the same time would mix up the history. */
+  running?: boolean;
 }
+
+/**
+ * Never offered to a subagent: run_task and send_subagent_message would let it start more
+ * agents (recursion), and the checklist of todowrite is the user's, shown by the interface.
+ */
+const MAIN_AGENT_ONLY = new Set(["run_task", "send_subagent_message", "todowrite"]);
 
 const activeSubagentSessions = new Map<string, SubagentSession>();
 
@@ -99,10 +107,10 @@ export function isSubagentToolAllowed(role: SubagentRole, name: string, args: Re
   return !READ_ONLY_ROLES.has(role) || isToolAllowedInMode("plano", name, args);
 }
 
-/** Tools offered to a subagent: never run_task (no recursion), and read-only roles lose the rest. */
+/** Tools offered to a subagent: never MAIN_AGENT_ONLY, and read-only roles lose the rest. */
 export function subagentTools(role: SubagentRole): McpTool[] {
   const tools: McpTool[] = [
-    ...builtinToolsAsMcp().filter((t) => t.name !== "run_task"),
+    ...builtinToolsAsMcp().filter((t) => !MAIN_AGENT_ONLY.has(t.name)),
     {
       server: "skill",
       name: SKILL_TOOL.name,
@@ -176,6 +184,12 @@ export async function sendSubagentMessage(
   if (!session) {
     return { result: `Sessão de subagente '${sessionId}' não encontrada.`, isError: true };
   }
+  if (session.running) {
+    return {
+      result: `O subagente '${sessionId}' ainda está trabalhando. Espere ele terminar (manage_background_task com action='status') antes de mandar outra mensagem.`,
+      isError: true,
+    };
+  }
 
   session.history.push({ role: "user", content: message });
 
@@ -202,9 +216,14 @@ export async function sendSubagentMessage(
 async function runSubagentExecution(opts: SubagentOptions, systemPrompt: string, session: SubagentSession): Promise<string> {
   const role = session.role;
   const tools = subagentTools(role);
+  // Models sometimes call a tool they were not offered (e.g. one named in a prompt).
+  const offered = new Set(tools.map((t) => t.name));
 
   let accumulatedContent = "";
   let turnMessages: ChatMessage[] = [];
+  // Finished tool steps: kept if the run fails, so a follow-up knows what already happened.
+  const steps: ChatMessage[] = [];
+  session.running = true;
 
   try {
     await log("info", `[Subagente iniciado] [${opts.role || "general"}] ${opts.description}`);
@@ -216,6 +235,9 @@ async function runSubagentExecution(opts: SubagentOptions, systemPrompt: string,
       reasoning: "none",
       signal: opts.signal,
       executeTool: async (name, args) => {
+        if (!offered.has(name)) {
+          return { result: `Ferramenta ${name} não disponível no subagente`, isError: true };
+        }
         // Actions such as memory "save" stay in the schema list, so the check is needed here too.
         if (!isSubagentToolAllowed(role, name, args)) {
           return { result: `Subagente "${role}" é somente leitura: ${name} bloqueada com esses argumentos.`, isError: true };
@@ -239,6 +261,8 @@ async function runSubagentExecution(opts: SubagentOptions, systemPrompt: string,
     for await (const ev of gen as AsyncIterable<StreamEvent>) {
       if (ev.type === "text") {
         accumulatedContent += ev.text;
+      } else if (ev.type === "step") {
+        steps.push(...ev.messages);
       } else if (ev.type === "done") {
         if (ev.content) accumulatedContent = ev.content;
         turnMessages = ev.messages ?? [];
@@ -260,8 +284,10 @@ async function runSubagentExecution(opts: SubagentOptions, systemPrompt: string,
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await log("error", `[Subagente erro] ${msg}`);
-    session.history.push({ role: "assistant", content: `[Erro: ${msg}]` });
+    session.history.push(...steps, { role: "assistant", content: `[Erro: ${msg}]` });
     throw err;
+  } finally {
+    session.running = false;
   }
 }
 

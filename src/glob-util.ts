@@ -1,5 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { isPathBlocked } from "./fs-util.js";
 
 function expandBraces(pattern: string): string {
   return pattern.replace(/\{([^}]+)\}/g, (_, content: string) => {
@@ -58,7 +59,8 @@ export function globToRegex(pattern: string): RegExp {
   return new RegExp(re);
 }
 
-export async function search(root: string, pattern: string, includeHidden = false): Promise<string[]> {
+/** `signal` stops the walk: from a big folder it can take minutes. */
+export async function search(root: string, pattern: string, includeHidden = false, signal?: AbortSignal): Promise<string[]> {
   const base = await safeStat(root);
   if (!base || !base.isDirectory()) {
     return [];
@@ -68,7 +70,7 @@ export async function search(root: string, pattern: string, includeHidden = fals
   const limit = 1000;
 
   async function walk(dir: string, depth: number) {
-    if (results.length >= limit) return;
+    if (results.length >= limit || signal?.aborted) return;
     if (depth > 12) return;
     let entries;
     try {
@@ -77,10 +79,12 @@ export async function search(root: string, pattern: string, includeHidden = fals
       return;
     }
     for (const e of entries) {
-      if (results.length >= limit) return;
+      if (results.length >= limit || signal?.aborted) return;
       if (e.name === "node_modules" || e.name === ".git") continue;
       if (!includeHidden && e.name.startsWith(".") && e.name !== ".") continue;
       const full = join(dir, e.name);
+      // Not even the names inside /etc, .ssh, System32...: the same rule as the path given.
+      if (isPathBlocked(full)) continue;
       const rel = relative(root, full).replace(/\\/g, "/");
       if (re.test(rel)) results.push(full);
       if (e.isDirectory()) {

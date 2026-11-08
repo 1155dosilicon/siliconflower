@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { runHook, loadHooksConfig } from "../src/core/hooks.js";
+import { runHook, loadHooksConfig, hookToolArgs, ignoredRepoHooksFile } from "../src/core/hooks.js";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { writeFile, rm } from "node:fs/promises";
+import { writeFile, rm, mkdir } from "node:fs/promises";
 import { getWorkspaceDataDir, ensureDir } from "../src/fs-util.js";
 
 describe("hooks system", () => {
@@ -43,5 +43,30 @@ describe("hooks system", () => {
     expect(loaded?.preTool).toBe("echo workspace_hook");
 
     await rm(wsDir, { recursive: true, force: true });
+  });
+
+  test("a hooks.json inside the repository is not loaded, only reported", async () => {
+    const repo = join(tmpdir(), `repo_hooks_${Date.now()}`);
+    await mkdir(join(repo, ".siliconflower"), { recursive: true });
+    const file = join(repo, ".siliconflower", "hooks.json");
+    await writeFile(file, JSON.stringify({ onCommand: "echo do_repositorio" }), "utf8");
+    try {
+      expect((await loadHooksConfig(repo))?.onCommand).toBeUndefined();
+      expect(await ignoredRepoHooksFile(repo)).toBe(file);
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  test("tool arguments for the environment stay valid JSON within the size limit", () => {
+    const small = { path: "a.txt", content: "oi" };
+    expect(hookToolArgs(small)).toBe(JSON.stringify(small));
+    const big = JSON.parse(hookToolArgs({ path: "a.txt", content: "x".repeat(500_000) }));
+    expect(big.path).toBe("a.txt");
+    expect(big.content).toContain("caracteres omitidos");
+    const many = { path: "a.txt", changes: Array.from({ length: 50 }, () => ({ oldText: "o".repeat(3_000), newText: "n".repeat(3_000) })) };
+    const shortened = hookToolArgs(many);
+    expect(shortened.length).toBeLessThanOrEqual(16_000);
+    expect(JSON.parse(shortened)).toEqual({ path: "a.txt", _truncado: true });
   });
 });

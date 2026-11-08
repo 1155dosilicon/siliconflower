@@ -17,9 +17,9 @@ Depois de configurado, o modelo pode usar ferramentas que:
 ## Proteções embutidas
 
 - **`delete_path`** exige `confirm: true` em qualquer exclusão. Raízes de disco, a pasta do usuário, o diretório atual e as pastas acima deles não podem ser removidos por essa ferramenta.
-- **Caminhos sensíveis** (`C:\Windows\System32`, `SysWOW64`, `/etc`, `/root`, `/boot`, `.ssh`, `.aws`, inclusive via junction ou link simbólico) são bloqueados no caminho passado às ferramentas de arquivo, busca e grep.
+- **Caminhos sensíveis** (`C:\Windows\System32`, `SysWOW64`, `/etc`, `/root`, `/boot`, `.ssh`, `.aws`, inclusive via junction ou link simbólico) são bloqueados no caminho passado às ferramentas de arquivo, busca e grep, e as buscas recursivas (`grep_content`, `search_files`, `repo_map`, `find_symbol`) não entram neles a partir de uma pasta acima.
   - Nas buscas recursivas, `grep_content` sempre pula pastas ocultas.
-  - `search_files` pula pastas ocultas, a menos que receba `includeHidden: true`; nesse caso pode **listar nomes** dentro delas, mas a leitura continua bloqueada.
+  - `search_files` pula pastas ocultas, a menos que receba `includeHidden: true`; nesse caso pode **listar nomes** dentro delas (menos em `.ssh` e `.aws`), mas a leitura continua bloqueada.
 - **`web_fetch`** bloqueia:
   - localhost e IPs privados ou reservados, inclusive em redirecionamentos;
   - formas IPv6 que embutem IPv4 (`::ffff:7f00:1`, `::ffff:127.0.0.1`, IPv4-compatible, NAT64 `64:ff9b::/96`);
@@ -33,7 +33,7 @@ Depois de configurado, o modelo pode usar ferramentas que:
   - Hooks de ferramenta ficam desligados, mas `onSessionStart` e `onSessionEnd` configurados inline continuam rodando e podem executar comandos.
 - **Modos `programação` e `sistema`** só mudam o foco do prompt. Nenhum dos dois limita privilégios.
 - **Regras do prompt de sistema** pedem ao modelo que trate conteúdo de arquivos, web e ferramentas como dado, não como instrução, e que confirme ações destrutivas. São orientações ao modelo, não barreiras: uma injeção de prompt ainda pode ter sucesso.
-- **Subagentes `research` e `plan`** seguem a allowlist do modo `plano`, imposta no código. Os demais papéis têm as mesmas ferramentas nativas do agente principal, exceto `run_task`.
+- **Subagentes `research` e `plan`** seguem a allowlist do modo `plano`, imposta no código. Os demais papéis têm as mesmas ferramentas nativas do agente principal, exceto `run_task`, `send_subagent_message` e `todowrite`, e nenhum subagente executa uma ferramenta que não lhe foi oferecida.
 - **`config.json`**, que guarda a chave de API, é gravado com permissão `0600` em Linux/Unix, e um arquivo antigo mais aberto é corrigido ao ser lido. Um arquivo somente leitura (ex.: na store do Nix) continua como está, e com ele a permissão que tiver.
 - **`read_media`** envia o conteúdo do arquivo ao provedor configurado.
 - **`execute_command`** é, por design, um shell arbitrário. As proteções das ferramentas de arquivo **não** se aplicam a comandos de shell.
@@ -73,7 +73,9 @@ A janela mostra a mesma página, com texto vindo do modelo e de repositórios, e
 
 ## Instruções de projeto vêm do repositório
 
-`SILICONFLOWER.md` e `AGENTS.md` são enviados ao modelo como instruções do projeto, procurados na pasta atual e nas pastas acima dela. Num repositório clonado de terceiros, esses arquivos podem conter instruções maliciosas (*prompt injection*), por exemplo para rodar comandos ou enviar arquivos para fora. Leia esses arquivos antes de abrir o agente num repositório que você não conhece.
+`SILICONFLOWER.md` e `AGENTS.md` são enviados ao modelo como instruções do projeto, procurados na pasta atual e nas pastas acima dela. Num repositório clonado de terceiros, esses arquivos podem conter instruções maliciosas (*prompt injection*), por exemplo para rodar comandos ou enviar arquivos para fora. Leia esses arquivos antes de abrir o agente num repositório que você não conhece. O mesmo vale para memórias antigas em `<raiz>/.siliconflower/memory/` (local usado por versões antigas), que ainda entram no índice de memórias do prompt.
+
+**Hooks nunca vêm do repositório.** Um `<raiz>/.siliconflower/hooks.json`, lido até a 0.8.0, é ignorado: um projeto clonado rodaria comandos seus a cada `execute_command`, mesmo um `git status`. Os hooks só vêm do `config.json` e de `hooks.json` dentro de `~/.siliconflower/` (do workspace ou global); `show_hooks` avisa quando há um arquivo ignorado e diz para onde movê-lo.
 
 ## O que você ainda deve fazer
 

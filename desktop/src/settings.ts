@@ -1,4 +1,4 @@
-import { isValid, loadConfig, loadStoredConfig, normalize, saveConfig } from "../../src/config.js";
+import { ConfigFileError, isValid, loadConfig, loadStoredConfig, normalize, saveConfig } from "../../src/config.js";
 import { reasoningLabel, reasoningOptions } from "../../src/reasoning.js";
 import type { AppConfig, McpServerConfig, ReasoningLevel } from "../../src/types.js";
 
@@ -24,6 +24,8 @@ export interface SettingsView {
   keyHint: string;
   /** Variables that override the saved values while they are set. */
   envOverrides: string[];
+  /** config.json exists but cannot be read: the form must not save over it. */
+  fileError?: string;
 }
 
 /** What the page sends. An empty `apiKey` keeps the saved one. */
@@ -126,11 +128,22 @@ export function applyInput(stored: AppConfig | null, input: SettingsInput): { co
   };
 }
 
+/** The stored config, or the reason the file cannot be used (any other error is thrown). */
+async function storedConfig(): Promise<{ stored: AppConfig | null; fileError?: string }> {
+  try {
+    return { stored: await loadStoredConfig() };
+  } catch (e) {
+    if (e instanceof ConfigFileError) return { stored: null, fileError: e.message };
+    throw e;
+  }
+}
+
 export async function readSettings(env: NodeJS.ProcessEnv = process.env): Promise<SettingsView> {
   // The stored file, never loadConfig: saving must not persist environment overrides.
-  const stored = await loadStoredConfig();
+  const { stored, fileError } = await storedConfig();
   const mcpServers = stored?.mcpServers ?? {};
   return {
+    ...(fileError ? { fileError } : {}),
     baseURL: stored?.baseURL ?? "",
     model: stored?.model ?? "",
     reasoning: stored?.reasoning ?? "high",
@@ -141,8 +154,12 @@ export async function readSettings(env: NodeJS.ProcessEnv = process.env): Promis
   };
 }
 
-export async function writeSettings(input: SettingsInput): Promise<{ ok: boolean; changed?: boolean; errors?: SettingsErrors }> {
-  const stored = await loadStoredConfig();
+export async function writeSettings(
+  input: SettingsInput
+): Promise<{ ok: boolean; changed?: boolean; errors?: SettingsErrors; fileError?: string }> {
+  // A damaged file is never replaced: what the form does not show (hooks) would be lost.
+  const { stored, fileError } = await storedConfig();
+  if (fileError) return { ok: false, fileError };
   const { config, errors } = applyInput(stored, input);
   if (!config) return { ok: false, errors };
   const changed = JSON.stringify(config) !== JSON.stringify(stored);
@@ -152,7 +169,11 @@ export async function writeSettings(input: SettingsInput): Promise<{ ok: boolean
 
 /** Whether a project can start: the environment may supply what the file lacks. */
 export async function isConfigured(): Promise<boolean> {
-  const config = await loadConfig();
+  // A damaged file opens the settings, which explain what is wrong with it.
+  const config = await loadConfig().catch((e) => {
+    if (e instanceof ConfigFileError) return null;
+    throw e;
+  });
   return Boolean(config && isValid(config));
 }
 
@@ -163,7 +184,8 @@ function scrub(text: string, apiKey: string): string {
 
 /** Sends the smallest possible request, so the form tells a typo from a real answer. */
 export async function testConnection(input: SettingsInput, fetchImpl: typeof fetch = fetch): Promise<{ ok: boolean; message: string }> {
-  const { config, errors } = applyInput(await loadStoredConfig(), input);
+  // Only reads the file (for the saved key): a damaged one just means there is no saved key.
+  const { config, errors } = applyInput((await storedConfig()).stored, input);
   if (!config) return { ok: false, message: Object.values(errors ?? {})[0] ?? "Formulário inválido." };
 
   const url = `${config.baseURL.replace(/\/+$/, "")}/chat/completions`;

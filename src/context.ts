@@ -52,13 +52,18 @@ export function estimateMessagesTokens(messages: ChatMessage[]): number {
   return total;
 }
 
+/** Every tool result passes through processToolOutput in llm.ts, also MCP and subagents. */
+export const MAX_TOOL_OUTPUT_CHARS = 32_000;
+const TRUNCATED_HEADER = "[SAÍDA GRANDE TRUNCADA:";
+
 /**
  * Handles large outputs from tools/commands.
  * If output exceeds maxChars (default 32000), saves the full output to a temp file
  * and returns a truncated version with a clear reference and total lines/size.
+ * An output it already truncated is returned as is, so applying it twice is harmless.
  */
-export async function processToolOutput(output: string, maxChars = 32000): Promise<string> {
-  if (output.length <= maxChars) {
+export async function processToolOutput(output: string, maxChars = MAX_TOOL_OUTPUT_CHARS): Promise<string> {
+  if (output.length <= maxChars || output.startsWith(TRUNCATED_HEADER)) {
     return output;
   }
 
@@ -89,20 +94,82 @@ function buildBoundedPreview(output: string, maxChars: number): { header: string
   const head = output.slice(0, headSize);
   const tail = tailSize > 0 ? output.slice(-tailSize) : "";
   return {
-    header: `[SAÍDA GRANDE TRUNCADA: ${lines} linhas, ${output.length} caracteres]`,
+    header: `${TRUNCATED_HEADER} ${lines} linhas, ${output.length} caracteres]`,
     body: `--- INÍCIO DA SAÍDA ---\n${head}${separator}${tail}\n--- FIM DA SAÍDA ---`,
   };
+}
+
+const SHRINK_ABOVE_CHARS = 160;
+const SHRUNK_CHARS = 120;
+// Enough for the provider to accept the message; the full text only matters for display.
+const KEPT_REASONING_CHARS = 400;
+const MAX_SHRUNK_ITEMS = 20;
+const MAX_SHRUNK_DEPTH = 3;
+
+export interface CompressOptions {
+  /** Xiaomi MiMo requires reasoning_content on the assistant message that precedes tool results. */
+  keepToolCallReasoning?: boolean;
+}
+
+function shorten(text: string, max: number, note: string): string {
+  return text.length > max ? `${text.slice(0, max)}${note}` : text;
+}
+
+/**
+ * Shortens the long values of a tool call's arguments. The result is always a JSON object:
+ * cutting the text itself leaves broken JSON, which makes providers refuse every later request.
+ */
+export function shrinkToolArguments(raw: string): string {
+  if (raw.length <= SHRINK_ABOVE_CHARS) return raw;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return "{}";
+  }
+  const shrink = (v: unknown, depth: number): unknown => {
+    if (typeof v === "string") return shorten(v, SHRUNK_CHARS, "... [reduzido]");
+    if (Array.isArray(v)) return depth >= MAX_SHRUNK_DEPTH ? [] : v.slice(0, MAX_SHRUNK_ITEMS).map((x) => shrink(x, depth + 1));
+    if (v && typeof v === "object") {
+      if (depth >= MAX_SHRUNK_DEPTH) return {};
+      return Object.fromEntries(Object.entries(v).slice(0, MAX_SHRUNK_ITEMS).map(([k, x]) => [k, shrink(x, depth + 1)]));
+    }
+    return v;
+  };
+  const shrunk = shrink(value, 0);
+  return shrunk && typeof shrunk === "object" && !Array.isArray(shrunk) ? JSON.stringify(shrunk) : "{}";
+}
+
+function shrinkMessage(message: ChatMessage): void {
+  if (message.content.length > SHRINK_ABOVE_CHARS) {
+    message.content = `${message.content.slice(0, SHRUNK_CHARS)}\n... [conteúdo reduzido por limite de contexto]`;
+  }
+  if (message.toolCalls) {
+    message.toolCalls = message.toolCalls.map((call) => ({
+      ...call,
+      function: { ...call.function, arguments: shrinkToolArguments(call.function.arguments) },
+    }));
+  }
+}
+
+/** The user's request being worked on: the last user message that is not a media attachment. */
+function currentRequestIndex(messages: ChatMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]!.role === "user" && !messages[i]!.media) return i;
+  }
+  return -1;
 }
 
 /**
  * Compresses chat history when token threshold is reached or message count is high.
  * Keeps system/recent messages intact, compresses old tool outputs.
  */
-export function compressHistory(messages: ChatMessage[], maxTokens = CONTEXT_TOKEN_BUDGET): ChatMessage[] {
+export function compressHistory(messages: ChatMessage[], maxTokens = CONTEXT_TOKEN_BUDGET, opts: CompressOptions = {}): ChatMessage[] {
   const currentTokens = estimateMessagesTokens(messages);
   if (currentTokens <= maxTokens && messages.length <= 40) {
     return messages;
   }
+  const keepsReasoning = (message: ChatMessage) => Boolean(opts.keepToolCallReasoning && message.toolCalls?.length);
 
   // Preserve message ordering/protocol while progressively reducing oversized content.
   const KEEP_RECENT = 20;
@@ -121,7 +188,7 @@ export function compressHistory(messages: ChatMessage[], maxTokens = CONTEXT_TOK
       return {
         ...msg,
         content: msg.content.slice(0, 1000) + `\n... [Resposta antiga reduzida]`,
-        reasoning: undefined,
+        reasoning: keepsReasoning(msg) ? msg.reasoning : undefined,
       };
     }
     return msg;
@@ -130,41 +197,47 @@ export function compressHistory(messages: ChatMessage[], maxTokens = CONTEXT_TOK
   const result = [...compressedOld, ...recentMessages].map((message) => ({ ...message }));
   if (estimateMessagesTokens(result) <= maxTokens) return result;
 
-  // Remove reasoning first; it is useful for display but not required for protocol continuity.
-  for (const message of result) message.reasoning = undefined;
+  // Remove reasoning first; it is useful for display but not required for protocol continuity
+  // (except on MiMo tool calls, where it stays, shortened).
+  for (const message of result) {
+    message.reasoning = keepsReasoning(message) && message.reasoning !== undefined
+      ? shorten(message.reasoning, KEPT_REASONING_CHARS, "... [reduzido]")
+      : undefined;
+  }
 
-  // Shrink oldest content first, but keep every message so tool-call role ordering remains valid.
-  for (let i = 0; i < result.length && estimateMessagesTokens(result) > maxTokens; i++) {
-    const message = result[i];
-    if (message.content.length > 160) {
-      message.content = `${message.content.slice(0, 120)}\n... [conteúdo reduzido por limite de contexto]`;
-    }
-    if (message.toolCalls) {
-      message.toolCalls = message.toolCalls.map((call) => ({
-        ...call,
-        function: {
-          ...call.function,
-          arguments: call.function.arguments.length > 160
-            ? `${call.function.arguments.slice(0, 120)}...`
-            : call.function.arguments,
-        },
-      }));
-    }
+  // Keep every message so tool-call role ordering remains valid, and shrink what the model
+  // needs least first: tool results, then its own messages, then the user's. The request
+  // being worked on goes last: without it the model loses the task.
+  const request = currentRequestIndex(result);
+  const indexes = (keep: (m: ChatMessage, i: number) => boolean) => result.flatMap((m, i) => (keep(m, i) ? [i] : []));
+  const order = [
+    ...indexes((m) => m.role === "tool"),
+    ...indexes((m) => m.role === "assistant"),
+    ...indexes((m, i) => m.role === "user" && i !== request),
+    ...(request >= 0 ? [request] : []),
+  ];
+  let total = estimateMessagesTokens(result);
+  for (const i of order) {
+    if (total <= maxTokens) break;
+    const message = result[i]!;
+    const before = estimateMessagesTokens([message]);
+    shrinkMessage(message);
+    total += estimateMessagesTokens([message]) - before;
   }
 
   // If metadata and many small messages still exceed the budget, discard the oldest turns.
   // Discard whole turns at once: dropping only the leading "assistant" message of a
   // tool-call turn would leave an orphan "tool" message at the front, which breaks the
   // assistant(tool_calls) -> tool(result) pairing the OpenAI-compatible APIs require.
-  while (estimateMessagesTokens(result) > maxTokens && result.length > 1) {
-    result.shift();
-    while (result.length > 1 && result[0].role === "tool") {
-      result.shift();
+  while (total > maxTokens && result.length > 1) {
+    total -= estimateMessagesTokens([result.shift()!]);
+    while (result.length > 1 && result[0]!.role === "tool") {
+      total -= estimateMessagesTokens([result.shift()!]);
     }
   }
 
   // A single recent message can exceed the whole context budget; bound it as a last resort.
-  if (estimateMessagesTokens(result) > maxTokens && result.length === 1) {
+  if (total > maxTokens && result.length === 1) {
     const last = result[0];
     last.reasoning = undefined;
     last.toolCalls = undefined;

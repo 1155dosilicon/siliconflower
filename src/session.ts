@@ -56,7 +56,7 @@ export interface SessionState {
   apiTokens: number;
   /** System prompt + API history + live text. Front ends may add what is being typed. */
   estimatedTokens: number;
-  /** The open conversation; null until its first turn is saved. Only with a store. */
+  /** The open conversation; null until its first turn ends. Only with a store. */
   conversationId: string | null;
   conversations: ConversationSummary[];
 }
@@ -231,14 +231,19 @@ export class AgentSession {
   /** Only complete turns reach this point: see commitTurn. A failure must not end the turn. */
   private async saveConversation(): Promise<void> {
     if (!this.store || !this.history.length) return;
-    const id = this.state.conversationId ?? `${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
+    // Before writing: the page may open another conversation meanwhile, and an id set after
+    // the write would make that conversation save its next turn over this one.
+    let id = this.state.conversationId;
+    if (!id) {
+      id = `${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
+      this.patch({ conversationId: id });
+    }
     const first = this.state.messages.find((m) => m.role === "user")?.content ?? "";
     try {
       await this.store.save(
         { id, title: conversationTitle(first), updatedAt: new Date().toISOString(), messageCount: this.state.messages.length },
         { history: stripMediaData(this.history), messages: this.state.messages, activities: this.activities, todos: this.state.todos }
       );
-      this.patch({ conversationId: id });
       await this.refreshConversations();
     } catch (e) {
       await log("error", `Conversa não foi salva: ${String(e)}`);
@@ -400,12 +405,22 @@ export class AgentSession {
 
     let accText = "";
     let accThinking = "";
+    // Text since the last finished step: what came before is already in `steps`.
+    let stepText = "";
     let hadError = false;
     let assistantMsgAdded = false;
+    // Finished tool steps, kept even if the turn fails or is cancelled later: otherwise the
+    // model would not know what its tools already did (files written, commands run).
+    const steps: ChatMessage[] = [];
     // Commits this turn to the API history exactly once.
     const commitTurn = (turnMessages: ChatMessage[]) => {
       // Files that will not be sent again must not stay in memory for the whole conversation.
       this.history = pruneMedia([...this.history, userMsg, ...turnMessages]);
+    };
+    /** An interrupted turn: its finished steps, then what was being written and why it stopped. */
+    const commitInterrupted = (note: string) => {
+      const partial = stepText.trim();
+      commitTurn([...steps, { role: "assistant", content: partial ? `${partial}\n\n${note}` : note }]);
     };
 
     try {
@@ -433,7 +448,12 @@ export class AgentSession {
             break;
           case "text":
             accText += ev.text;
+            stepText += ev.text;
             this.patch({ liveText: accText });
+            break;
+          case "step":
+            steps.push(...ev.messages);
+            stepText = "";
             break;
           case "tool_call":
             this.patch({ status: `🔨 ${ev.name}...` });
@@ -453,7 +473,7 @@ export class AgentSession {
               const partial = accText.trim();
               const shown = partial ? `${partial}\n\n[Erro: ${ev.message}]` : `[Erro: ${ev.message}]`;
               this.patch({ messages: [...this.state.messages, { role: "assistant", content: shown }] });
-              commitTurn([{ role: "assistant", content: shown }]);
+              commitInterrupted(`[Erro: ${ev.message}]`);
             }
             break;
           case "done": {
@@ -487,9 +507,9 @@ export class AgentSession {
         this.patch({
           messages: [...this.state.messages, { role: "assistant", content: shown, reasoning: accThinking || undefined }],
         });
-        // Partial tool calls of an interrupted turn are not kept (they could be left
-        // without their results); the visible text is enough context for the next turn.
-        commitTurn([{ role: "assistant", content: isAbort && accText ? `${accText}\n\n[interrompido pelo usuário]` : shown }]);
+        // Finished steps are kept (llm.ts closes a step cut by a cancel); tool calls of a
+        // response still being received are not, since they never ran.
+        commitInterrupted(isAbort ? "[interrompido pelo usuário]" : `[${errMsg}]`);
       }
     } finally {
       this.pending?.reject(new Error("operação encerrada"));
