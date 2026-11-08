@@ -6,6 +6,9 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Changed
+- Workflows de CI e release com `actions/checkout@v7` e `softprops/action-gh-release@v3`, que rodam em Node 24 (o Node 20 nas actions foi descontinuado pelo GitHub).
+
 ## [0.8.1] - 2026-11-07
 
 Correções de perda de conversas, de turnos interrompidos que o modelo esquecia, de saídas de ferramenta sem corte e do cancelamento, além de uma de segurança: hooks dentro do repositório não rodam mais.
