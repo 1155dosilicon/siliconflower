@@ -6,6 +6,10 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-07
+
+Correções de perda de conversas, de turnos interrompidos que o modelo esquecia, de saídas de ferramenta sem corte e do cancelamento, além de uma de segurança: hooks dentro do repositório não rodam mais.
+
 ### Changed
 - Documentação enxugada: README sem repetições, ARCHITECTURE e PLATAFORMAS sem trechos duplicados, e o README explica o `env` do MCP e o erro de PATH com `npx` do nvm no app.
 
