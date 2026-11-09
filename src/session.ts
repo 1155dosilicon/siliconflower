@@ -5,20 +5,25 @@ import { loadSkills, readSkillContent, SKILL_TOOL, type Skill } from "./skills.j
 import { buildSystemPrompt, nextMode, type Mode } from "./modes.js";
 import { buildMemorySystemPrompt } from "./services/memory.js";
 import { onTodosChange, setTodos } from "./todo.js";
-import { randomBytes } from "node:crypto";
+import { basename, join } from "node:path";
+import { writeFile } from "node:fs/promises";
 import {
+  cleanTitle,
   conversationTitle,
+  newConversationId,
   type ConversationStore,
   type ConversationSummary,
   type ToolActivity,
 } from "./services/conversations.js";
-import { pruneMedia, stripMediaData } from "./services/media.js";
+import { isToolMediaMessage, loadMedia, pruneMedia, stripMediaData, MAX_MEDIA_BYTES } from "./services/media.js";
+import { killBackgroundTask, listBackgroundTasks, onBackgroundTasksChange } from "./services/background-tasks.js";
+import { ensureDir, getWorkspaceDataDir } from "./fs-util.js";
 import { estimateTokens, estimateMessagesTokens } from "./context.js";
 import { log } from "./logger.js";
-import type { AppConfig, ChatMessage, McpTool, ReasoningLevel, StreamEvent, TodoItem, ToolResult } from "./types.js";
+import type { AppConfig, ChatMessage, McpTool, MediaAttachment, ReasoningLevel, StreamEvent, TodoItem, ToolResult } from "./types.js";
 import { isToolAllowedInMode } from "./tool-policy.js";
-import { runHook } from "./core/hooks.js";
-import { reasoningLabel, reasoningOptions } from "./reasoning.js";
+import { resolveHooks, runHook } from "./core/hooks.js";
+import { isXiaomiMimoEndpoint, reasoningLabel, reasoningOptions } from "./reasoning.js";
 import { findProject, type ProjectInfo } from "./project.js";
 
 export interface SessionOverrides {
@@ -32,6 +37,23 @@ export interface UIMessage {
   content: string;
   reasoning?: string;
 }
+
+/** A file the user attached in the interface: its name and its content in Base64. */
+export interface SessionUpload {
+  name: string;
+  data: string;
+}
+
+/** A command or subagent still running in the background, for the interface to show and stop. */
+export interface SessionBackgroundTask {
+  id: string;
+  type: "command" | "subagent";
+  description: string;
+  startedAt: string;
+}
+
+export const MAX_UPLOADS = 4;
+const EMPTY_RESPONSE_NOTE = "[O modelo encerrou a resposta sem escrever nada. Envie a mensagem de novo ou reformule o pedido.]";
 
 export interface SessionQuestion {
   question: string;
@@ -59,6 +81,8 @@ export interface SessionState {
   /** The open conversation; null until its first turn ends. Only with a store. */
   conversationId: string | null;
   conversations: ConversationSummary[];
+  /** Only what is still running: "Parar" ends the turn, not these. */
+  backgroundTasks: SessionBackgroundTask[];
 }
 
 export interface SessionDeps {
@@ -104,7 +128,11 @@ export class AgentSession {
   private pending: { resolve: (answer: string) => void; reject: (err: Error) => void; options?: string[] } | null = null;
   private statusTimer: ReturnType<typeof setTimeout> | undefined;
   private unsubscribeTodos: (() => void) | undefined;
+  private unsubscribeTasks: (() => void) | undefined;
+  /** `updatedAt` this session last saw in each conversation file: see ConversationStore.save. */
+  private readonly stamps = new Map<string, string>();
   private started = false;
+  private sending = false;
   private closed = false;
 
   constructor(config: AppConfig, overrides: SessionOverrides = {}, deps: SessionDeps = {}) {
@@ -130,6 +158,7 @@ export class AgentSession {
       estimatedTokens: 0,
       conversationId: null,
       conversations: [],
+      backgroundTasks: [],
     };
     this.state.estimatedTokens = this.estimateTokens(this.state);
   }
@@ -187,7 +216,9 @@ export class AgentSession {
     if (!this.store || this.state.streaming || this.closed) return false;
     try {
       const body = await this.store.load(id);
+      const stamp = await this.store.stamp(id);
       if (this.state.streaming || this.closed) return false; // a turn started meanwhile
+      if (stamp) this.stamps.set(id, stamp);
       this.showConversation(id, body);
       return true;
     } catch (e) {
@@ -207,8 +238,35 @@ export class AgentSession {
       this.patch({ error: "Não consegui apagar essa conversa." });
       return;
     }
+    this.stamps.delete(id);
     if (id === this.state.conversationId) this.newConversation();
     await this.refreshConversations();
+  }
+
+  /** Gives a saved conversation another title. Returns false when nothing changed. */
+  async renameConversation(id: string, rawTitle: string): Promise<boolean> {
+    const title = cleanTitle(rawTitle);
+    if (!this.store || !title || this.closed) return false;
+    try {
+      await this.store.rename(id, title);
+    } catch (e) {
+      await log("error", `Conversa ${id} não foi renomeada: ${String(e)}`);
+      this.patch({ error: "Não consegui renomear essa conversa." });
+      return false;
+    }
+    await this.refreshConversations();
+    return true;
+  }
+
+  /** Ends a background command or subagent from the interface. */
+  killBackgroundTask(id: string): boolean {
+    return killBackgroundTask(id).success;
+  }
+
+  private runningTasks(): SessionBackgroundTask[] {
+    return listBackgroundTasks()
+      .filter((task) => task.status === "running")
+      .map(({ id, type, description, startedAt }) => ({ id, type, description, startedAt }));
   }
 
   private showConversation(id: string | null, body: { history: ChatMessage[]; messages: UIMessage[]; activities: ToolActivity[]; todos: TodoItem[] }): void {
@@ -235,15 +293,27 @@ export class AgentSession {
     // the write would make that conversation save its next turn over this one.
     let id = this.state.conversationId;
     if (!id) {
-      id = `${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
+      id = newConversationId();
       this.patch({ conversationId: id });
     }
     const first = this.state.messages.find((m) => m.role === "user")?.content ?? "";
+    // A title the user gave (renameConversation) stays.
+    const title = this.state.conversations.find((c) => c.id === id)?.title ?? conversationTitle(first);
+    const updatedAt = new Date().toISOString();
     try {
-      await this.store.save(
-        { id, title: conversationTitle(first), updatedAt: new Date().toISOString(), messageCount: this.state.messages.length },
-        { history: stripMediaData(this.history), messages: this.state.messages, activities: this.activities, todos: this.state.todos }
+      const savedAs = await this.store.save(
+        { id, title, updatedAt, messageCount: this.state.messages.length },
+        { history: stripMediaData(this.history), messages: this.state.messages, activities: this.activities, todos: this.state.todos },
+        this.stamps.get(id)
       );
+      this.stamps.set(savedAs, updatedAt);
+      if (savedAs !== id) {
+        // Another window wrote this conversation meanwhile: ours went on as a copy.
+        this.stamps.delete(id);
+        if (this.state.conversationId === id) {
+          this.patch({ conversationId: savedAs, error: "Outra janela alterou esta conversa. Para não apagar o que ela gravou, esta janela continua numa cópia." });
+        }
+      }
       await this.refreshConversations();
     } catch (e) {
       await log("error", `Conversa não foi salva: ${String(e)}`);
@@ -281,6 +351,7 @@ export class AgentSession {
     if (this.started || this.closed) return;
     this.started = true;
     this.unsubscribeTodos = onTodosChange((updated) => this.patch({ todos: [...updated] }));
+    this.unsubscribeTasks = onBackgroundTasksChange(() => { if (!this.closed) this.patch({ backgroundTasks: this.runningTasks() }); });
     const mcp = new McpManager();
     this.mcp = mcp;
 
@@ -291,9 +362,9 @@ export class AgentSession {
     this.memoryPrompt = await buildMemorySystemPrompt(process.cwd()).catch(() => "");
     this.patch({});
     await log("info", `siliconflower iniciado - model=${this.state.model}`);
-    if (this.config.hooks) {
-      await runHook("onSessionStart", this.config.hooks, { cwd: process.cwd() });
-    }
+    // config.json first, then hooks.json of the workspace or the global one.
+    const hooks = await resolveHooks(this.config.hooks);
+    if (hooks) await runHook("onSessionStart", hooks, { cwd: process.cwd() });
     this.patch({ status: "conectando MCP..." });
     try {
       const tools = await mcp.connectAll(this.config.mcpServers);
@@ -321,10 +392,11 @@ export class AgentSession {
     this.closed = true;
     this.clearStatusTimer();
     this.unsubscribeTodos?.();
+    this.unsubscribeTasks?.();
     this.abort?.abort();
     const pendingWork: Promise<unknown>[] = [];
     if (this.turn) pendingWork.push(this.turn); // what the aborted turn did must still be saved
-    if (this.config.hooks) pendingWork.push(runHook("onSessionEnd", this.config.hooks, { cwd: process.cwd() }));
+    pendingWork.push(resolveHooks(this.config.hooks).then((hooks) => (hooks ? runHook("onSessionEnd", hooks, { cwd: process.cwd() }) : undefined)));
     if (this.mcp) pendingWork.push(this.mcp.close());
     await Promise.allSettled(pendingWork);
   }
@@ -376,21 +448,94 @@ export class AgentSession {
     return true;
   }
 
-  /** Runs one full turn. Ignored while another turn is running or after close(). */
-  async send(text: string): Promise<void> {
+  /**
+   * Runs one full turn, with the files the user attached, if any. Ignored while another turn
+   * is running or after close().
+   */
+  async send(text: string, uploads: SessionUpload[] = []): Promise<void> {
     // Line breaks and tabs are content (the web front end has a multi-line input).
     const cleanText = text.replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0B-\x1F\x7F]/g, "").trim();
-    if (!cleanText || this.state.streaming || this.closed) return;
-    const turn = this.runTurn(cleanText);
+    if ((!cleanText && !uploads.length) || this.state.streaming || this.sending || this.closed) return;
+    this.sending = true; // the turn only counts as streaming after the attachments are stored
+    const turn = this.runTurn(cleanText, uploads).finally(() => { this.sending = false; });
     this.turn = turn;
     await turn;
   }
 
-  private async runTurn(cleanText: string): Promise<void> {
+  /**
+   * Replaces the last message the user sent and runs the turn again with the new text. The old
+   * answer, its tool cards and its place in the API history are dropped before anything is
+   * awaited, so the caller can redraw right after calling. What the tools of the old turn
+   * already did (files written, commands run) is not undone. Files attached to the old
+   * message go along again. Returns false when there is nothing to edit.
+   */
+  editLastMessage(text: string): Promise<void> | false {
+    const cleanText = text.replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0B-\x1F\x7F]/g, "").trim();
+    if (!cleanText || this.state.streaming || this.sending || this.closed) return false;
+    const lastIndex = <T>(list: T[], match: (item: T) => boolean) => {
+      for (let i = list.length - 1; i >= 0; i--) if (match(list[i]!)) return i;
+      return -1;
+    };
+    const shownIndex = lastIndex(this.state.messages, (m) => m.role === "user");
+    const historyIndex = lastIndex(this.history, (m) => m.role === "user" && !isToolMediaMessage(m));
+    if (shownIndex === -1 || historyIndex === -1) return false;
+
+    const media = this.history[historyIndex]!.media ?? [];
+    this.history = this.history.slice(0, historyIndex);
+    // Cards of the dropped turn were placed after its user message.
+    this.activities = this.activities.filter((a) => a.afterMessage <= shownIndex);
+    this.patch({ messages: this.state.messages.slice(0, shownIndex), error: null });
+
+    this.sending = true;
+    const turn = this.runTurn(cleanText, [], media).finally(() => { this.sending = false; });
+    this.turn = turn;
+    return turn;
+  }
+
+  /**
+   * Saves the attached files in the project's data folder and loads them for the model.
+   * Saved conversations keep only the path, which read_media can open again later.
+   */
+  private async storeUploads(uploads: SessionUpload[]): Promise<MediaAttachment[]> {
+    if (uploads.length > MAX_UPLOADS) throw new Error(`no máximo ${MAX_UPLOADS} arquivos por mensagem`);
+    const dir = join(getWorkspaceDataDir(process.cwd()), "uploads");
+    await ensureDir(dir);
+    const media: MediaAttachment[] = [];
+    for (const [index, upload] of uploads.entries()) {
+      const name = upload.name.replace(/[^a-zA-Z0-9._-]/g, "_").replace(/^\.+/, "").slice(-80) || "arquivo";
+      const bytes = Buffer.from(upload.data, "base64");
+      if (bytes.length > MAX_MEDIA_BYTES) throw new Error(`${upload.name} tem ${bytes.length} bytes; o limite é ${MAX_MEDIA_BYTES}`);
+      const path = join(dir, `${Date.now().toString(36)}-${index}-${name}`);
+      await writeFile(path, bytes);
+      try {
+        media.push(await loadMedia(path, { allowAudioVideo: isXiaomiMimoEndpoint(this.config.baseURL) }));
+      } catch (e) {
+        throw new Error(`${upload.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    return media;
+  }
+
+  private async runTurn(text: string, uploads: SessionUpload[], reusedMedia: MediaAttachment[] = []): Promise<void> {
     this.clearStatusTimer();
+    let media: MediaAttachment[] = reusedMedia;
+    if (uploads.length) {
+      try {
+        media = await this.storeUploads(uploads);
+      } catch (e) {
+        // Nothing was sent to the model. The page checks the file type before sending, so
+        // this is rare (audio or video on a provider without them, a file too large).
+        this.patch({ error: `Anexo não enviado: ${e instanceof Error ? e.message : String(e)}` });
+        return;
+      }
+      if (this.state.streaming || this.closed) return;
+    }
+    const cleanText = text || "Veja o anexo.";
+    const names = uploads.length ? uploads.map((u) => u.name) : media.map((m) => basename(m.path).replace(/^[a-z0-9]+-\d+-/, "")); // without storeUploads' prefix
+    const shown = media.length ? `${cleanText}\n\n${names.map((name) => `[anexo: ${name}]`).join("\n")}` : cleanText;
     this.patch({
       error: null,
-      messages: [...this.state.messages, { role: "user", content: cleanText }],
+      messages: [...this.state.messages, { role: "user", content: shown }],
       streaming: true,
       liveText: "",
       status: "pensando...",
@@ -398,7 +543,7 @@ export class AgentSession {
 
     // Pass the full API history (including tool calls/results from earlier turns) so the
     // model keeps that context; compressHistory in llm.ts applies the token budget.
-    const userMsg: ChatMessage = { role: "user", content: cleanText };
+    const userMsg: ChatMessage = { role: "user", content: cleanText, ...(media.length ? { media } : {}) };
     const messages: ChatMessage[] = [...this.history, userMsg];
     const controller = new AbortController();
     this.abort = controller;
@@ -479,13 +624,19 @@ export class AgentSession {
           case "done": {
             const final = ev.content?.trim() || accText.trim();
             const finalThinking = ev.reasoning?.trim() || accThinking.trim();
-            if (final) {
+            // Nothing at all (no text, no tool step): without a note the turn would end in
+            // silence, as if the message had never been sent.
+            const silent = !final && steps.length === 0;
+            const shownFinal = silent ? EMPTY_RESPONSE_NOTE : final;
+            if (shownFinal) {
               this.patch({
-                messages: [...this.state.messages, { role: "assistant", content: final, reasoning: finalThinking || undefined }],
+                messages: [...this.state.messages, { role: "assistant", content: shownFinal, reasoning: finalThinking || undefined }],
               });
             }
             assistantMsgAdded = true;
-            commitTurn(ev.messages ?? (final ? [{ role: "assistant", content: final }] : []));
+            const turnMessages = ev.messages ?? (final ? [{ role: "assistant" as const, content: final }] : []);
+            // The history keeps user and assistant alternating.
+            commitTurn(silent ? [{ role: "assistant", content: EMPTY_RESPONSE_NOTE }] : turnMessages);
             break;
           }
         }
@@ -493,7 +644,8 @@ export class AgentSession {
       this.patch({ status: hadError ? "erro" : "pronto" });
     } catch (e) {
       hadError = true;
-      const isAbort = (e instanceof Error && e.name === "AbortError") || /abort/i.test(String(e));
+      // Only the turn's own signal means a cancel: see isCancellation in llm.ts.
+      const isAbort = controller.signal.aborted;
       const errMsg = isAbort ? "Operação cancelada pelo usuário" : (e instanceof Error ? e.message : String(e));
       if (!isAbort) {
         await log("error", `Stream failed: ${errMsg}`);
@@ -554,10 +706,20 @@ export class AgentSession {
       });
     }
     if (this.mcp) {
+      // The same preTool/postTool hooks as the native tools (runBuiltin runs those).
+      const signal = this.abort?.signal;
+      const hooks = await resolveHooks(this.config.hooks);
+      const hookCtx = { toolName: name, toolArgs: args, cwd: process.cwd() };
+      if (hooks) {
+        await runHook("preTool", hooks, hookCtx, signal);
+        if (signal?.aborted) return { result: `Execução de ${name} cancelada pelo usuário.`, isError: true };
+      }
       try {
-        return await this.mcp.callTool(name, args, this.abort?.signal);
+        return await this.mcp.callTool(name, args, signal);
       } catch (e) {
         return { result: String(e), isError: true };
+      } finally {
+        if (hooks) await runHook("postTool", hooks, hookCtx, signal);
       }
     }
     return { result: `tool not found: ${name}`, isError: true };

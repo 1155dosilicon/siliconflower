@@ -1,10 +1,14 @@
 export type ReasoningLevel = "none" | "low" | "medium" | "high";
 export type Mode = "programação" | "sistema" | "plano";
 
+/** A server started here and reached by stdio (`command`), or a remote one by HTTP (`url`). */
 export interface McpServerConfig {
-  command: string;
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  /** Streamable HTTP endpoint, e.g. https://exemplo.com/mcp. */
+  url?: string;
+  headers?: Record<string, string>;
 }
 
 export interface AppConfig {
@@ -14,6 +18,8 @@ export interface AppConfig {
   reasoning: ReasoningLevel;
   mode?: Mode;
   system?: string;
+  /** Tokens one request may use (system prompt, tool schemas and history). Default: 90000. */
+  contextTokens?: number;
   mcpServers?: Record<string, McpServerConfig>;
   hooks?: {
     preTool?: string;

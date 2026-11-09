@@ -1,9 +1,14 @@
-import { parseMarkdown } from "/markdown.js";
+import { highlightTokens, parseMarkdown } from "/markdown.js";
 
 const $ = (id) => document.getElementById(id);
 const MAX_RECONNECT_ATTEMPTS = 20;
 // gui/server.ts closes the connection above this size (MAX_MESSAGE_BYTES), and the text was lost.
-const MAX_MESSAGE_BYTES = 1024 * 1024;
+const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
+// Attachments go in the message, as Base64 (a third larger than the file).
+const MAX_ATTACHMENTS = 4;
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+// The formats of services/media.ts: checked here so a wrong file never costs the typed message.
+const ATTACHMENT_TYPES = /\.(jpe?g|png|gif|webp|bmp|mp3|wav|flac|m4a|ogg|mp4|mov|avi|wmv)$/i;
 const STICK_TO_BOTTOM_PX = 80;
 const REASONING_NAMES = { off: "desligado", on: "ligado", low: "baixo", med: "médio", high: "alto" };
 
@@ -18,6 +23,13 @@ let questionShown = null;
 let workingFolder = "";
 /** A problem found here, before anything reached the server (e.g. a message too large). */
 let localError = null;
+/** Files waiting to go with the next message: `{ name, data }`, data in Base64. */
+let pendingFiles = [];
+let conversationFilter = "";
+/** Id of the conversation whose title is being edited in the sidebar. */
+let renamingId = null;
+/** The next message replaces the last one sent, instead of following it. */
+let editingLast = false;
 const toolCards = new Map();
 
 /* --------------------------------- DOM helpers --------------------------------- */
@@ -98,7 +110,10 @@ function renderBlocks(blocks, parent) {
         const wrap = parent.appendChild(el("div", "code-block"));
         const bar = wrap.appendChild(el("div", "code-bar"));
         bar.append(el("span", "", block.lang || "texto"), copyButton(() => block.text));
-        wrap.appendChild(el("pre")).append(el("code", "", block.text));
+        const code = wrap.appendChild(el("pre")).appendChild(el("code"));
+        for (const token of highlightTokens(block.text, block.lang)) {
+          code.append(token.type ? el("span", `tok-${token.type}`, token.text) : document.createTextNode(token.text));
+        }
         break;
       }
       case "table": {
@@ -124,10 +139,38 @@ function markdownInto(node, text) {
 
 /* ----------------------------------- Timeline ----------------------------------- */
 
+/** What the user typed, without the "[anexo: ...]" lines the session adds below it. */
+function typedText(content) {
+  return content.replace(/\n\n(?:\[anexo: [^\]\n]*\]\n?)+$/, "");
+}
+
+function startEditingLast() {
+  const last = state.messages.findLast((m) => m.role === "user");
+  if (!last || state.streaming) return;
+  editingLast = true;
+  const input = $("input");
+  input.value = typedText(last.content);
+  fitInput();
+  input.focus();
+  scheduleRender();
+}
+
+function stopEditingLast() {
+  if (!editingLast) return;
+  editingLast = false;
+  $("input").value = "";
+  fitInput();
+  scheduleRender();
+}
+
 function messageNode(message) {
   const node = el("article", `message ${message.role}`);
   if (message.role === "user") {
-    node.append(el("div", "bubble", message.content));
+    const edit = el("button", "edit-message", "Editar");
+    edit.type = "button";
+    edit.title = "Editar e reenviar esta mensagem (a resposta atual é descartada)";
+    edit.addEventListener("click", startEditingLast);
+    node.append(edit, el("div", "bubble", message.content));
     return node;
   }
   const body = node.appendChild(el("div", "markdown"));
@@ -280,14 +323,26 @@ function formatDate(iso) {
 function renderSidebar() {
   // Rebuilding the list at every token of an answer would lose hover and focus.
   const { conversations, conversationId, streaming } = state;
-  if (sidebarDrawn?.conversations === conversations && sidebarDrawn.conversationId === conversationId && sidebarDrawn.streaming === streaming) return;
-  sidebarDrawn = { conversations, conversationId, streaming };
+  if (
+    sidebarDrawn?.conversations === conversations && sidebarDrawn.conversationId === conversationId &&
+    sidebarDrawn.streaming === streaming && sidebarDrawn.filter === conversationFilter && sidebarDrawn.renamingId === renamingId
+  ) return;
+  sidebarDrawn = { conversations, conversationId, streaming, filter: conversationFilter, renamingId };
 
   $("new-conversation").disabled = streaming;
-  $("no-conversations").hidden = conversations.length > 0;
-  $("conversation-list").replaceChildren(...conversations.map((conversation) => {
+  $("conversation-search").hidden = conversations.length < 2 && !conversationFilter;
+  const needle = conversationFilter.trim().toLowerCase();
+  const shown = needle ? conversations.filter((c) => c.title.toLowerCase().includes(needle)) : conversations;
+  const empty = $("no-conversations");
+  empty.hidden = shown.length > 0;
+  empty.textContent = conversations.length ? "Nenhuma conversa com esse texto." : "As conversas deste projeto ficam aqui.";
+  $("conversation-list").replaceChildren(...shown.map((conversation) => {
     const current = conversation.id === conversationId;
     const item = el("li", `conversation${current ? " current" : ""}`);
+    if (conversation.id === renamingId) {
+      item.append(renameInput(conversation));
+      return item;
+    }
     const open = el("button", "conversation-open");
     open.type = "button";
     open.disabled = streaming;
@@ -296,6 +351,14 @@ function renderSidebar() {
     open.append(el("span", "conversation-title", conversation.title), el("span", "conversation-date", formatDate(conversation.updatedAt)));
     open.addEventListener("click", () => {
       if (!current) sendToServer({ type: "resume", id: conversation.id });
+    });
+    const rename = el("button", "conversation-rename", "✎");
+    rename.type = "button";
+    rename.title = "Renomear esta conversa";
+    rename.setAttribute("aria-label", `Renomear a conversa ${conversation.title}`);
+    rename.addEventListener("click", () => {
+      renamingId = conversation.id;
+      scheduleRender();
     });
     const remove = el("button", "conversation-delete", "×");
     remove.type = "button";
@@ -307,9 +370,110 @@ function renderSidebar() {
         sendToServer({ type: "delete", id: conversation.id });
       }
     });
-    item.append(open, remove);
+    item.append(open, rename, remove);
     return item;
   }));
+  $("conversation-list").querySelector(".conversation-title-input")?.focus();
+}
+
+/** The title edited in place: Enter saves, Esc or leaving the field gives up. */
+function renameInput(conversation) {
+  const input = el("input", "conversation-title-input");
+  input.type = "text";
+  input.value = conversation.title;
+  input.maxLength = 80;
+  input.setAttribute("aria-label", "Novo título da conversa");
+  const finish = (save) => {
+    if (renamingId !== conversation.id) return;
+    renamingId = null;
+    const title = input.value.trim();
+    if (save && title && title !== conversation.title) sendToServer({ type: "rename", id: conversation.id, title });
+    scheduleRender();
+  };
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") finish(true);
+    else if (event.key === "Escape") {
+      event.stopPropagation(); // Esc here must not cancel the running answer
+      finish(false);
+    }
+  });
+  input.addEventListener("blur", () => finish(false));
+  return input;
+}
+
+let tasksDrawn = null;
+
+function renderTasks() {
+  const tasks = state.backgroundTasks ?? [];
+  if (tasksDrawn === tasks) return;
+  tasksDrawn = tasks;
+  $("tasks").hidden = tasks.length === 0;
+  $("task-list").replaceChildren(...tasks.map((task) => {
+    const item = el("li", "task");
+    const text = el("span", "task-text", `${task.type === "subagent" ? "Subagente: " : ""}${task.description}`);
+    text.title = `${task.description}\n${task.id} · desde ${formatDate(task.startedAt)}`;
+    const stop = el("button", "task-stop", "Encerrar");
+    stop.type = "button";
+    stop.setAttribute("aria-label", `Encerrar a tarefa ${task.description}`);
+    stop.addEventListener("click", () => sendToServer({ type: "kill-task", id: task.id }));
+    item.append(el("span", "task-dot"), text, stop);
+    return item;
+  }));
+}
+
+function renderAttachments() {
+  const list = $("attachments");
+  list.hidden = pendingFiles.length === 0;
+  list.replaceChildren(...pendingFiles.map((file, index) => {
+    const item = el("li", "attachment");
+    const remove = el("button", "", "×");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Remover ${file.name}`);
+    remove.addEventListener("click", () => {
+      pendingFiles = pendingFiles.filter((_, i) => i !== index);
+      renderAttachments();
+    });
+    item.append(el("span", "", file.name), remove);
+    return item;
+  }));
+}
+
+function readAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    // "data:<mime>;base64,<data>": only the data goes to the server, which decides the type by the name.
+    reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+    reader.readAsDataURL(file);
+  });
+}
+
+async function addFiles(files) {
+  for (const file of files) {
+    if (pendingFiles.length >= MAX_ATTACHMENTS) {
+      localError = `No máximo ${MAX_ATTACHMENTS} arquivos por mensagem.`;
+      break;
+    }
+    const total = pendingFiles.reduce((sum, f) => sum + f.size, 0) + file.size;
+    if (total > MAX_ATTACHMENT_BYTES) {
+      localError = `${file.name} não coube: os anexos de uma mensagem somam até 10 MB. Para arquivos maiores, diga o caminho e peça ao agente para lê-lo.`;
+      break;
+    }
+    // A pasted screenshot has no useful name.
+    const name = file.name && file.name !== "image.png" ? file.name : `colado-${Date.now()}.${(file.type.split("/")[1] ?? "png").replace("jpeg", "jpg")}`;
+    if (!ATTACHMENT_TYPES.test(name)) {
+      localError = `${name} não é imagem, áudio nem vídeo. Para outros arquivos, diga o caminho e peça ao agente para lê-lo.`;
+      continue;
+    }
+    try {
+      pendingFiles = [...pendingFiles, { name, size: file.size, data: await readAsBase64(file) }];
+      localError = null;
+    } catch {
+      localError = `Não consegui ler ${file.name}.`;
+    }
+  }
+  renderAttachments();
+  scheduleRender();
 }
 
 function formatTokens(n) {
@@ -347,6 +511,13 @@ function renderChrome() {
   action.classList.toggle("primary", !stopping);
 
   $("empty").hidden = state.messages.length > 0 || state.streaming;
+
+  // Only the last message can be edited, and not while an answer is running.
+  const userMessages = $("timeline").querySelectorAll(".message.user");
+  userMessages.forEach((node, index) => node.classList.toggle("editable", !state.streaming && index === userMessages.length - 1));
+  if (editingLast && (state.streaming || !userMessages.length)) editingLast = false;
+  $("editing").hidden = !editingLast;
+  if (!stopping) action.textContent = editingLast ? "Reenviar" : "Enviar";
 }
 
 function isNearBottom() {
@@ -372,6 +543,7 @@ function render() {
   renderQuestion();
   renderTodos();
   renderSidebar();
+  renderTasks();
   renderChrome();
   if (stick) scrollToEnd();
   updateJumpButton();
@@ -402,7 +574,7 @@ function sendToServer(message) {
   const payload = JSON.stringify(message);
   const bytes = new TextEncoder().encode(payload).length;
   if (bytes > MAX_MESSAGE_BYTES) {
-    localError = `Mensagem grande demais (${(bytes / 1048576).toFixed(1)} MB; o limite é 1 MB). Salve o texto num arquivo e peça ao agente para lê-lo.`;
+    localError = `Mensagem grande demais (${(bytes / 1048576).toFixed(1)} MB; o limite é 16 MB). Salve o conteúdo num arquivo e peça ao agente para lê-lo.`;
     scheduleRender();
     return false;
   }
@@ -463,6 +635,8 @@ function connect() {
       case "state":
         if (!state) return;
         state = { ...state, ...message.changes };
+        // The text of a running answer arrives in pieces: see flushState in gui/server.ts.
+        if (message.liveAppend) state.liveText += message.liveAppend;
         break;
       case "tool":
         handleTool(message.activity);
@@ -498,9 +672,21 @@ function submitComposer() {
     return;
   }
   const input = $("input");
-  if (!input.value.trim() || socket?.readyState !== WebSocket.OPEN) return;
-  if (!sendToServer({ type: "send", text: input.value })) return;
+  if ((!input.value.trim() && !pendingFiles.length) || socket?.readyState !== WebSocket.OPEN) return;
+  if (editingLast) {
+    if (!input.value.trim() || !sendToServer({ type: "edit", text: input.value })) return;
+    editingLast = false;
+    localError = null;
+    input.value = "";
+    fitInput();
+    forceScroll = true;
+    return;
+  }
+  const attachments = pendingFiles.map(({ name, data }) => ({ name, data }));
+  if (!sendToServer({ type: "send", text: input.value, ...(attachments.length ? { attachments } : {}) })) return;
   localError = null;
+  pendingFiles = [];
+  renderAttachments();
   input.value = "";
   fitInput();
   forceScroll = true;
@@ -536,6 +722,36 @@ $("question").addEventListener("submit", (event) => {
 });
 
 $("new-conversation").addEventListener("click", () => sendToServer({ type: "new" }));
+$("conversation-search").addEventListener("input", (event) => {
+  conversationFilter = event.target.value;
+  scheduleRender();
+});
+
+$("attach").addEventListener("click", () => $("file-input").click());
+$("file-input").addEventListener("change", (event) => {
+  void addFiles([...event.target.files]);
+  event.target.value = ""; // the same file can be chosen again
+});
+$("input").addEventListener("paste", (event) => {
+  const files = [...(event.clipboardData?.files ?? [])];
+  if (!files.length) return; // plain text: the default paste
+  event.preventDefault();
+  void addFiles(files);
+});
+const dropZone = $("composer-form");
+dropZone.addEventListener("dragover", (event) => {
+  if (!event.dataTransfer?.types.includes("Files")) return;
+  event.preventDefault();
+  dropZone.classList.add("dragging");
+});
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragging"));
+dropZone.addEventListener("drop", (event) => {
+  dropZone.classList.remove("dragging");
+  const files = [...(event.dataTransfer?.files ?? [])];
+  if (!files.length) return;
+  event.preventDefault();
+  void addFiles(files);
+});
 $("toggle-sidebar").addEventListener("click", () => { $("sidebar").hidden = !$("sidebar").hidden; });
 // Narrow windows start with the room for the conversation itself.
 $("sidebar").hidden = window.matchMedia("(max-width: 760px)").matches;
@@ -543,8 +759,11 @@ $("sidebar").hidden = window.matchMedia("(max-width: 760px)").matches;
 $("mode").addEventListener("change", (event) => sendToServer({ type: "mode", mode: event.target.value }));
 $("reasoning").addEventListener("change", (event) => sendToServer({ type: "reasoning", level: event.target.value }));
 
+$("cancel-edit").addEventListener("click", stopEditingLast);
+
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && state?.streaming) sendToServer({ type: "cancel" });
+  if (event.key === "Escape" && editingLast) stopEditingLast();
+  else if (event.key === "Escape" && state?.streaming) sendToServer({ type: "cancel" });
 });
 
 setConnection("conectando...", "warn");

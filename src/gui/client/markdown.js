@@ -225,3 +225,44 @@ function parseBlocks(lines, depth) {
 export function parseMarkdown(text) {
   return parseBlocks(text.replace(/\r\n?/g, "\n").split("\n"), 0);
 }
+
+/* ------------------------------ Code highlighting ------------------------------ */
+
+const HASH_COMMENT_LANGS = new Set(["py", "python", "sh", "bash", "zsh", "shell", "fish", "yaml", "yml", "toml", "ruby", "rb", "r", "perl", "pl", "dockerfile", "makefile", "ini", "conf", "powershell", "ps1", "nix", "elixir", "ex"]);
+const PLAIN_LANGS = new Set(["", "text", "texto", "txt", "plain", "markdown", "md", "diff", "log", "csv", "output"]);
+const SQL_LANGS = new Set(["sql", "lua", "haskell", "hs"]);
+const MAX_HIGHLIGHT_CHARS = 40_000;
+
+const KEYWORDS =
+  "abstract and as assert async await begin bool boolean break case catch char class const continue def default defer del delete do done double elif else end enum esac except export extends false False fi final finally float fn for from func function global go if impl implements import in int interface is lambda let local long match mod module mut new nil None not null of or package pass private protected pub public raise return select self static string struct super switch then this throw trait true True try type typeof undefined unless until use using var void while with yield";
+
+/**
+ * Splits code into tokens: `[{ type, text }]`, with type "comment", "string", "number",
+ * "keyword" or "" (plain). The page builds the elements, so nothing here is ever HTML.
+ * One rule set for every language: good enough to read code, not a parser.
+ */
+export function highlightTokens(text, lang = "") {
+  const name = String(lang).toLowerCase();
+  if (PLAIN_LANGS.has(name) || text.length > MAX_HIGHLIGHT_CHARS) return [{ type: "", text }];
+  const comments = [];
+  if (HASH_COMMENT_LANGS.has(name)) comments.push("#[^\\n]*");
+  else if (SQL_LANGS.has(name)) comments.push("--[^\\n]*");
+  else comments.push("\\/\\/[^\\n]*", "\\/\\*[\\s\\S]*?(?:\\*\\/|$)");
+  const pattern = new RegExp(
+    `(?<comment>${comments.join("|")})` +
+      "|(?<string>\"(?:[^\"\\\\\\n]|\\\\.)*\"|'(?:[^'\\\\\\n]|\\\\.)*'|`(?:[^`\\\\]|\\\\.)*`)" +
+      "|(?<number>\\b\\d[\\d_]*(?:\\.\\d+)?\\b)" +
+      `|(?<keyword>\\b(?:${KEYWORDS.split(" ").join("|")})\\b)`,
+    "g"
+  );
+  const tokens = [];
+  let last = 0;
+  for (const match of text.matchAll(pattern)) {
+    if (match.index > last) tokens.push({ type: "", text: text.slice(last, match.index) });
+    const type = Object.keys(match.groups).find((key) => match.groups[key] !== undefined) ?? "";
+    tokens.push({ type, text: match[0] });
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) tokens.push({ type: "", text: text.slice(last) });
+  return tokens;
+}

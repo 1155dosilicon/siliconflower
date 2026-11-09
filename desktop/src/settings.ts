@@ -71,13 +71,24 @@ export function parseMcp(text: string): { servers?: Record<string, McpServerConf
     parsed = (parsed as { mcpServers: unknown }).mcpServers; // as most MCP docs show it
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return { error: 'Use um objeto: { "nome": { "command": "npx", "args": ["..."] } }.' };
+    return { error: 'Use um objeto: { "nome": { "command": "npx", "args": ["..."] } } ou { "nome": { "url": "https://..." } }.' };
   }
   const servers: Record<string, McpServerConfig> = {};
   for (const [name, value] of Object.entries(parsed)) {
     const server = value as Partial<McpServerConfig> | null;
-    if (typeof server?.command !== "string" || !server.command.trim()) {
-      return { error: `O servidor MCP "${name}" precisa de um "command".` };
+    const isText = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
+    const onlyText = (v: unknown) => typeof v === "object" && v !== null && Object.values(v).every((x) => typeof x === "string");
+    if (isText(server?.url)) {
+      // A remote server, reached by HTTP instead of started here.
+      if (!validUrl(server.url)) return { error: `Em "${name}", "url" precisa ser um endereço http:// ou https://.` };
+      if (server.headers !== undefined && !onlyText(server.headers)) {
+        return { error: `Em "${name}", "headers" precisa ter só valores de texto.` };
+      }
+      servers[name] = { url: server.url.trim(), ...(server.headers ? { headers: server.headers } : {}) };
+      continue;
+    }
+    if (!isText(server?.command)) {
+      return { error: `O servidor MCP "${name}" precisa de um "command" ou de uma "url".` };
     }
     if (server.args !== undefined && !(Array.isArray(server.args) && server.args.every((a) => typeof a === "string"))) {
       return { error: `Em "${name}", "args" precisa ser uma lista de textos.` };

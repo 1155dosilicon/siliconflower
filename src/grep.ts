@@ -21,16 +21,29 @@ interface GrepMatch {
 }
 
 
-function matchesGlob(relPath: string, filename: string, pattern?: string): boolean {
-  if (!pattern || pattern === "*") return true;
-  const re = globToRegex(pattern);
+function matchesGlob(relPath: string, filename: string, pattern: string, re: RegExp): boolean {
   // Patterns without a path separator match the basename at any depth (like ripgrep --glob);
   // patterns with a separator (e.g. "src/**/*.tsx") match the full path relative to basePath.
   return pattern.includes("/") ? re.test(relPath) : re.test(filename);
 }
 
+// A regex runs to the end once started: nothing can cancel it, not even "Parar". Longer lines
+// (minified files) are only tested up to here.
+const MAX_TESTED_LINE_CHARS = 2_000;
+
+/**
+ * A repetition applied to a group that already repeats, like `(a+)+` or `(\w*)*`: on a line
+ * that almost matches, the time doubles with every character and the whole agent freezes.
+ */
+export function hasNestedRepetition(pattern: string): boolean {
+  return /\((?:[^()\\]|\\.)*(?:[+*]|\{\d+,\d*\})(?:[^()\\]|\\.)*\)(?:[+*]|\{\d+,\d*\})/.test(pattern);
+}
+
 export async function searchContent(opts: GrepOptions): Promise<GrepMatch[]> {
   const { basePath, pattern, includePattern, maxMatches = GREP_MAX_MATCHES, signal } = opts;
+  if (hasNestedRepetition(pattern)) {
+    throw new Error("padrão com repetição aninhada, como (a+)+ ou (\\w*)*, pode travar a busca. Reescreva sem repetir um grupo que já repete.");
+  }
   let regex: RegExp;
   try {
     regex = new RegExp(pattern, "i");
@@ -40,6 +53,7 @@ export async function searchContent(opts: GrepOptions): Promise<GrepMatch[]> {
   }
   const matches: GrepMatch[] = [];
   const root = resolve(basePath);
+  const includeRe = includePattern && includePattern !== "*" ? globToRegex(includePattern) : undefined;
 
   async function walk(dir: string) {
     if (matches.length >= maxMatches || signal?.aborted) return;
@@ -59,9 +73,9 @@ export async function searchContent(opts: GrepOptions): Promise<GrepMatch[]> {
           await walk(fullPath);
         }
       } else if (entry.isFile()) {
-        if (includePattern) {
+        if (includePattern && includeRe) {
           const relPath = relative(root, fullPath).replace(/\\/g, "/");
-          if (!matchesGlob(relPath, entry.name, includePattern)) continue;
+          if (!matchesGlob(relPath, entry.name, includePattern, includeRe)) continue;
         }
 
         // Avoid binary files / large files
@@ -75,7 +89,7 @@ export async function searchContent(opts: GrepOptions): Promise<GrepMatch[]> {
           const lines = content.split(/\r?\n/);
 
           for (let i = 0; i < lines.length; i++) {
-            if (regex.test(lines[i])) {
+            if (regex.test(lines[i].length > MAX_TESTED_LINE_CHARS ? lines[i].slice(0, MAX_TESTED_LINE_CHARS) : lines[i])) {
               matches.push({
                 file: fullPath,
                 line: i + 1,

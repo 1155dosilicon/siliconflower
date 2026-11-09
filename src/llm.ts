@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { log } from "./logger.js";
-import { CONTEXT_TOKEN_BUDGET, compressHistory, estimateTokens, processToolOutput } from "./context.js";
+import { compressHistory, contextBudget, estimateTokens, processToolOutput } from "./context.js";
 import type { AppConfig, ChatMessage, MediaAttachment, McpTool, ReasoningLevel, StreamEvent, ToolResult } from "./types.js";
 import { isXiaomiMimoEndpoint } from "./reasoning.js";
 import { hasMediaData, mediaNote, pruneMedia, rejectMedia, userContent } from "./services/media.js";
@@ -18,14 +18,19 @@ export async function* streamChat(opts: ChatOptions): AsyncGenerator<StreamEvent
   try {
     yield* streamOpenAI(opts);
   } catch (err) {
-    if (isAbortError(err)) throw err;
+    if (isCancellation(err, opts.signal)) throw err;
     void log("error", `streamChat: ${describeApiError(err)}`);
     yield { type: "error", message: enrichError(err, opts.config) };
   }
 }
 
-function isAbortError(err: unknown): boolean {
-  return (err instanceof Error && err.name === "AbortError") || /abort/i.test(String(err));
+/**
+ * Whether the error is the user's cancel. Only the turn's signal says so: a network failure
+ * whose text has "aborted" in it ("connection aborted by peer") is an error to show.
+ */
+export function isCancellation(err: unknown, signal?: AbortSignal): boolean {
+  if (signal) return signal.aborted;
+  return err instanceof Error && err.name === "AbortError";
 }
 
 export function enrichError(err: unknown, config: AppConfig): string {
@@ -99,14 +104,24 @@ export function buildOpenAITools(tools: McpTool[]): OpenAI.Chat.Completions.Chat
 }
 
 const STREAM_CONNECT_TIMEOUT_MS = 300_000;
+/** Time without any data in an open stream: the provider or the network stopped answering. */
+export const STREAM_IDLE_TIMEOUT_MS = 300_000;
 
-async function withConnectTimeout<T>(promise: Promise<T>, signal?: AbortSignal, onTimeout?: () => void): Promise<T> {
+const connectTimeoutMessage = () => `Sem resposta da API após ${STREAM_CONNECT_TIMEOUT_MS / 1000}s (timeout de conexão)`;
+
+async function withConnectTimeout<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal,
+  onTimeout?: () => void,
+  ms = STREAM_CONNECT_TIMEOUT_MS,
+  message: () => string = connectTimeoutMessage
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       cleanup();
       onTimeout?.();
-      reject(new Error(`Sem resposta da API após ${STREAM_CONNECT_TIMEOUT_MS / 1000}s (timeout de conexão)`));
-    }, STREAM_CONNECT_TIMEOUT_MS);
+      reject(new Error(message()));
+    }, ms);
 
     const onAbort = () => {
       cleanup();
@@ -152,6 +167,30 @@ export const MAX_STEPS = 50;
 const MIN_HISTORY_TOKENS = 20_000;
 
 const GENERIC_RETRY_DELAY_MS = 1000;
+
+/**
+ * The chunks of a stream, failing when none arrives for `idleMs`: without this, a provider
+ * that stops in the middle of an answer leaves the turn waiting forever.
+ */
+export async function* withIdleTimeout<T>(
+  source: AsyncIterable<T>,
+  signal: AbortSignal | undefined,
+  onTimeout: () => void,
+  idleMs = STREAM_IDLE_TIMEOUT_MS
+): AsyncGenerator<T> {
+  const iterator = source[Symbol.asyncIterator]();
+  const message = () => `A API parou de enviar dados por ${Math.round(idleMs / 1000)}s no meio da resposta (stream travado).`;
+  try {
+    while (true) {
+      const next = await withConnectTimeout(iterator.next(), signal, onTimeout, idleMs, message);
+      if (next.done) return;
+      yield next.value;
+    }
+  } finally {
+    // Not awaited: on a stalled stream the provider's iterator may never answer.
+    void iterator.return?.()?.catch?.(() => {});
+  }
+}
 
 /**
  * Xiaomi MiMo sometimes answers a valid request with HTTP 400 and only "Request failed"
@@ -230,7 +269,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   // The system prompt and the tool schemas are sent in every request and use the same budget.
   const historyBudget = Math.max(
     MIN_HISTORY_TOKENS,
-    CONTEXT_TOKEN_BUDGET - estimateTokens(config.system ?? "") - estimateTokens(JSON.stringify(apiTools))
+    contextBudget(config.contextTokens) - estimateTokens(config.system ?? "") - estimateTokens(JSON.stringify(apiTools))
   );
   const turn: ChatMessage[] = [];
   let finalContent = "";
@@ -324,7 +363,12 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
     let toolCallChunkCount = 0;
 
     try {
-      for await (const chunk of stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>) {
+      const chunks = withIdleTimeout(
+        stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>,
+        signal,
+        () => requestController?.abort()
+      );
+      for await (const chunk of chunks) {
       if (chunk.usage) {
         yield {
           type: "usage",

@@ -18,7 +18,9 @@ Referência para quem vai mudar o código. Comandos, regras e mapa resumido est�
 5. **O evento `done`** traz em `messages` o que o turno produziu: `assistant` com `toolCalls`, resultados `tool` e a resposta final. A sessão acrescenta isso ao histórico da API, separado das mensagens exibidas. Turnos cancelados ou com erro guardam os passos concluídos (eventos `step`) e, depois deles, o texto do passo interrompido com o motivo (`[Erro: ...]` ou `[interrompido pelo usuário]`): o modelo continua sabendo o que suas ferramentas já fizeram. Um passo cortado pelo cancelamento é fechado com o resultado `NOT_RUN_AFTER_CANCEL` para as chamadas que não rodaram. Chamadas de uma resposta ainda em recepção não entram, porque não rodaram.
 6. **`buildOpenAIMessages`** descarta resultados `tool` cuja chamada foi compactada, evitando HTTP 400 por mensagem órfã.
 
-Saídas de ferramenta acima de 32 mil caracteres são truncadas (início e fim). O conteúdo completo vai para `~/.siliconflower/outputs/` e o caminho aparece na resposta (`processToolOutput`). O corte é feito em `llm.ts`, para todo resultado: ferramentas nativas, MCP e subagentes. Imagens e áudios devolvidos por MCP viram uma nota curta (`mcpContentText`), em vez de Base64 como texto.
+Saídas de ferramenta acima de 32 mil caracteres são truncadas (início e fim). O conteúdo completo vai para `~/.siliconflower/outputs/` e o caminho aparece na resposta (`processToolOutput`); arquivos ali com mais de 7 dias são apagados na primeira gravação de cada execução. `read_file` não chega a esse corte: devolve linhas inteiras até cerca de 28 mil caracteres e diz em que linha continuar.
+
+O histórico só é compactado (`compressHistory`) quando passa do orçamento de tokens, que é `contextTokens` do `config.json` (padrão 90 mil) menos o prompt de sistema e os schemas das ferramentas. O stream tem dois timeouts de 300 s: o de conexão e o de inatividade (`withIdleTimeout`), para o provedor que para de enviar no meio da resposta. Um erro só conta como cancelamento quando o sinal do turno foi abortado (`isCancellation`), nunca pelo texto da mensagem. O corte é feito em `llm.ts`, para todo resultado: ferramentas nativas, MCP e subagentes. Imagens e áudios devolvidos por MCP viram uma nota curta (`mcpContentText`), em vez de Base64 como texto.
 
 **Cancelamento**: `Esc` ou **Parar** na interface chama `AgentSession.cancel()`, que aborta o `AbortController` do turno. O SDK da OpenAI encerra o stream em silêncio ao abortar, então `llm.ts` confere o sinal depois do stream e antes de cada ferramenta: um turno cancelado nunca conta como concluído nem executa as chamadas já recebidas. O sinal chega:
 - à requisição HTTP;
@@ -31,9 +33,15 @@ Saídas de ferramenta acima de 32 mil caracteres são truncadas (início e fim).
 
 ## Sessão e interfaces
 
-`AgentSession` (`session.ts`) concentra a conversa e não depende de interface: histórico da API, despacho de ferramentas, modo `plano`, cancelamento e `ask_question`. As interfaces leem `getState()` (objeto substituído a cada mudança, nunca alterado), assinam `subscribe`/`onStreamEvent` e chamam as ações (`send`, `cancel`, `answer`, `setMode`, `setReasoning`).
+`AgentSession` (`session.ts`) concentra a conversa e não depende de interface: histórico da API, despacho de ferramentas, modo `plano`, cancelamento e `ask_question`. As interfaces leem `getState()` (objeto substituído a cada mudança, nunca alterado), assinam `subscribe`/`onStreamEvent` e chamam as ações (`send`, `cancel`, `answer`, `setMode`, `setReasoning`, `editLastMessage`, `renameConversation`, `killBackgroundTask`).
 
-- **GUI** (`gui/`): `gui/index.ts` controla o ciclo de vida e abre o navegador (`openUrlCommand`: `xdg-open` no Linux, `open` no macOS, `Start-Process` no Windows, sempre via `runShell`); `gui/server.ts` serve a página e faz a ponte por WebSocket; `gui/client/` é HTML, CSS e JS puros, sem build, embutidos no binário por `import ... with { type: "text" }`. Usa `Bun.serve`, então só é importada dinamicamente pelo comando `gui`, e os demais subcomandos continuam rodando em Node + tsx.
+- **Anexos**: `send(texto, arquivos)` grava cada arquivo em `workspaces/<workspace-id>/uploads/` e o envia ao modelo na mensagem do usuário (`services/media.ts`, os mesmos formatos e limites de `read_media`). A conversa salva guarda só o caminho.
+- **Editar a última mensagem**: `editLastMessage(texto)` tira do histórico da API, da tela e dos cartões o último turno e roda outro com o novo texto. O corte acontece antes de qualquer `await`, então o servidor redesenha as páginas logo após a chamada. O que as ferramentas do turno antigo já fizeram não é desfeito.
+- **Tarefas em background**: o estado traz `backgroundTasks`, só com o que ainda roda. **Parar** encerra o turno, não essas tarefas; a interface as lista e encerra uma a uma.
+- **Duas janelas no mesmo projeto**: ao salvar, `ConversationStore.save` confere se o arquivo ainda tem a data que esta sessão viu por último. Se outra janela gravou no meio, a conversa é salva como cópia, com outro id, em vez de apagar os turnos da outra.
+- **Texto da resposta**: o servidor manda só o trecho novo (`liveAppend`) enquanto a resposta cresce.
+
+- **GUI** (`gui/`): `gui/index.ts` controla o ciclo de vida e abre o navegador (`openUrlCommand`: `xdg-open` no Linux, `Start-Process` no Windows, sempre via `runShell`); `gui/server.ts` serve a página e faz a ponte por WebSocket; `gui/client/` é HTML, CSS e JS puros, sem build, embutidos no binário por `import ... with { type: "text" }`. Usa `Bun.serve`, então só é importada dinamicamente pelo comando `gui`, e os demais subcomandos continuam rodando em Node + tsx.
 
 **Protocolo do WebSocket** (JSON). Servidor: `hello` (estado e ferramentas, para uma página nova ou recarregada), `state` (só as chaves que mudaram, agrupadas a cada 33 ms) e `tool`. O texto do raciocínio não vai para a página. Página: `send`, `answer`, `cancel`, `mode`, `reasoning`; valores inválidos são ignorados.
 
@@ -96,12 +104,14 @@ Quando o provedor rejeita `reasoning_effort` ou o parâmetro de tokens, a requis
 
 ## Hooks (`core/hooks.ts`)
 
-| Hook | Quando | Origem |
-| :--- | :--- | :--- |
-| `preTool`, `postTool` | Antes e depois de cada ferramenta nativa (não no modo `plano`) | `hooks` do `config.json` |
-| `onEdit` | Depois de `write_file`, `edit_file`, `apply_patch`, `move_path` e `delete_path` bem-sucedidos | `config.json` |
-| `onCommand` | Antes de `execute_command` | `hooks.onCommand` inline; se ausente, o primeiro `hooks.json` em: workspace → `~/.siliconflower/` |
-| `onSessionStart`, `onSessionEnd` | Abertura e fechamento da sessão (GUI ou app), inclusive no modo `plano` | `config.json` |
+| Hook | Quando |
+| :--- | :--- |
+| `preTool`, `postTool` | Antes e depois de cada ferramenta nativa ou MCP (não no modo `plano`) |
+| `onEdit` | Depois de `write_file`, `edit_file`, `apply_patch`, `move_path` e `delete_path` bem-sucedidos |
+| `onCommand` | Antes de `execute_command` |
+| `onSessionStart`, `onSessionEnd` | Abertura e fechamento da sessão (GUI ou app), inclusive no modo `plano` |
+
+Origem (`resolveHooks`), evento por evento: `hooks` do `config.json`; se o evento não estiver lá, o primeiro `hooks.json` em: workspace → `~/.siliconflower/`.
 
 Os hooks rodam via `shell.ts`, com timeout de 30 s, e recebem estas variáveis:
 - `SILICONFLOWER_EVENT`;
@@ -123,7 +133,8 @@ Um `hooks.json` dentro do repositório (`<raiz>/.siliconflower/hooks.json`, lido
 A checagem é feita em `session.ts` antes de despachar a ferramenta. `programação` e `sistema` só mudam o foco do prompt e não restringem nada. A mesma política vale para os subagentes `research` e `plan` (`services/subagent.ts`).
 
 **MCP** (`mcp.ts`):
-- os servidores de `mcpServers` sobem via stdio, com timeout de conexão de 20 s;
+- os servidores de `mcpServers` sobem via stdio (`command`) ou são acessados por HTTP (`url` e `headers`, transporte Streamable HTTP), com timeout de conexão de 20 s;
+- um servidor cuja conexão caiu é reconectado antes da chamada seguinte; a chamada que falhou nunca é repetida sozinha, porque pode já ter tido efeito;
 - as ferramentas são expostas como `mcp_<servidor>_<ferramenta>_<hash>` (no máximo 64 caracteres, sem colisões), e o nome original é usado só no transporte;
 - cada chamada tem timeout de 120 s e é cancelável;
 - `isError: true` do servidor chega ao modelo como erro.
@@ -140,10 +151,10 @@ Os schemas em `src/tools.ts` são a fonte de verdade; esta tabela só indica ond
 | `edit_file` | `services/smart-edit.ts` | Correspondência exata → quebras de linha normalizadas → espaços flexíveis (erro se ambíguo); preserva CRLF |
 | `apply_patch` | `tools.ts` | Vários blocos, gravação única; preserva CRLF |
 | `search_files` | `glob-util.ts` | No máximo 1000 resultados, 200 exibidos com aviso; não entra nas pastas bloqueadas, nem com `includeHidden` |
-| `grep_content` | `grep.ts` | Regex sem distinção de maiúsculas; ignora `IGNORED_SOURCE_DIRS`, pastas ocultas e bloqueadas, binários e arquivos acima de 2 MB; para em 200 ocorrências e avisa |
+| `grep_content` | `grep.ts` | Regex sem distinção de maiúsculas; ignora `IGNORED_SOURCE_DIRS`, pastas ocultas e bloqueadas, binários e arquivos acima de 2 MB; para em 200 ocorrências e avisa; recusa regex com repetição aninhada, como `(a+)+`, que travaria o agente, e testa só os 2 mil primeiros caracteres de cada linha |
 | `repo_map`, `find_symbol` | `services/repomap.ts` | Extração por regex: TS/JS, Python, Go, Rust; não entram nas pastas bloqueadas; `find_symbol` exige um nome |
 | `execute_command` | `tools.ts` + `shell.ts` | Timeout de até 120 s; `runInBackground` cria tarefa com timeout de até 1 h |
-| `manage_background_task` | `services/background-tasks.ts` | `list`, `status`, `kill` |
+| `manage_background_task` | `services/background-tasks.ts` | `list`, `status`, `kill`; o `status` de um comando ainda rodando traz `partialOutput`, o que ele já imprimiu (últimos 16 mil caracteres) |
 | `run_task`, `send_subagent_message` | `services/subagent.ts` | Sem timeout fixo, cancelável; subagentes não têm `run_task`, `send_subagent_message`, `todowrite` nem MCP e só executam as ferramentas oferecidas a eles; recebem o contexto do projeto (`buildSubagentPrompt`), e `research` e `plan` são somente leitura; `send_subagent_message` recusa um subagente ainda em execução |
 | `ask_question` | `tools.ts` + `session.ts` | Pausa e espera a resposta na interface; sem interface, pede ao modelo que repasse a pergunta |
 | `todowrite` | `todo.ts` | Checklist da sessão |

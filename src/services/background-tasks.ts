@@ -21,6 +21,27 @@ export interface BackgroundTaskRecord {
 
 const backgroundTasks = new Map<string, BackgroundTaskRecord>();
 
+/** What a running command has printed so far is kept up to here (its end, the newest part). */
+const MAX_PARTIAL_CHARS = 16_000;
+
+const changeListeners = new Set<() => void>();
+
+/** Called when a task starts, ends or is killed. Returns the unsubscribe function. */
+export function onBackgroundTasksChange(listener: () => void): () => void {
+  changeListeners.add(listener);
+  return () => changeListeners.delete(listener);
+}
+
+function notifyChange(): void {
+  for (const listener of changeListeners) {
+    try {
+      listener();
+    } catch {
+      // A listener of the interface must never break a task.
+    }
+  }
+}
+
 // Finished (non-running) records are never removed otherwise, so a long-lived session
 // running many background commands/subagents would grow this map without bound.
 const MAX_FINISHED_TASKS = 200;
@@ -37,6 +58,7 @@ function pruneFinishedTasks(): void {
 
 export function registerBackgroundTask(task: BackgroundTaskRecord): void {
   backgroundTasks.set(task.id, task);
+  notifyChange();
 }
 
 export function settleBackgroundTask(
@@ -50,6 +72,7 @@ export function settleBackgroundTask(
   task.result = result;
   task.completedAt = new Date().toISOString();
   pruneFinishedTasks();
+  notifyChange();
 }
 
 export function startBackgroundCommand(command: string, cwd: string = process.cwd(), timeout = 300000): string {
@@ -70,6 +93,13 @@ export function startBackgroundCommand(command: string, cwd: string = process.cw
   try {
     const started = startShell(command, { cwd, timeout });
     child = started.child;
+    // A server or a watcher never ends: its output so far must be readable while it runs.
+    const keepPartial = (chunk: Buffer) => {
+      if (taskRecord.status !== "running") return;
+      taskRecord.result = ((taskRecord.result ?? "") + chunk.toString("utf8")).slice(-MAX_PARTIAL_CHARS);
+    };
+    child.stdout?.on("data", keepPartial);
+    child.stderr?.on("data", keepPartial);
     void started.done.then((res) => {
       taskRecord.completedAt = new Date().toISOString();
       // The process handle is no longer useful once it exits; drop it so it can be collected.
@@ -94,15 +124,18 @@ export function startBackgroundCommand(command: string, cwd: string = process.cw
       }
       void log("info", `[Background Task ${taskId}] concluída com status: ${taskRecord.status}`);
       pruneFinishedTasks();
+      notifyChange();
     });
   } catch (error) {
     taskRecord.status = "failed";
     taskRecord.completedAt = new Date().toISOString();
     taskRecord.result = `Erro ao iniciar processo: ${error instanceof Error ? error.message : String(error)}`;
+    notifyChange();
     return taskId;
   }
 
   taskRecord.processRef = child;
+  notifyChange();
   log("info", `[Background Task ${taskId}] iniciada: ${command}`);
 
   return taskId;
@@ -137,6 +170,7 @@ export async function killAllBackgroundTasks(): Promise<void> {
     task.completedAt = new Date().toISOString();
     task.result = "(Processo em background interrompido ao fechar o aplicativo)";
   }
+  notifyChange();
   await Promise.allSettled(kills);
 }
 
@@ -163,8 +197,10 @@ export function killBackgroundTask(id: string): { success: boolean; message: str
 
   task.status = "killed";
   task.completedAt = new Date().toISOString();
-  task.result = "(Processo em background interrompido pelo usuário)";
+  const partial = task.type === "command" && task.result ? `\n${task.result}` : "";
+  task.result = `(Processo em background interrompido pelo usuário)${partial}`;
   pruneFinishedTasks();
+  notifyChange();
 
   return { success: true, message: `Tarefa em background '${id}' foi encerrada com sucesso.` };
 }

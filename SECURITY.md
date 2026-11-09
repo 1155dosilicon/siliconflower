@@ -30,7 +30,7 @@ Depois de configurado, o modelo pode usar ferramentas que:
   **Limitação conhecida:** o hostname é resolvido uma vez para validação e de novo, de forma independente, pelo cliente HTTP. Um DNS malicioso que mude a resposta entre as duas consultas (*DNS rebinding*) contorna a checagem, e não há forma sem dependências de fixar o IP validado no Bun. Não use `web_fetch` com URLs controladas por terceiros apontando para endpoints internos sensíveis.
 - **Modo `plano`** usa uma allowlist explícita: leitura, buscas, web, perguntas e checklist da sessão.
   - Bloqueia MCP, subagentes e qualquer mutação persistente.
-  - Hooks de ferramenta ficam desligados, mas `onSessionStart` e `onSessionEnd` configurados inline continuam rodando e podem executar comandos.
+  - Hooks de ferramenta ficam desligados, mas `onSessionStart` e `onSessionEnd` (do `config.json` ou de um `hooks.json` em `~/.siliconflower/`) continuam rodando e podem executar comandos.
 - **Modos `programação` e `sistema`** só mudam o foco do prompt. Nenhum dos dois limita privilégios.
 - **Regras do prompt de sistema** pedem ao modelo que trate conteúdo de arquivos, web e ferramentas como dado, não como instrução, e que confirme ações destrutivas. São orientações ao modelo, não barreiras: uma injeção de prompt ainda pode ter sucesso.
 - **Subagentes `research` e `plan`** seguem a allowlist do modo `plano`, imposta no código. Os demais papéis têm as mesmas ferramentas nativas do agente principal, exceto `run_task`, `send_subagent_message` e `todowrite`, e nenhum subagente executa uma ferramenta que não lhe foi oferecida.
@@ -81,7 +81,8 @@ A janela mostra a mesma página, com texto vindo do modelo e de repositórios, e
 
 - **Trate a chave de API como senha.** `show` mostra a chave mascarada, mas `~/.siliconflower/config.json` é texto puro. Para manter a chave fora desse arquivo, deixe o campo vazio e use `SILICONFLOWER_API_KEY`. Valores de ambiente nunca são gravados no `config.json`, nem pelo assistente `config`. Chaves de servidores MCP (campo `env` em `mcpServers`) também ficam em texto puro no `config.json`.
 - **Não use `--mode` como barreira de permissão.** Ele só define o foco do modelo.
-- **Revise o log** (`siliconflower logs`) de vez em quando, principalmente depois de sessões longas.
+- **Revise o log** (`siliconflower logs`) de vez em quando, principalmente depois de sessões longas. Ele guarda os comandos executados e o começo dos argumentos e resultados das ferramentas. Valores com cara de credencial (`Bearer ...`, `sk-...`, `token=...`, `senha:...`, senha em URL) são mascarados antes de gravar, mas esse filtro é por padrão de texto e não pega tudo: não conte com ele para segredos em formatos incomuns.
+- **Arquivos anexados na interface** ficam em `~/.siliconflower/workspaces/<workspace-id>/uploads/` e não são apagados sozinhos.
 - **Servidores MCP de terceiros não são auditados por este projeto.** Ao configurar um, você confia nele.
 
 ## Reportando uma vulnerabilidade

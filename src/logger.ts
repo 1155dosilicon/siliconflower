@@ -45,11 +45,23 @@ function stamp(): string {
   return new Date().toISOString().replace("T", " ").replace("Z", "");
 }
 
+/**
+ * Commands and tool arguments are logged, and they may carry credentials (a curl with a
+ * token, an export of a key). Hides the values that look like one; the rest stays readable.
+ */
+export function redactSecrets(text: string): string {
+  return text
+    .replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+\/=-]{8,}/gi, "$1 ***")
+    .replace(/\b(sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[abprs])[-_][A-Za-z0-9_-]{12,}/g, "$1-***")
+    .replace(/((?:api[_-]?key|apikey|token|secret|senha|password|passwd|authorization)[A-Za-z0-9_]*["']?\s*[=:]\s*["']?)(?!\*\*\*)[^\s"'&,;]{6,}/gi, "$1***")
+    .replace(/(:\/\/[^\s\/:@]+:)[^\s\/@]+@/g, "$1***@");
+}
+
 export async function log(level: LogLevel, msg: string): Promise<void> {
   await ensure();
   await rotateIfNeeded();
   const tag = level.toUpperCase().padEnd(5);
-  const line = `[${stamp()}] ${tag} ${msg}\n`;
+  const line = `[${stamp()}] ${tag} ${redactSecrets(msg)}\n`;
   try {
     await appendFile(LOG_FILE, line, "utf8");
   } catch {

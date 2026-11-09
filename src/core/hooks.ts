@@ -38,7 +38,8 @@ async function readHooksFile(path: string): Promise<HookConfig | undefined> {
   }
   try {
     const raw = await readFile(path, "utf8");
-    return JSON.parse(raw);
+    const parsed: unknown = JSON.parse(raw.replace(/^\uFEFF/, ""));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as HookConfig) : undefined;
   } catch (err) {
     // File exists but is unreadable or not valid JSON: warn instead of silently
     // falling back to a different (unexpected) hooks source.
@@ -79,6 +80,22 @@ export function workspaceHooksFile(cwd: string = process.cwd()): string {
 export async function loadHooksConfig(cwd: string = process.cwd()): Promise<HookConfig | undefined> {
   await ignoredRepoHooksFile(cwd);
   return (await readHooksFile(workspaceHooksFile(cwd))) ?? (await readHooksFile(join(getGlobalDataDir(), "hooks.json")));
+}
+
+const HOOK_EVENTS: HookEvent[] = ["preTool", "postTool", "onEdit", "onCommand", "onSessionStart", "onSessionEnd"];
+
+/**
+ * The hooks in force: each event comes from config.json when set there, otherwise from
+ * hooks.json (workspace, else global). Undefined when no event has a command.
+ */
+export async function resolveHooks(inline: HookConfig | undefined, cwd: string = process.cwd()): Promise<HookConfig | undefined> {
+  const fromFile = await loadHooksConfig(cwd);
+  const merged: HookConfig = {};
+  for (const event of HOOK_EVENTS) {
+    const command = [inline?.[event], fromFile?.[event]].find((c) => typeof c === "string" && c.trim());
+    if (command) merged[event] = command;
+  }
+  return Object.keys(merged).length ? merged : undefined;
 }
 
 /** The tool's arguments as JSON, short enough to fit in an environment variable. */

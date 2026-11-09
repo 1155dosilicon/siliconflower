@@ -1,6 +1,6 @@
 # O que muda entre Windows e Linux/Unix
 
-O Siliconflower tem um único código para Windows, Linux e macOS/Unix. As funções são as mesmas em todos: GUI no navegador (`siliconflower gui`), app de desktop em Electron, conversas salvas, ferramentas, subagentes, MCP, hooks e skills.
+O Siliconflower tem um único código para Windows e Linux, só em x86_64. macOS e ARM não são suportados: o build (`build.ts`) recusa outras plataformas. As funções são as mesmas em todos: GUI no navegador (`siliconflower gui`), app de desktop em Electron, conversas salvas, ferramentas, subagentes, MCP, hooks e skills.
 
 Esta lista é tudo o que **deve** ser diferente entre os sistemas. Fora daqui, o comportamento é o mesmo. O código específico de SO passa por `src/platform.ts` (`isWindows()`), e os testes que dependem dele escolhem o lado pela plataforma. Ao criar ou remover uma diferença, atualize este arquivo.
 
@@ -28,6 +28,7 @@ Esta lista é tudo o que **deve** ser diferente entre os sistemas. Fora daqui, o
 | Ponto | Windows | Linux/Unix | Onde |
 | :--- | :--- | :--- | :--- |
 | `config.json` | gravação atômica | gravação atômica com permissão `0600` (e correção de arquivos antigos ao ler); resolve links simbólicos antes de substituir (dotfiles, Nix/Home Manager); apaga o temporário em caso de falha | `src/config.ts` |
+| Memória chamada `memory` | arquivo `memory_.md`, porque `memory.md` seria o próprio índice `MEMORY.md` (sistema de arquivos sem distinção de maiúsculas) | arquivo `memory.md` | `src/services/memory.ts` (`fileNameFor`) |
 | ID do workspace | caminho em minúsculas (sistema de arquivos sem distinção de maiúsculas) | caminho como está, para duas pastas que diferem só em maiúsculas não colidirem | `src/fs-util.ts` |
 | Projetos recentes do app | `folderKey` em minúsculas | `folderKey` mantém maiúsculas | `desktop/src/projects.ts` |
 
@@ -35,7 +36,7 @@ Esta lista é tudo o que **deve** ser diferente entre os sistemas. Fora daqui, o
 
 | Ponto | Windows | Linux/Unix | Onde |
 | :--- | :--- | :--- | :--- |
-| Abrir o navegador | `Start-Process '<url>'` | `xdg-open` (Linux/BSD) ou `open` (macOS), via `runShell` | `src/gui/index.ts` (`openUrlCommand`) |
+| Abrir o navegador | `Start-Process '<url>'` | `xdg-open`, via `runShell` | `src/gui/index.ts` (`openUrlCommand`) |
 | Sinais da GUI | `SIGINT`, `SIGTERM`, `SIGBREAK` | `SIGINT`, `SIGTERM`, `SIGHUP` | `src/gui/index.ts` |
 | Executável do agente | `siliconflower.exe` | `siliconflower` | `desktop/src/main.ts` (`AGENT_EXE`), `desktop/electron-builder.yml` |
 | Encerramento forçado do agente | `taskkill /T /F` | o agente roda em grupo de processos próprio (`detached`) e o grupo recebe `SIGKILL` | `desktop/src/agent-process.ts` |

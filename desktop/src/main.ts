@@ -433,9 +433,9 @@ function buildMenu(): void {
     {
       label: "Arquivo",
       submenu: [
-        { label: "Abrir pasta...", accelerator: "CmdOrCtrl+O", click: () => void pickAndOpen(focused()) },
-        { label: "Projetos recentes", accelerator: "CmdOrCtrl+Shift+O", click: () => showHome() },
-        { label: "Configurações...", accelerator: "CmdOrCtrl+,", click: () => showSettings() },
+        { label: "Abrir pasta...", accelerator: "Ctrl+O", click: () => void pickAndOpen(focused()) },
+        { label: "Projetos recentes", accelerator: "Ctrl+Shift+O", click: () => showHome() },
+        { label: "Configurações...", accelerator: "Ctrl+,", click: () => showSettings() },
         { type: "separator" },
         { role: "close", label: "Fechar janela" },
         { role: "quit", label: "Sair" },
@@ -500,7 +500,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", (_event, argv, workingDirectory) => openFromArgs(argv, workingDirectory));
 
   app.whenReady().then(() => {
-    // Windows only (taskbar grouping); a no-op on Linux and macOS.
+    // Windows only (taskbar grouping); a no-op on Linux.
     app.setAppUserModelId("com.siliconflower.desktop");
     buildMenu();
     registerIpc();

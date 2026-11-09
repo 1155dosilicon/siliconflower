@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { ServerWebSocket } from "bun";
-import type { AgentSession, SessionState } from "../session.js";
+import { MAX_UPLOADS, type AgentSession, type SessionState, type SessionUpload } from "../session.js";
 import type { Mode, ReasoningLevel } from "../types.js";
 import { REASONING_LEVELS } from "../types.js";
 import { MODES } from "../modes.js";
@@ -14,7 +14,9 @@ import markdownJs from "./client/markdown.js" with { type: "text" };
 
 const HOST = "127.0.0.1";
 const TOPIC = "session";
-const MAX_MESSAGE_BYTES = 1024 * 1024;
+// Room for the files attached to a message (Base64), which travel in the message itself.
+export const MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
+const MAX_UPLOAD_NAME_CHARS = 200;
 const STATE_FLUSH_MS = 33;
 /** Time for a page reload to reconnect before the app considers itself closed. */
 const DEFAULT_GRACE_MS = 15_000;
@@ -64,6 +66,19 @@ function withoutReasoning<T extends { reasoning?: unknown }>(message: T): Omit<T
   return rest;
 }
 
+/** The files of a "send" message, or null when the page sent anything else in their place. */
+export function parseUploads(raw: unknown): SessionUpload[] | null {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.length > MAX_UPLOADS) return null;
+  const uploads: SessionUpload[] = [];
+  for (const item of raw as { name?: unknown; data?: unknown }[]) {
+    if (typeof item?.name !== "string" || !item.name || item.name.length > MAX_UPLOAD_NAME_CHARS) return null;
+    if (typeof item.data !== "string" || !item.data || !/^[A-Za-z0-9+/]+={0,2}$/.test(item.data)) return null;
+    uploads.push({ name: item.name, data: item.data });
+  }
+  return uploads;
+}
+
 function forPage(state: SessionState) {
   return { ...state, messages: state.messages.map(withoutReasoning) };
 }
@@ -104,9 +119,16 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
     for (const key of Object.keys(current) as (keyof SessionState)[]) {
       if (current[key] !== lastSent[key]) changes[key] = current[key];
     }
+    // An answer grows a few characters at a time: send what is new, not the whole text again.
+    let liveAppend: string | undefined;
+    const previousLive = lastSent.liveText;
+    if (typeof changes.liveText === "string" && previousLive && changes.liveText.startsWith(previousLive)) {
+      liveAppend = changes.liveText.slice(previousLive.length);
+      delete changes.liveText;
+    }
     lastSent = current;
     if (changes.messages) changes.messages = current.messages.map(withoutReasoning);
-    if (Object.keys(changes).length) publish({ type: "state", changes });
+    if (Object.keys(changes).length || liveAppend) publish({ type: "state", changes, ...(liveAppend ? { liveAppend } : {}) });
   };
 
   const unsubscribeState = session.subscribe((state) => {
@@ -144,7 +166,7 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
   };
 
   const handleMessage = (raw: string | Buffer) => {
-    let msg: { type?: unknown; text?: unknown; mode?: unknown; level?: unknown; id?: unknown };
+    let msg: { type?: unknown; text?: unknown; mode?: unknown; level?: unknown; id?: unknown; attachments?: unknown; title?: unknown };
     try {
       msg = JSON.parse(String(raw));
     } catch {
@@ -154,8 +176,25 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
     switch (msg.type) {
       case "send":
         if (typeof msg.text === "string") {
-          session.send(msg.text).catch((e) => void log("error", `GUI send: ${String(e)}`));
+          const uploads = parseUploads(msg.attachments);
+          if (uploads) session.send(msg.text, uploads).catch((e) => void log("error", `GUI send: ${String(e)}`));
         }
+        break;
+      case "edit":
+        // The old turn is dropped synchronously: the pages redraw without it, then follow the new one.
+        if (typeof msg.text === "string") {
+          const turn = session.editLastMessage(msg.text);
+          if (turn) {
+            publishConversation();
+            turn.catch((e) => void log("error", `GUI edit: ${String(e)}`));
+          }
+        }
+        break;
+      case "rename":
+        if (typeof msg.id === "string" && typeof msg.title === "string") void session.renameConversation(msg.id, msg.title);
+        break;
+      case "kill-task":
+        if (typeof msg.id === "string") session.killBackgroundTask(msg.id);
         break;
       case "answer":
         if (typeof msg.text === "string") session.answer(msg.text);

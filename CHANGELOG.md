@@ -6,8 +6,48 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-09
+
+Correções da revisão da 0.8.1 e o que faltava na interface: anexos, edição da última mensagem, tarefas em background, busca e renomeação de conversas. O projeto passa a ser só para Windows e Linux em x86_64.
+
+### Added
+- Anexar arquivos pela interface: botão 📎, colar ou arrastar. Imagens em qualquer provedor; áudio e vídeo na API Xiaomi MiMo. Até 4 arquivos e 10 MB por mensagem, guardados em `workspaces/<workspace-id>/uploads/` (`src/session.ts`, `src/gui/`).
+- Tarefas em background aparecem na barra lateral, com botão para encerrar cada uma (`src/session.ts`, `src/gui/client/`).
+- `manage_background_task` com `status` mostra em `partialOutput` o que um comando ainda em execução já imprimiu (`src/services/background-tasks.ts`).
+- Editar e reenviar a última mensagem: o botão **Editar** aparece ao passar o mouse sobre ela; a resposta antiga sai da tela e do histórico, e os anexos vão de novo (`src/session.ts`, `src/gui/`).
+- Busca e renomeação de conversas na barra lateral (`src/services/conversations.ts`, `src/gui/client/app.js`).
+- Realce de sintaxe nos blocos de código, sem dependências e sem HTML do modelo (`src/gui/client/markdown.js`).
+- `contextTokens` no `config.json`: quanto cada pedido pode usar antes de compactar o histórico (padrão 90 mil) (`src/context.ts`).
+- Servidores MCP por HTTP: `url` e `headers` em `mcpServers`, também no formulário do app (`src/mcp.ts`, `desktop/src/settings.ts`).
+- Hooks `preTool` e `postTool` também rodam para ferramentas MCP (`src/session.ts`).
+
+### Removed
+- Suporte a macOS e a ARM: o projeto é só para Windows e Linux em x86_64. `build.ts` recusa outras plataformas, `siliconflower gui` não usa mais `open`, e a documentação e o `package.json` (`os`, `cpu`) deixam de citar macOS.
+
 ### Changed
 - Workflows de CI e release com `actions/checkout@v7` e `softprops/action-gh-release@v3`, que rodam em Node 24 (o Node 20 nas actions foi descontinuado pelo GitHub).
+- `read_file` devolve linhas inteiras até cerca de 28 mil caracteres e diz em que linha continuar, em vez de o começo e o fim com o meio cortado; uma linha acima de 4 mil caracteres é encurtada (`src/tools.ts`).
+- O texto de uma resposta em andamento vai para a página em pedaços, não inteiro a cada atualização (`src/gui/server.ts`).
+- O limite de uma mensagem da página subiu de 1 MB para 16 MB, para caber os anexos (`src/gui/server.ts`).
+- `@modelcontextprotocol/sdk` 1.32.2, que corrige quatro avisos de segurança do próprio SDK.
+
+### Fixed
+- Um `hooks.json` em `~/.siliconflower/` só rodava o `onCommand`: `preTool`, `postTool`, `onEdit`, `onSessionStart` e `onSessionEnd` eram ignorados sem aviso, e quem moveu o arquivo do repositório ao atualizar para a 0.8.1 ficou sem eles. Agora cada evento vem do `config.json` ou, na falta, do `hooks.json` (`src/core/hooks.ts`).
+- Conversas com mais de 40 mensagens tinham os resultados antigos de ferramentas cortados para 300 caracteres mesmo com o contexto quase vazio, e o modelo esquecia os arquivos que tinha lido; a compactação agora depende só do orçamento de tokens (`src/context.ts`).
+- Um erro de rede com "aborted" no texto aparecia como "cancelado pelo usuário", sem mensagem de erro (`src/llm.ts`, `src/session.ts`).
+- Uma resposta vazia do provedor deixava a tela sem nada; agora aparece um aviso (`src/session.ts`).
+- Um stream que parava de enviar dados no meio da resposta prendia o turno para sempre; agora falha depois de 300 s sem dados (`src/llm.ts`).
+- `search_files` e o `include` de `grep_content` falhavam com `*` dentro de chaves (`{*.ts,*.js}`), e o ponto dentro de chaves casava com qualquer caractere (`src/glob-util.ts`).
+- `grep_content` com uma regex de repetição aninhada, como `(a+)+`, podia congelar o agente inteiro, inclusive o botão Parar; o padrão agora é recusado (`src/grep.ts`).
+- `web_fetch` com `timeoutMs` acima de 60 s era cortado em 60 s pelo limite fixo da ferramenta (`src/tools.ts`).
+- `edit_file` regravava com CRLF todas as linhas de um arquivo que tivesse um só `\r\n`; agora só o trecho trocado é reescrito (`src/services/smart-edit.ts`).
+- Windows: uma memória chamada `memory` era gravada no arquivo do índice e apagada por ele (`src/services/memory.ts`).
+- `~/.siliconflower/outputs/` crescia sem limite; saídas com mais de 7 dias são apagadas (`src/context.ts`).
+- Um servidor MCP que morria deixava suas ferramentas falhando até reiniciar o agente; agora é reconectado na chamada seguinte, e uma falha ao listar as ferramentas vai para o log (`src/mcp.ts`).
+- Duas janelas no mesmo projeto (navegador e app) gravavam por cima da mesma conversa; a segunda a salvar agora continua numa cópia (`src/services/conversations.ts`).
+
+### Security
+- Credenciais em comandos e argumentos (`Bearer ...`, `sk-...`, `token=...`, senha em URL) são mascaradas antes de ir para o log (`src/logger.ts`).
 
 ## [0.8.1] - 2026-11-07
 

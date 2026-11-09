@@ -1,6 +1,7 @@
 import { readFile, writeFile, unlink, readdir, access } from "fs/promises";
 import { join, resolve, basename } from "path";
 import { ensureDir, getWorkspaceDataDir, getGlobalDataDir } from "../fs-util.js";
+import { isWindows } from "../platform.js";
 import { findProject, readProjectInstructions, PROJECT_MARKERS, DEFAULT_MARKER, type ProjectInfo } from "../project.js";
 
 export type MemoryType = "user" | "feedback" | "project" | "reference";
@@ -40,8 +41,13 @@ export function noProjectMessage(cwd: string): string {
   );
 }
 
-function fileNameFor(name: string): string {
-  return `${name.replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase()}.md`;
+const INDEX_FILE = "MEMORY.md";
+
+export function fileNameFor(name: string, windows: boolean = isWindows()): string {
+  const base = name.replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase();
+  // On Windows "memory.md" and the index "MEMORY.md" are the same file: the index, written
+  // right after, would replace the memory.
+  return windows && `${base}.md` === INDEX_FILE.toLowerCase() ? `${base}_.md` : `${base}.md`;
 }
 
 /** Frontmatter values must stay on one line, otherwise the file can't be parsed back. */

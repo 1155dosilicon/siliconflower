@@ -14,6 +14,8 @@ export interface EditResult {
   matchType?: "exact" | "normalized_newlines" | "fuzzy_whitespace";
 }
 
+type Eol = "\r\n" | "\n";
+
 /**
  * Normalizes line endings to \n for consistent comparisons.
  */
@@ -28,8 +30,35 @@ function normalizeLineWhitespace(line: string): string {
   return line.trim().replace(/\s+/g, " ");
 }
 
+/** The line ending most lines of the text use. */
+function dominantEol(text: string): Eol {
+  const crlf = text.split("\r\n").length - 1;
+  const lf = text.split("\n").length - 1 - crlf;
+  return crlf > lf ? "\r\n" : "\n";
+}
+
+/** The ending the replaced stretch uses; the file's own when the stretch is a single line. */
+function eolOf(stretch: string, fallback: Eol): Eol {
+  if (stretch.includes("\r\n")) return "\r\n";
+  return stretch.includes("\n") ? "\n" : fallback;
+}
+
+const withEol = (text: string, eol: Eol) => (eol === "\n" ? normalizeNewlines(text) : normalizeNewlines(text).replace(/\n/g, "\r\n"));
+
+/** Position in `original` of the character at `index` of its newline-normalized form. */
+function originalIndex(original: string, index: number): number {
+  let o = 0;
+  for (let n = 0; n < index; n++) {
+    if (original[o] === "\r" && original[o + 1] === "\n") o++;
+    o++;
+  }
+  return o;
+}
+
 /**
  * Smart file edit function that handles exact, newline-normalized, and fuzzy whitespace matches.
+ * Only the replaced stretch is rewritten: the line endings of the rest of the file stay as
+ * they are, also in a file that mixes CRLF and LF.
  */
 export async function smartEditFile(options: EditOptions): Promise<EditResult> {
   const { path, oldText, newText, replaceAll = false } = options;
@@ -40,13 +69,13 @@ export async function smartEditFile(options: EditOptions): Promise<EditResult> {
 
   try {
     const originalRaw = await readFile(path, "utf8");
-    const useCRLF = originalRaw.includes("\r\n");
+    const fileEol = dominantEol(originalRaw);
 
     // Strategy 1: Exact match
     if (originalRaw.includes(oldText)) {
-      // Keep the file's line-ending style: a single-line oldText can match exactly in a
-      // CRLF file while newText arrives with bare LF, which would mix line endings.
-      const replacement = useCRLF ? normalizeNewlines(newText).replace(/\n/g, "\r\n") : newText;
+      // A single-line oldText can match exactly in a CRLF file while newText arrives with
+      // bare LF, which would mix line endings.
+      const replacement = withEol(newText, eolOf(oldText, fileEol));
       let updated: string;
       if (replaceAll) {
         updated = originalRaw.split(oldText).join(replacement);
@@ -65,19 +94,23 @@ export async function smartEditFile(options: EditOptions): Promise<EditResult> {
     // Strategy 2: Normalized Newlines (\r\n vs \n)
     const normOriginal = normalizeNewlines(originalRaw);
     const normOld = normalizeNewlines(oldText);
-    const normNew = normalizeNewlines(newText);
 
     if (normOriginal.includes(normOld)) {
-      let updatedNorm: string;
-      if (replaceAll) {
-        updatedNorm = normOriginal.split(normOld).join(normNew);
-      } else {
-        const idx = normOriginal.indexOf(normOld);
-        updatedNorm = normOriginal.slice(0, idx) + normNew + normOriginal.slice(idx + normOld.length);
+      const starts: number[] = [];
+      for (let idx = normOriginal.indexOf(normOld); idx !== -1; idx = normOriginal.indexOf(normOld, idx + normOld.length)) {
+        starts.push(idx);
+        if (!replaceAll) break;
       }
-      // Re-apply CRLF if original used CRLF
-      const finalContent = useCRLF ? updatedNorm.replace(/\r?\n/g, "\r\n") : updatedNorm;
-      await writeFile(path, finalContent, "utf8");
+      let updated = "";
+      let cursor = 0;
+      for (const start of starts) {
+        const from = originalIndex(originalRaw, start);
+        const to = originalIndex(originalRaw, start + normOld.length);
+        updated += originalRaw.slice(cursor, from) + withEol(newText, eolOf(originalRaw.slice(from, to), fileEol));
+        cursor = to;
+      }
+      updated += originalRaw.slice(cursor);
+      await writeFile(path, updated, "utf8");
       await log("info", `smartEditFile (normalized_newlines): ${path}`);
       return {
         result: `Editado (correspondência de quebras de linha ajustadas): ${path}`,
@@ -87,7 +120,18 @@ export async function smartEditFile(options: EditOptions): Promise<EditResult> {
     }
 
     // Strategy 3: Fuzzy Line-by-Line Whitespace Matching
+    // Each line keeps its own ending ("" on a last line without one).
     const origLines = normOriginal.split("\n");
+    const endings: string[] = [];
+    {
+      let pos = 0;
+      for (const line of origLines) {
+        pos += line.length;
+        const ending = originalRaw.startsWith("\r\n", pos) ? "\r\n" : originalRaw[pos] === "\n" ? "\n" : "";
+        endings.push(ending);
+        pos += ending.length;
+      }
+    }
     const oldLines = normOld.split("\n");
 
     if (oldLines.length > 0) {
@@ -119,17 +163,23 @@ export async function smartEditFile(options: EditOptions): Promise<EditResult> {
       }
 
       if (foundIndexes.length > 0) {
-        const newLines = normNew.split("\n");
-        const updatedLines: string[] = [];
+        const newLines = normalizeNewlines(newText).split("\n");
+        const joinLines = (from: number, to: number) => {
+          let text = "";
+          for (let i = from; i < to; i++) text += origLines[i] + endings[i];
+          return text;
+        };
+        let finalContent = "";
         let cursor = 0;
         for (const idx of foundIndexes) {
-          updatedLines.push(...origLines.slice(cursor, idx));
-          updatedLines.push(...newLines);
+          finalContent += joinLines(cursor, idx);
+          const last = idx + targetLength - 1;
+          const blockEol = (endings.slice(idx, last).find(Boolean) ?? endings[last]) || fileEol;
+          // The block ends as the replaced one did: with its line ending, or none at the end of the file.
+          finalContent += newLines.join(blockEol) + endings[last];
           cursor = idx + targetLength;
         }
-        updatedLines.push(...origLines.slice(cursor));
-        let finalContent = updatedLines.join("\n");
-        if (useCRLF) finalContent = finalContent.replace(/\r?\n/g, "\r\n");
+        finalContent += joinLines(cursor, origLines.length);
 
         await writeFile(path, finalContent, "utf8");
         await log("info", `smartEditFile (fuzzy_whitespace): ${path}`);

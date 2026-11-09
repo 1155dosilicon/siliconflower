@@ -1,11 +1,35 @@
-import { writeFile } from "node:fs/promises";
+import { readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ensureDir, getGlobalDataDir } from "./fs-util.js";
 import type { ChatMessage } from "./types.js";
 import { log } from "./logger.js";
+import { isToolMediaMessage } from "./services/media.js";
 
 function outputDir(): string {
   return join(getGlobalDataDir(), "outputs");
+}
+
+const OUTPUT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+let outputsPruned = false;
+
+/** Full outputs are only useful for the conversation that produced them: old ones are deleted. */
+export async function pruneOldOutputs(now = Date.now(), maxAgeMs = OUTPUT_MAX_AGE_MS): Promise<number> {
+  let removed = 0;
+  try {
+    const dir = outputDir();
+    for (const name of await readdir(dir)) {
+      if (!/^output_.*\.txt$/.test(name)) continue;
+      const file = join(dir, name);
+      const info = await stat(file).catch(() => null);
+      if (info && now - info.mtimeMs > maxAgeMs) {
+        await rm(file, { force: true });
+        removed++;
+      }
+    }
+  } catch {
+    // No folder yet, or no permission: nothing to clean.
+  }
+  return removed;
 }
 
 /**
@@ -22,6 +46,16 @@ const CHARS_PER_TOKEN = 3.5;
 
 /** Everything sent in one request should fit here: system prompt, tool schemas and history. */
 export const CONTEXT_TOKEN_BUDGET = 90_000;
+export const MIN_CONTEXT_TOKENS = 8_000;
+export const MAX_CONTEXT_TOKENS = 2_000_000;
+
+/** `contextTokens` of config.json, bounded; the default when absent or not a number. */
+export function contextBudget(value: unknown): number {
+  const n = Number(value);
+  return value !== undefined && value !== null && Number.isFinite(n)
+    ? Math.min(MAX_CONTEXT_TOKENS, Math.max(MIN_CONTEXT_TOKENS, Math.floor(n)))
+    : CONTEXT_TOKEN_BUDGET;
+}
 
 /**
  * Estimates token count for text.
@@ -73,6 +107,10 @@ export async function processToolOutput(output: string, maxChars = MAX_TOOL_OUTP
   try {
     const dir = outputDir();
     await ensureDir(dir);
+    if (!outputsPruned) {
+      outputsPruned = true; // once per process, before the first new file
+      await pruneOldOutputs();
+    }
     const filename = `output_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.txt`;
     const fullPath = join(dir, filename);
     await writeFile(fullPath, output, "utf8");
@@ -152,21 +190,22 @@ function shrinkMessage(message: ChatMessage): void {
   }
 }
 
-/** The user's request being worked on: the last user message that is not a media attachment. */
+/** The user's request being worked on: the last user message that is not a read_media attachment. */
 function currentRequestIndex(messages: ChatMessage[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i]!.role === "user" && !messages[i]!.media) return i;
+    if (messages[i]!.role === "user" && !isToolMediaMessage(messages[i]!)) return i;
   }
   return -1;
 }
 
 /**
- * Compresses chat history when token threshold is reached or message count is high.
+ * Compresses chat history when the token budget is exceeded.
  * Keeps system/recent messages intact, compresses old tool outputs.
  */
 export function compressHistory(messages: ChatMessage[], maxTokens = CONTEXT_TOKEN_BUDGET, opts: CompressOptions = {}): ChatMessage[] {
-  const currentTokens = estimateMessagesTokens(messages);
-  if (currentTokens <= maxTokens && messages.length <= 40) {
+  // Only the token budget decides: a count of messages says nothing about their size, and
+  // cutting old tool results in a small conversation makes the model forget what it read.
+  if (estimateMessagesTokens(messages) <= maxTokens) {
     return messages;
   }
   const keepsReasoning = (message: ChatMessage) => Boolean(opts.keepToolCallReasoning && message.toolCalls?.length);

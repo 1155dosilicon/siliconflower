@@ -17,7 +17,7 @@ bun test
 bun run dev -- gui   # sem subcomando, só mostra a ajuda
 ```
 
-Requisitos: Windows, Linux ou macOS/Unix, Bun >= 1.3 (recomendado) ou Node >= 20 com `tsx`.
+Requisitos: Windows ou Linux em x86_64 (macOS e ARM não são suportados), Bun >= 1.3 (recomendado) ou Node >= 20 com `tsx`.
 
 Para mexer no app de desktop (`desktop/`, projeto à parte):
 

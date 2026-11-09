@@ -2,11 +2,11 @@
 
 ![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-0078D6.svg)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D6.svg)
 ![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black.svg)
 ![Node](https://img.shields.io/badge/Node.js-%3E%3D20-green.svg)
 
-Agente de IA para desenvolvimento de software em **Windows, Linux e macOS/Unix**, como **app de desktop** ou **interface no navegador**. Tem **30 ferramentas nativas**, subagentes, tarefas em background, memória por projeto, Git worktrees, RepoMap, busca web e **MCP**, e funciona com **SiliconFlow, OpenRouter, OpenAI** e qualquer API compatível com a da OpenAI.
+Agente de IA para desenvolvimento de software em **Windows e Linux** (x86_64), como **app de desktop** ou **interface no navegador**. Tem **30 ferramentas nativas**, subagentes, tarefas em background, memória por projeto, Git worktrees, RepoMap, busca web e **MCP**, e funciona com **SiliconFlow, OpenRouter, OpenAI** e qualquer API compatível com a da OpenAI.
 
 ---
 
@@ -18,7 +18,8 @@ Agente de IA para desenvolvimento de software em **Windows, Linux e macOS/Unix**
 - ⚡ **Modos e raciocínio**: modos `programação`, `sistema` e `plano` (somente leitura) e nível de raciocínio, escolhidos na interface.
 - 🌳 **Git worktrees** em `<repo>/.worktrees/<branch>`, sem mexer na sua área de trabalho.
 - 🗺️ **RepoMap**: mapa de símbolos (TS, JS, Python, Go, Rust) com poucos tokens.
-- 🧩 **MCP, hooks e skills**: servidores MCP por stdio, comandos disparados por eventos e instruções em Markdown carregadas sob demanda.
+- 🧩 **MCP, hooks e skills**: servidores MCP por stdio ou HTTP, comandos disparados por eventos e instruções em Markdown carregadas sob demanda.
+- 📎 **Na interface**: anexe imagens (botão 📎, colar ou arrastar; áudio e vídeo na API Xiaomi MiMo), edite e reenvie a última mensagem, busque e renomeie conversas, e acompanhe ou encerre o que roda em background.
 - 📦 **Binário único** feito com o Bun: não precisa de Node.js instalado.
 
 ---
@@ -51,7 +52,7 @@ bun install
 bun run start -- gui     # abre a interface (assistente de configuração na 1ª vez)
 
 bun run build            # gera dist/siliconflower (dist/siliconflower.exe no Windows)
-npm run install:bin      # Linux/macOS: ~/.local/bin; Windows: %LOCALAPPDATA%\Programs\siliconflower + PATH
+npm run install:bin      # Linux: ~/.local/bin; Windows: %LOCALAPPDATA%\Programs\siliconflower + PATH
 ```
 
 Abra um novo terminal depois do `install:bin`. Para gerar o app de desktop, veja [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -60,7 +61,7 @@ Abra um novo terminal depois do `install:bin`. Para gerar o app de desktop, veja
 
 | Item | App de desktop | Agente avulso |
 | :--- | :--- | :--- |
-| Arquitetura | x86_64 (sem pacote ARM ou 32 bits) | x86_64; em ARM64, compile do código-fonte |
+| Arquitetura | x86_64 (sem ARM nem 32 bits) | x86_64 (sem ARM nem 32 bits) |
 | CPU | qualquer x86_64 | SSE4.2 (Intel 2008 / AMD 2011 em diante); não exige AVX2 |
 | glibc | **2.25+** | 2.17+ |
 | Kernel | qualquer atual | 3.10+ (5.6+ recomendado pelo Bun) |
@@ -121,8 +122,8 @@ Tudo fica em `~/.siliconflower/` (ou em `SILICONFLOWER_DATA_DIR`, se definida):
 | Configuração | `config.json` |
 | Skills | `skills/` |
 | Memórias e artefatos globais | `memory/`, `artifacts/` |
-| Dados do projeto (memórias, artefatos, hooks, conversas em texto puro) | `workspaces/<workspace-id>/` |
-| Logs e saídas longas truncadas | `logs/`, `outputs/` |
+| Dados do projeto (memórias, artefatos, hooks, conversas em texto puro, arquivos anexados em `uploads/`) | `workspaces/<workspace-id>/` |
+| Logs e saídas longas truncadas (apagadas depois de 7 dias) | `logs/`, `outputs/` |
 
 ```json
 {
@@ -132,11 +133,16 @@ Tudo fica em `~/.siliconflower/` (ou em `SILICONFLOWER_DATA_DIR`, se definida):
   "reasoning": "high",
   "mode": "programação",
   "system": "prompt personalizado (opcional)",
+  "contextTokens": 90000,
   "mcpServers": {
     "filesystem": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/Workspace"],
       "env": { "EXEMPLO_API_KEY": "..." }
+    },
+    "remoto": {
+      "url": "https://exemplo.com/mcp",
+      "headers": { "Authorization": "Bearer ..." }
     }
   },
   "hooks": {
@@ -147,8 +153,9 @@ Tudo fica em `~/.siliconflower/` (ou em `SILICONFLOWER_DATA_DIR`, se definida):
 ```
 
 - **Variáveis de ambiente:** `SILICONFLOWER_API_KEY`, `SILICONFLOWER_BASE_URL` e `SILICONFLOWER_MODEL` substituem os campos do `config.json` sem serem gravadas nele.
-- **MCP:** cada servidor sobe por stdio. As ferramentas aparecem para o modelo como `mcp_<servidor>_<ferramenta>_<hash>`.
-- **Hooks:** `preTool`, `postTool`, `onEdit`, `onCommand`, `onSessionStart` e `onSessionEnd`, no `config.json` ou num `hooks.json` em `workspaces/<workspace-id>/` ou na raiz de `~/.siliconflower/`; um `hooks.json` dentro do repositório não roda. Quando cada um roda e as variáveis que recebe: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#hooks-corehooksts).
+- **Contexto:** `contextTokens` é quanto cada pedido pode usar (prompt, ferramentas e histórico); acima disso o histórico antigo é compactado. O padrão é 90 mil; aumente em modelos com janela maior (de 8 mil a 2 milhões).
+- **MCP:** um servidor sobe por stdio (`command`) ou é acessado por HTTP (`url`, com `headers` opcionais). As ferramentas aparecem para o modelo como `mcp_<servidor>_<ferramenta>_<hash>`. Um servidor que caiu é reconectado na chamada seguinte.
+- **Hooks:** `preTool`, `postTool`, `onEdit`, `onCommand`, `onSessionStart` e `onSessionEnd`, no `config.json` ou num `hooks.json` em `workspaces/<workspace-id>/` ou na raiz de `~/.siliconflower/`. Cada evento vem do `config.json` quando está lá e, se não, do `hooks.json`; um `hooks.json` dentro do repositório não roda. Quando cada um roda e as variáveis que recebe: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#hooks-corehooksts).
 - **Skills:** arquivos Markdown em `~/.siliconflower/skills/`, lidos pelo agente com `read_skill` quando relevantes.
 - **Projeto:** `siliconflower init` cria `SILICONFLOWER.md` na pasta atual. Sem esse arquivo (ou `AGENTS.md`) na pasta ou acima dela, a memória de projeto fica desligada.
 - **Xiaomi MiMo:** com `baseURL` em `xiaomimimo.com`, o raciocínio vira desligado/ligado (`none`/`high`), enviado como `thinking.type`.

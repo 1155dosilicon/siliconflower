@@ -2,21 +2,43 @@ import { readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { isPathBlocked } from "./fs-util.js";
 
-function expandBraces(pattern: string): string {
-  return pattern.replace(/\{([^}]+)\}/g, (_, content: string) => {
-    const parts = content.split(",");
-    return `(?:${parts.join("|")})`;
-  });
+/** Splits `a,b{c,d}` at the commas outside nested braces. */
+function splitAlternatives(content: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of content) {
+    if (ch === "{") depth++;
+    else if (ch === "}") depth--;
+    if (ch === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  parts.push(current);
+  return parts;
 }
 
-export function globToRegex(pattern: string): RegExp {
-  const expanded = expandBraces(pattern);
-  let re = "^";
+/** Index of the "}" that closes the "{" at `open`, or -1. */
+function closingBrace(pattern: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < pattern.length; i++) {
+    if (pattern[i] === "{") depth++;
+    else if (pattern[i] === "}" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/** Regex source for a glob, without anchors. Each alternative inside braces is a glob too. */
+function globSource(pattern: string): string {
+  let re = "";
   let i = 0;
-  while (i < expanded.length) {
-    const ch = expanded[i];
-    if (ch === "*" && i + 1 < expanded.length && expanded[i + 1] === "*") {
-      if (i + 2 < expanded.length && expanded[i + 2] === "/") {
+  while (i < pattern.length) {
+    const ch = pattern[i];
+    if (ch === "*" && pattern[i + 1] === "*") {
+      if (pattern[i + 2] === "/") {
         re += "(?:.*/)?";
         i += 3;
       } else {
@@ -29,25 +51,25 @@ export function globToRegex(pattern: string): RegExp {
     } else if (ch === "?") {
       re += "[^/]";
       i++;
-    } else if (ch === "(" && expanded.startsWith("(?:", i)) {
-      const end = expanded.indexOf(")", i);
+    } else if (ch === "{") {
+      const end = closingBrace(pattern, i);
       if (end !== -1) {
-        re += expanded.slice(i, end + 1);
+        re += `(?:${splitAlternatives(pattern.slice(i + 1, end)).map(globSource).join("|")})`;
         i = end + 1;
       } else {
-        re += "\\(";
+        re += "\\{";
         i++;
       }
     } else if (ch === "[") {
-      const end = expanded.indexOf("]", i + 1);
+      const end = pattern.indexOf("]", i + 1);
       if (end !== -1) {
-        re += expanded.slice(i, end + 1);
+        re += pattern.slice(i, end + 1);
         i = end + 1;
       } else {
         re += "\\[";
         i++;
       }
-    } else if (".+()^$|\\".includes(ch)) {
+    } else if (".+()^$|\\{}".includes(ch)) {
       re += "\\" + ch;
       i++;
     } else {
@@ -55,8 +77,11 @@ export function globToRegex(pattern: string): RegExp {
       i++;
     }
   }
-  re += "$";
-  return new RegExp(re);
+  return re;
+}
+
+export function globToRegex(pattern: string): RegExp {
+  return new RegExp(`^${globSource(pattern)}$`);
 }
 
 /** `signal` stops the walk: from a big folder it can take minutes. */

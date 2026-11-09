@@ -16,24 +16,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = here;
 const outDir = join(root, "dist");
 
+/** Only Windows and Linux on x86_64 are supported: anything else stops here with the reason. */
 function resolveBunTarget(): { target: string; binName: string; binExt: string } {
-  const platform = process.platform;
-  const arch = process.arch;
-  const archMap: Record<string, string> = {
-    x64: "x64",
-    arm64: "arm64",
-    ia32: "ia32",
-    arm: "arm",
-  };
-  const bunArch = archMap[arch] ?? arch;
-
-  if (platform === "win32") {
-    return { target: `bun-windows-${bunArch}`, binName: "siliconflower", binExt: ".exe" };
+  const { platform, arch } = process;
+  if (arch !== "x64" || (platform !== "win32" && platform !== "linux")) {
+    console.error(`[erro] O Siliconflower só é compilado para Windows e Linux em x86_64 (esta máquina: ${platform} ${arch}).`);
+    process.exit(1);
   }
-  if (platform === "darwin") {
-    return { target: `bun-darwin-${bunArch}`, binName: "siliconflower", binExt: "" };
-  }
-  return { target: `bun-linux-${bunArch}`, binName: "siliconflower", binExt: "" };
+  return platform === "win32"
+    ? { target: "bun-windows-x64", binName: "siliconflower", binExt: ".exe" }
+    : { target: "bun-linux-x64", binName: "siliconflower", binExt: "" };
 }
 
 const { target: bunTarget, binName, binExt } = resolveBunTarget();

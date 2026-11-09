@@ -816,3 +816,243 @@ describe("background task list", () => {
     expect(status.result.length).toBeGreaterThan(50_000);
   }, 30_000);
 });
+
+// ---- Found by the 0.8.1 review (relatorio.md) -------------------------------------------
+
+describe("hooks.json supplies every event", () => {
+  const cfg: AppConfig = { baseURL: "http://localhost:1/v1", apiKey: "k", model: "m", reasoning: "none" };
+
+  test.skipIf(isWin)("preTool, onEdit, postTool and onCommand run from the workspace hooks.json", async () => {
+    const { getWorkspaceDataDir } = await import("../src/fs-util.js");
+    const { resolveHooks } = await import("../src/core/hooks.js");
+    const dir = getWorkspaceDataDir(process.cwd());
+    const mark = join(tmp, "hooks-ran.txt");
+    await mkdir(dir, { recursive: true });
+    await mkdir(tmp, { recursive: true });
+    const hook = (name: string) => `echo ${name} >> '${mark}'`;
+    const file = join(dir, "hooks.json");
+    await writeFile(file, JSON.stringify({ preTool: hook("preTool"), postTool: hook("postTool"), onEdit: hook("onEdit"), onCommand: hook("onCommand") }));
+    try {
+      await runBuiltin("write_file", { path: join(tmp, "hooked.txt"), content: "x" }, { config: cfg });
+      await runBuiltin("execute_command", { command: "true" }, { config: cfg });
+      const ran = (await readFile(mark, "utf8")).trim().split("\n");
+      expect(ran).toEqual(["preTool", "onEdit", "postTool", "preTool", "onCommand", "postTool"]);
+      // config.json wins event by event; an empty value there does not hide the file's.
+      expect(await resolveHooks({ onEdit: "inline", preTool: "  " })).toMatchObject({ onEdit: "inline", preTool: hook("preTool") });
+      // Tool hooks stay off in the "plano" mode.
+      await rm(mark);
+      await runBuiltin("read_file", { path: join(tmp, "hooked.txt") }, { config: cfg, mode: "plano" });
+      expect(existsSync(mark)).toBe(false);
+    } finally {
+      await rm(file, { force: true });
+    }
+  });
+});
+
+describe("history compaction", () => {
+  test("a long but small conversation keeps its old tool results", async () => {
+    const { compressHistory } = await import("../src/context.js");
+    const messages: ChatMessage[] = [{ role: "user", content: "tarefa" }];
+    for (let i = 0; i < 30; i++) {
+      messages.push({ role: "assistant", content: "", toolCalls: [{ id: `c${i}`, type: "function", function: { name: "read_file", arguments: "{}" } }] });
+      messages.push({ role: "tool", toolCallId: `c${i}`, content: "x".repeat(2000) });
+    }
+    expect(compressHistory(messages)).toBe(messages);
+  });
+
+  test("contextTokens of config.json is bounded and optional", async () => {
+    const { contextBudget, CONTEXT_TOKEN_BUDGET } = await import("../src/context.js");
+    expect(contextBudget(undefined)).toBe(CONTEXT_TOKEN_BUDGET);
+    expect(contextBudget("abc")).toBe(CONTEXT_TOKEN_BUDGET);
+    expect(contextBudget(200_000)).toBe(200_000);
+    expect(contextBudget(5)).toBe(8_000);
+    expect(normalize({ contextTokens: 300_000 } as Partial<AppConfig>).contextTokens).toBe(300_000);
+    expect("contextTokens" in normalize({})).toBe(false);
+  });
+});
+
+describe("errors that looked like something else", () => {
+  const cfg: AppConfig = { baseURL: "http://localhost:1/v1", apiKey: "k", model: "m", reasoning: "none" };
+
+  test("a network error with 'aborted' in its text is shown as an error, not as a cancel", async () => {
+    const session = new AgentSession(cfg, {}, {
+      stream: async function* () {
+        throw new Error("socket hang up: connection aborted by peer");
+      },
+    });
+    await session.send("oi");
+    const state = session.getState();
+    expect(state.status).toBe("erro");
+    expect(state.error).toContain("aborted by peer");
+    expect(state.messages.at(-1)?.content).not.toContain("cancelada");
+  });
+
+  test("isCancellation follows the turn's signal", async () => {
+    const { isCancellation } = await import("../src/llm.js");
+    const controller = new AbortController();
+    expect(isCancellation(new Error("Request was aborted."), controller.signal)).toBe(false);
+    controller.abort();
+    expect(isCancellation(new Error("qualquer"), controller.signal)).toBe(true);
+  });
+
+  test("an empty response leaves a note instead of silence", async () => {
+    const seen: ChatMessage[][] = [];
+    let turn = 0;
+    const session = new AgentSession(cfg, {}, {
+      stream: async function* (opts) {
+        seen.push(opts.messages);
+        yield { type: "done", content: turn++ ? "ok" : "", reasoning: "", messages: [] };
+      },
+    });
+    await session.send("oi");
+    expect(session.getState().messages.at(-1)).toMatchObject({ role: "assistant" });
+    expect(session.getState().messages.at(-1)?.content).toContain("sem escrever nada");
+    await session.send("de novo");
+    expect(seen[1]!.map((m) => m.role)).toEqual(["user", "assistant", "user"]);
+  });
+
+  test("a stream that stops sending data fails instead of hanging", async () => {
+    const { withIdleTimeout } = await import("../src/llm.js");
+    let aborted = false;
+    async function* stalled() {
+      yield 1;
+      await new Promise(() => {});
+    }
+    const got: number[] = [];
+    let error = "";
+    try {
+      for await (const value of withIdleTimeout(stalled(), undefined, () => { aborted = true; }, 50)) got.push(value);
+    } catch (e) {
+      error = String(e);
+    }
+    expect(got).toEqual([1]);
+    expect(error).toContain("parou de enviar dados");
+    expect(aborted).toBe(true);
+  });
+});
+
+describe("glob and grep patterns", () => {
+  test("wildcards inside braces work and dots there are literal", async () => {
+    const { globToRegex } = await import("../src/glob-util.js");
+    expect(globToRegex("{*.ts,*.js}").test("a.ts")).toBe(true);
+    expect(globToRegex("{*.ts,*.js}").test("a.md")).toBe(false);
+    expect(globToRegex("{a.b,c}").test("axb")).toBe(false);
+    expect(globToRegex("src/{a,b{1,2}}/*.md").test("src/b2/x.md")).toBe(true);
+    expect(globToRegex("**/*.{ts,tsx}").test("src/gui/a.tsx")).toBe(true);
+    expect(globToRegex("a{b").test("a{b")).toBe(true);
+  });
+
+  test("search_files accepts a pattern with wildcards inside braces", async () => {
+    const dir = join(tmp, "glob");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "a.ts"), "");
+    await writeFile(join(dir, "b.md"), "");
+    const res = await runBuiltin("search_files", { path: dir, pattern: "{*.ts,*.js}" });
+    expect(res.isError).toBe(false);
+    expect(res.result).toContain("a.ts");
+    expect(res.result).not.toContain("b.md");
+  });
+
+  test("grep_content refuses a pattern that could freeze the agent", async () => {
+    const { hasNestedRepetition } = await import("../src/grep.js");
+    expect(hasNestedRepetition("(a+)+$")).toBe(true);
+    expect(hasNestedRepetition("(\\w*)*x")).toBe(true);
+    expect(hasNestedRepetition("(ab|cd)+")).toBe(false);
+    expect(hasNestedRepetition("\\(a+\\)+")).toBe(false);
+    const res = await runBuiltin("grep_content", { path: tmp, pattern: "(a+)+$" });
+    expect(res.isError).toBe(true);
+    expect(res.result).toContain("repetição aninhada");
+  });
+});
+
+describe("read_file and saved outputs", () => {
+  test("a big file comes as a page of whole lines that says where to continue", async () => {
+    await mkdir(tmp, { recursive: true });
+    const file = join(tmp, "grande.txt");
+    await writeFile(file, Array.from({ length: 20000 }, (_, i) => `linha ${i + 1}`).join("\n"));
+    const first = await runBuiltin("read_file", { path: file, limit: 10000 });
+    expect(first.result).not.toContain("SAÍDA GRANDE TRUNCADA");
+    expect(first.result.startsWith("1: linha 1\n")).toBe(true);
+    const next = Number(/offset=(\d+)/.exec(first.result)?.[1]);
+    expect(next).toBeGreaterThan(100);
+    const second = await runBuiltin("read_file", { path: file, offset: next, limit: 3 });
+    expect(second.result).toBe(`${next}: linha ${next}\n${next + 1}: linha ${next + 1}\n${next + 2}: linha ${next + 2}`);
+  });
+
+  test("a huge single line is cut instead of filling the context", async () => {
+    const file = join(tmp, "minificado.js");
+    await writeFile(file, "x".repeat(100_000));
+    const res = await runBuiltin("read_file", { path: file });
+    expect(res.result.length).toBeLessThan(5000);
+    expect(res.result).toContain("linha com 100000 caracteres");
+  });
+
+  test("old full outputs are deleted, recent ones stay", async () => {
+    const { pruneOldOutputs, processToolOutput } = await import("../src/context.js");
+    const saved = await processToolOutput("y".repeat(40_000));
+    const path = /salva em: (.+)\]/.exec(saved)![1]!;
+    expect(await pruneOldOutputs()).toBe(0);
+    expect(existsSync(path)).toBe(true);
+    expect(await pruneOldOutputs(Date.now() + 8 * 24 * 3600 * 1000)).toBeGreaterThan(0);
+    expect(existsSync(path)).toBe(false);
+  });
+});
+
+describe("edit_file keeps the line endings it does not touch", () => {
+  test("a file with mixed endings is not rewritten as CRLF", async () => {
+    await mkdir(tmp, { recursive: true });
+    const file = join(tmp, "misto.txt");
+    await writeFile(file, "um\r\ndois\ntres\nquatro\n");
+    // Exact match fails (oldText has CRLF where the file has LF): newline-normalized strategy.
+    const res = await smartEditFile({ path: file, oldText: "dois\r\ntres", newText: "2\n3" });
+    expect(res.matchType).toBe("normalized_newlines");
+    expect(await readFile(file, "utf8")).toBe("um\r\n2\n3\nquatro\n");
+  });
+
+  test("the whitespace-tolerant strategy also leaves the other lines alone", async () => {
+    const file = join(tmp, "misto2.txt");
+    await writeFile(file, "a\r\n  if (x) {\n    y();\n  }\nfim");
+    const res = await smartEditFile({ path: file, oldText: "if (x) {\ny();\n}", newText: "if (z) {\n  w();\n}" });
+    expect(res.matchType).toBe("fuzzy_whitespace");
+    expect(await readFile(file, "utf8")).toBe("a\r\nif (z) {\n  w();\n}\nfim");
+  });
+
+  test("a CRLF file gets CRLF in the new text", async () => {
+    const file = join(tmp, "crlf.txt");
+    await writeFile(file, "a\r\nb\r\nc\r\n");
+    await smartEditFile({ path: file, oldText: "b", newText: "b1\nb2" });
+    expect(await readFile(file, "utf8")).toBe("a\r\nb1\r\nb2\r\nc\r\n");
+  });
+});
+
+describe("memory and log details", () => {
+  test("Windows: a memory named 'memory' does not take the index file's name", async () => {
+    const { fileNameFor } = await import("../src/services/memory.js");
+    expect(fileNameFor("Memory", true)).toBe("memory_.md");
+    expect(fileNameFor("Memory", false)).toBe("memory.md");
+    expect(fileNameFor("outra coisa", true)).toBe("outra_coisa.md");
+  });
+
+  test("credentials are masked before reaching the log", async () => {
+    const { redactSecrets } = await import("../src/logger.js");
+    const line = redactSecrets('curl -H "Authorization: Bearer abcdef123456789" https://u:senha123@host/x?api_key=ZZZZZZZZ9 sk-proj-abcdefghijklmnop');
+    for (const secret of ["abcdef123456789", "senha123", "ZZZZZZZZ9", "abcdefghijklmnop"]) expect(line).not.toContain(secret);
+    expect(line).toContain("curl -H");
+    expect(redactSecrets("execute_command: git status (cwd=/home/x)")).toBe("execute_command: git status (cwd=/home/x)");
+  });
+});
+
+describe("background commands", () => {
+  test.skipIf(isWin)("the output so far can be read while the command runs", async () => {
+    const id = startBackgroundCommand("echo primeira; sleep 30", process.cwd(), 60_000);
+    try {
+      for (let i = 0; i < 100 && !getBackgroundTask(id)?.result; i++) await new Promise((r) => setTimeout(r, 50));
+      const res = await runBuiltin("manage_background_task", { action: "status", taskId: id });
+      const status = JSON.parse(res.result);
+      expect(status.status).toBe("running");
+      expect(status.partialOutput).toContain("primeira");
+    } finally {
+      await killAllBackgroundTasks();
+    }
+  });
+});

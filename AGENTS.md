@@ -1,6 +1,6 @@
 # Siliconflower — guia para agentes
 
-Agente de IA para Windows, Linux e macOS/Unix, como app de desktop e interface no navegador: TypeScript + Bun (Electron no app), sobre APIs compatíveis com OpenAI.
+Agente de IA para Windows e Linux (só x86_64; sem macOS e sem ARM), com foco no app de desktop em Electron e, como alternativa, interface no navegador: TypeScript + Bun (Electron no app), sobre APIs compatíveis com OpenAI.
 Um único código para todos os sistemas: o que muda entre Windows e Linux/Unix fica listado em `docs/PLATAFORMAS.md` (atualize esse arquivo ao criar ou remover uma diferença). O CI (`.github/workflows/ci.yml`) roda typecheck e testes em Windows e Linux.
 Textos para o usuário, prompts e docs ficam em pt-BR. Logs e campos de protocolo ficam em ASCII.
 
@@ -10,7 +10,7 @@ Textos para o usuário, prompts e docs ficam em pt-BR. Logs e campos de protocol
 bun install
 bun run typecheck   # precisa passar limpo
 bun test            # roda o shell real da plataforma; usa SILICONFLOWER_DATA_DIR temporário (tests/setup.ts)
-bun run build       # gera dist/siliconflower (Linux/macOS) ou dist/siliconflower.exe (Windows)
+bun run build       # gera dist/siliconflower (Linux) ou dist/siliconflower.exe (Windows)
 npm run install:bin # Unix: copia para ~/.local/bin; Windows: %LOCALAPPDATA%\Programs\siliconflower + PATH
 bun start -- gui    # roda a GUI a partir do código-fonte (sem argumentos, só mostra a ajuda)
 ```

@@ -20,5 +20,5 @@ export function getShellLabel(): string {
 /** OS label for the agent persona. */
 export function getOsLabel(): string {
   if (isWindows()) return "Windows (PowerShell/Bun/Node)";
-  return `Linux/Unix (${process.platform}, shell do usuário, Bun/Node)`;
+  return "Linux (shell do usuário, Bun/Node)";
 }

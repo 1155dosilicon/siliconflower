@@ -19,8 +19,13 @@
   <div class="layout">
     <nav id="sidebar" class="sidebar" aria-label="Conversas">
       <button id="new-conversation" type="button">+ Nova conversa</button>
+      <input id="conversation-search" type="search" autocomplete="off" placeholder="Buscar conversa..." aria-label="Buscar conversa">
       <ul id="conversation-list"></ul>
       <p id="no-conversations" class="sidebar-empty">As conversas deste projeto ficam aqui.</p>
+      <section id="tasks" class="tasks" hidden aria-label="Tarefas em background">
+        <h2>Em background</h2>
+        <ul id="task-list"></ul>
+      </section>
     </nav>
 
     <main id="scroller" class="scroller">
@@ -53,7 +58,14 @@
   <footer class="composer">
     <div class="column">
       <div id="error" class="error" role="alert" hidden></div>
+      <div id="editing" class="editing" hidden>
+        <span>Editando a última mensagem: ao reenviar, a resposta atual é descartada (o que ela já fez nos arquivos fica).</span>
+        <button id="cancel-edit" type="button">Cancelar</button>
+      </div>
+      <ul id="attachments" class="attachments" hidden aria-label="Arquivos anexados"></ul>
       <form id="composer-form" class="input-box">
+        <input id="file-input" type="file" multiple hidden accept="image/*,audio/*,video/*">
+        <button id="attach" type="button" class="icon-button" title="Anexar imagem (ou áudio e vídeo, na API Xiaomi MiMo)" aria-label="Anexar arquivo">📎</button>
         <textarea id="input" rows="1" placeholder="Envie uma mensagem..." aria-label="Mensagem"></textarea>
         <button id="action" type="submit" class="primary">Enviar</button>
       </form>
@@ -63,7 +75,7 @@
         <span id="status" class="status"></span>
         <span id="stats" class="stats"></span>
       </div>
-      <div class="hint">Enter envia · Shift+Enter quebra a linha · Esc cancela a resposta</div>
+      <div class="hint">Enter envia · Shift+Enter quebra a linha · Esc cancela a resposta · cole ou arraste uma imagem para anexar</div>
     </div>
   </footer>
 </body>

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { chmod, readFile, realpath, rename, rm, stat, writeFile, access } from "node:fs/promises";
 import { ensureDir, getGlobalDataDir } from "./fs-util.js";
 import { isWindows } from "./platform.js";
+import { contextBudget } from "./context.js";
 import type { AppConfig, McpServerConfig, Mode } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
 
@@ -155,6 +156,9 @@ export function normalize(data: Partial<AppConfig>, opts: { applyEnv?: boolean }
     reasoning,
     mode,
     system: text(data.system).trim() || undefined,
+    ...(data.contextTokens !== undefined && Number.isFinite(Number(data.contextTokens))
+      ? { contextTokens: contextBudget(data.contextTokens) }
+      : {}),
     mcpServers: (data.mcpServers && typeof data.mcpServers === "object" && !Array.isArray(data.mcpServers)
       ? data.mcpServers
       : {}) as Record<string, McpServerConfig>,

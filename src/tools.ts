@@ -18,7 +18,7 @@ import { saveMemory, recallMemories, forgetMemory } from "./services/memory.js";
 import { loadMedia } from "./services/media.js";
 import { isXiaomiMimoEndpoint } from "./reasoning.js";
 import { enterWorktree, exitWorktree, listWorktrees } from "./services/worktree.js";
-import { runHook, loadHooksConfig, ignoredRepoHooksFile, workspaceHooksFile } from "./core/hooks.js";
+import { runHook, resolveHooks, ignoredRepoHooksFile, workspaceHooksFile } from "./core/hooks.js";
 import { processToolOutput } from "./context.js";
 import { tailLogs } from "./logger.js";
 import { getShellLabel, isWindows } from "./platform.js";
@@ -89,30 +89,46 @@ function isDangerousDeleteTarget(path: string): boolean {
   });
 }
 
-async function readLineRange(path: string, offset: number, limit: number): Promise<string> {
+// Below the general cut of tool outputs (context.ts): a page of whole lines and where to go
+// on is worth more to the model than the start and the end of 2000 lines with the middle gone.
+const READ_FILE_MAX_CHARS = 28_000;
+const READ_FILE_MAX_LINE_CHARS = 4_000;
+
+export async function readLineRange(path: string, offset: number, limit: number, maxChars = READ_FILE_MAX_CHARS): Promise<string> {
   const stream = createReadStream(path, { encoding: "utf8" });
   const reader = createInterface({ input: stream, crlfDelay: Infinity });
   const lines: string[] = [];
   let lineNumber = 0;
+  let size = 0;
+  let note = "";
   try {
     for await (const line of reader) {
       lineNumber++;
       if (lineNumber < offset) continue;
-      lines.push(`${lineNumber}: ${line}`);
+      const shown = line.length > READ_FILE_MAX_LINE_CHARS
+        ? `${line.slice(0, READ_FILE_MAX_LINE_CHARS)}... [linha com ${line.length} caracteres, cortada]`
+        : line;
+      const entry = `${lineNumber}: ${shown}`;
+      if (lines.length > 0 && size + entry.length > maxChars) {
+        note = `\n... [parou antes da linha ${lineNumber} por tamanho. Para continuar, chame read_file com offset=${lineNumber}]`;
+        break;
+      }
+      lines.push(entry);
+      size += entry.length + 1;
       if (lines.length >= limit) break;
     }
   } finally {
     reader.close();
     stream.destroy();
   }
-  return lines.join("\n");
+  return lines.join("\n") + note;
 }
 
 export const BUILTIN_TOOLS: BuiltinTool[] = [
   {
     name: "read_file",
     description:
-      "Lê um arquivo de texto. Retorna as linhas no formato 'N: texto'; o número e os dois-pontos não fazem parte do arquivo.",
+      "Lê um arquivo de texto. Retorna as linhas no formato 'N: texto'; o número e os dois-pontos não fazem parte do arquivo. Devolve até cerca de 28 mil caracteres por chamada e diz em que linha continuar com offset.",
     inputSchema: {
       type: "object",
       properties: {
@@ -428,7 +444,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
   },
   {
     name: "manage_background_task",
-    description: "Gerencia tarefas rodando em background (subagentes ou comandos). Permite listar, verificar status e detalhes ou encerrar um processo.",
+    description: "Gerencia tarefas rodando em background (subagentes ou comandos). Permite listar, verificar status e detalhes ou encerrar um processo. O status de um comando ainda em execução traz em partialOutput o que ele já imprimiu (os últimos 16 mil caracteres).",
     inputSchema: {
       type: "object",
       properties: {
@@ -462,7 +478,11 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
         if (!taskId) return { result: "Parâmetro 'taskId' obrigatório para ação 'status'.", isError: true };
         const task = getBackgroundTask(taskId);
         if (!task) return { result: `Tarefa em background '${taskId}' não encontrada.`, isError: true };
-        return { result: JSON.stringify(task, null, 2), isError: false };
+        // While it runs, `result` is what the command has printed so far (its newest part).
+        const shown = task.status === "running" && task.result !== undefined
+          ? { ...task, result: undefined, partialOutput: task.result }
+          : task;
+        return { result: JSON.stringify(shown, null, 2), isError: false };
       }
 
       if (action === "kill") {
@@ -971,7 +991,7 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       properties: {},
     },
     run: async (_, ctx) => {
-      const cfg = ctx?.config?.hooks || (await loadHooksConfig());
+      const cfg = await resolveHooks(ctx?.config?.hooks);
       const ignored = await ignoredRepoHooksFile();
       const note = ignored
         ? `\n\nAviso: ${ignored} fica dentro do repositório e não roda (um projeto clonado poderia executar comandos assim). Para usar esses hooks, mova o arquivo para ${workspaceHooksFile()}.`
@@ -1005,10 +1025,10 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
       if (!cmd) return { result: "Nenhum comando fornecido.", isError: true };
       const workDir = a.cwd ? toAbs(String(a.cwd)) : process.cwd();
 
-      // onCommand: inline config.json value first; otherwise runHook falls back to hooks.json
-      // (workspace -> global; never one inside the repository, see core/hooks.ts).
-      const inlineHooks = ctx?.config?.hooks?.onCommand?.trim() ? ctx.config.hooks : undefined;
-      await runHook("onCommand", inlineHooks, { command: cmd, cwd: workDir }, ctx?.signal);
+      // config.json first, then hooks.json (workspace -> global; never one inside the
+      // repository, see core/hooks.ts).
+      const hooks = await resolveHooks(ctx?.config?.hooks);
+      if (hooks) await runHook("onCommand", hooks, { command: cmd, cwd: workDir }, ctx?.signal);
       // Cancelled while the hook ran: a background command would otherwise still start.
       if (ctx?.signal?.aborted) return cancelled("Execução do comando");
 
@@ -1069,18 +1089,20 @@ export async function runBuiltin(
       ? toAbs(args.destination)
       : undefined;
   const hookCtx = { toolName: name, toolArgs: args, cwd: process.cwd(), filePath };
-  const hooksEnabled = Boolean(ctx?.config?.hooks && ctx.mode !== "plano");
+  // Tool hooks are off in the "plano" mode. Without a config (tests, internal calls) there are none.
+  const hooks = ctx?.config && ctx.mode !== "plano" ? await resolveHooks(ctx.config.hooks) : undefined;
   // Hooks get the turn's signal: cancelling stops a hook that is still running.
   const turnSignal = ctx?.signal;
 
   // Pre-tool hook
-  if (hooksEnabled && ctx?.config?.hooks) {
-    await runHook("preTool", ctx.config.hooks, hookCtx, turnSignal);
+  if (hooks) {
+    await runHook("preTool", hooks, hookCtx, turnSignal);
     // Cancelled during the hook: the tool must not run after it (a write would still happen).
     if (turnSignal?.aborted) return cancelled(`Execução de ${name}`);
   }
 
-  const rawTimeout = Number(args?.timeout);
+  // web_fetch names its limit timeoutMs: without it here, the fixed minute cut a longer one short.
+  const rawTimeout = Number(args?.timeout ?? args?.timeoutMs);
   const toolTimeoutArg = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.min(rawTimeout + 5000, 125000) : 60000;
   const TOOL_TIMEOUT_MS = Math.max(60000, toolTimeoutArg);
   const controller = new AbortController();
@@ -1106,9 +1128,9 @@ export async function runBuiltin(
     let res = cancellable ? await Promise.race([toolPromise, timeoutPromise]) : await toolPromise;
 
     // On-edit and Post-tool hooks
-    if (!timedOut && hooksEnabled && ctx?.config?.hooks) {
+    if (!timedOut && hooks) {
       if (!res.isError && ["edit_file", "write_file", "apply_patch", "move_path", "delete_path"].includes(name)) {
-        const hook = await runHook("onEdit", ctx.config.hooks, hookCtx, turnSignal);
+        const hook = await runHook("onEdit", hooks, hookCtx, turnSignal);
         // The edit itself worked, so isError stays false; the model reads what the check found.
         if (hook.error || hook.output) {
           const title = hook.error ? `Hook onEdit falhou (${hook.error})` : "Hook onEdit";
@@ -1116,7 +1138,7 @@ export async function runBuiltin(
           res = { ...res, result: `${res.result}\n\n--- ${title} ---\n${output}`.trimEnd() };
         }
       }
-      await runHook("postTool", ctx.config.hooks, hookCtx, turnSignal);
+      await runHook("postTool", hooks, hookCtx, turnSignal);
     }
 
     return res;

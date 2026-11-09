@@ -1,5 +1,6 @@
 import { mkdir, open, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { randomBytes } from "node:crypto";
 import type { ChatMessage, TodoItem } from "../types.js";
 
 const VALID_ID = /^[a-z0-9-]{1,64}$/;
@@ -38,6 +39,16 @@ export interface ConversationBody {
   messages: StoredMessage[];
   activities: ToolActivity[];
   todos: TodoItem[];
+}
+
+export function newConversationId(): string {
+  return `${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
+}
+
+/** A title typed by the user: one line, bounded. Empty when nothing usable is left. */
+export function cleanTitle(raw: string): string {
+  const line = raw.replace(/[\x00-\x1F\x7F]+/g, " ").replace(/\s+/g, " ").trim();
+  return line.length > TITLE_MAX_CHARS ? `${line.slice(0, TITLE_MAX_CHARS - 3)}...` : line;
 }
 
 export function conversationTitle(firstMessage: string): string {
@@ -152,12 +163,47 @@ export class ConversationStore {
     return run;
   }
 
-  async save(summary: ConversationSummary, body: ConversationBody): Promise<void> {
-    const target = this.file(summary.id);
-    return this.enqueue(async () => {
+  /** `updatedAt` of the saved file, or undefined when there is none. */
+  async stamp(id: string): Promise<string | undefined> {
+    this.file(id); // validates the id
+    return (await this.readHeader(`${id}.jsonl`))?.updatedAt;
+  }
+
+  /**
+   * Saves the conversation and returns the id it was saved under. `expected` is the
+   * `updatedAt` this session last saw in the file: when the file has another one, a second
+   * window (browser and app on the same project) wrote it meanwhile, and saving over it
+   * would lose that window's turns. The conversation is then saved as a copy, under a new id.
+   * The check runs inside the queue, so a delete or a save already queued comes first.
+   */
+  async save(summary: ConversationSummary, body: ConversationBody, expected?: string): Promise<string> {
+    this.file(summary.id); // validates the id before anything is queued
+    let id = summary.id;
+    await this.enqueue(async () => {
       await mkdir(this.dir, { recursive: true });
+      if (expected !== undefined) {
+        const onDisk = (await this.readHeader(`${id}.jsonl`))?.updatedAt;
+        if (onDisk !== undefined && onDisk !== expected) id = newConversationId();
+      }
+      const target = this.file(id);
       const temp = `${target}.${process.pid}.tmp`;
-      await writeFile(temp, `${JSON.stringify(summary)}\n${JSON.stringify(body)}\n`, "utf8");
+      await writeFile(temp, `${JSON.stringify({ ...summary, id })}\n${JSON.stringify(body)}\n`, "utf8");
+      await this.replace(temp, target);
+    });
+    return id;
+  }
+
+  /** Changes only the title: the date stays, so the conversation keeps its place in the list. */
+  async rename(id: string, title: string): Promise<void> {
+    const target = this.file(id);
+    return this.enqueue(async () => {
+      const text = await readFile(target, "utf8");
+      const end = text.indexOf("\n");
+      if (end === -1) throw new Error("arquivo de conversa incompleto");
+      const header: unknown = JSON.parse(text.slice(0, end));
+      if (!isSummary(header)) throw new Error("arquivo de conversa em formato inválido");
+      const temp = `${target}.${process.pid}.tmp`;
+      await writeFile(temp, `${JSON.stringify({ ...header, title })}${text.slice(end)}`, "utf8");
       await this.replace(temp, target);
     });
   }

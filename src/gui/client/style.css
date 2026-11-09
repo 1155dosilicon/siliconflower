@@ -13,7 +13,7 @@
   --warn: #e0b050;
   --code-bg: #111016;
   --mono: "Cascadia Code", Consolas, "Courier New", monospace;
-  --sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+  --sans: "Segoe UI", system-ui, sans-serif;
 }
 
 @media (prefers-color-scheme: light) {
@@ -220,3 +220,43 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
 .status.busy { color: var(--accent); }
 .stats { margin-left: auto; overflow-wrap: anywhere; }
 .hint { margin-top: 4px; font-size: 12px; color: var(--muted); }
+
+/* Conversation search, rename and background tasks */
+#conversation-search { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
+.conversation-rename { flex: none; width: 26px; padding: 0; border: 0; background: transparent; color: var(--muted); opacity: 0; }
+.conversation:hover .conversation-rename, .conversation-rename:focus-visible { opacity: 1; }
+.conversation-rename:hover { color: var(--accent); }
+.conversation-title-input { flex: 1; min-width: 0; margin: 4px; padding: 4px 6px; border: 1px solid var(--accent); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
+.tasks { flex: none; max-height: 35%; overflow-y: auto; padding-top: 8px; border-top: 1px solid var(--border); }
+.tasks h2 { margin: 0 0 6px; padding: 0 6px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.sidebar .tasks ul { flex: none; overflow: visible; }
+.task { display: flex; align-items: center; gap: 6px; padding: 4px 6px; font-size: 12px; }
+.task-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+.task-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-stop { flex: none; padding: 1px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; }
+.task-stop:hover { color: var(--danger); border-color: var(--danger); }
+
+/* Attachments */
+.attachments { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 6px; padding: 0; list-style: none; }
+.attachments[hidden] { display: none; }
+.attachment { display: flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); font-size: 12px; }
+.attachment span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment button { flex: none; padding: 0 6px; border: 0; background: transparent; color: var(--muted); }
+.attachment button:hover { color: var(--danger); }
+.input-box.dragging textarea { border-color: var(--accent); }
+
+/* Code highlighting */
+.tok-comment { color: var(--muted); font-style: italic; }
+.tok-string { color: var(--ok); }
+.tok-number { color: var(--warn); }
+.tok-keyword { color: var(--accent); }
+
+/* Editing the last message */
+.message.user { position: relative; }
+.edit-message { display: none; align-self: center; margin-right: 8px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--muted); font-size: 12px; }
+.message.user.editable:hover .edit-message, .message.user.editable .edit-message:focus-visible { display: inline-block; }
+.edit-message:hover { color: var(--accent); border-color: var(--accent); }
+.editing { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; padding: 6px 10px; border: 1px solid var(--accent); border-radius: 8px; font-size: 12px; color: var(--muted); }
+.editing[hidden] { display: none; }
+.editing span { flex: 1; }
+.editing button { flex: none; padding: 2px 10px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--text); font-size: 12px; }

@@ -81,8 +81,8 @@ export async function startGui(config: AppConfig, overrides: SessionOverrides, o
   process.exit(0);
 }
 
-/** Opens the default browser. Windows: Start-Process; macOS: open; Linux/BSD: xdg-open. */
+/** Opens the default browser. Windows: Start-Process; Linux: xdg-open. */
 export function openUrlCommand(url: string): string {
   if (isWindows()) return `Start-Process '${url}'`;
-  return `${process.platform === "darwin" ? "open" : "xdg-open"} '${url}' >/dev/null 2>&1`;
+  return `xdg-open '${url}' >/dev/null 2>&1`;
 }

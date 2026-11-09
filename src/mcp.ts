@@ -1,5 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { createHash } from "node:crypto";
 import type { McpServerConfig, McpTool } from "./types.js";
 import { APP_VERSION } from "./version.js";
@@ -7,9 +9,12 @@ import { log } from "./logger.js";
 
 interface ConnectedServer {
   name: string;
+  config: McpServerConfig;
   client: Client;
-  transport: StdioClientTransport;
+  transport: Transport;
   tools: McpTool[];
+  /** The server process ended or the connection dropped: reconnect before the next call. */
+  closed: boolean;
 }
 
 const MCP_CONNECT_TIMEOUT_MS = 20_000;
@@ -62,7 +67,17 @@ export class McpManager {
     return [...this.failures];
   }
 
-  private async connect(name: string, cfg: McpServerConfig): Promise<void> {
+  private transportFor(name: string, cfg: McpServerConfig): Transport {
+    if (typeof cfg.url === "string" && cfg.url.trim()) {
+      const url = new URL(cfg.url.trim());
+      if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error(`"url" do servidor MCP "${name}" precisa ser http:// ou https://`);
+      }
+      return new StreamableHTTPClientTransport(url, cfg.headers ? { requestInit: { headers: cfg.headers } } : undefined);
+    }
+    if (typeof cfg.command !== "string" || !cfg.command.trim()) {
+      throw new Error(`o servidor MCP "${name}" precisa de "command" (stdio) ou "url" (HTTP)`);
+    }
     const rawEnv = { ...process.env, ...(cfg.env ?? {}) };
     const cleanEnv: Record<string, string> = {};
     for (const [k, v] of Object.entries(rawEnv)) {
@@ -81,11 +96,15 @@ export class McpManager {
       }
     }
 
-    const transport = new StdioClientTransport({
+    return new StdioClientTransport({
       command: resolvedCommand,
       args: cfg.args ?? [],
       env: cleanEnv,
     });
+  }
+
+  private async connect(name: string, cfg: McpServerConfig): Promise<void> {
+    const transport = this.transportFor(name, cfg);
     const client = new Client(
       { name: "siliconflower", version: APP_VERSION },
       { capabilities: {} }
@@ -108,10 +127,32 @@ export class McpManager {
         description: t.description,
         inputSchema: (t.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
       }));
-    } catch {
+    } catch (err) {
+      // The server stays connected, but with no tool to offer: say why in the log.
+      await log("warn", `[MCP] "${name}" conectou mas nao listou ferramentas: ${err instanceof Error ? err.message : String(err)}`);
       toolList = [];
     }
-    this.servers.set(name, { name, client, transport, tools: toolList });
+    const server: ConnectedServer = { name, config: cfg, client, transport, tools: toolList, closed: false };
+    client.onclose = () => {
+      server.closed = true;
+      void log("warn", `[MCP] conexao com "${name}" encerrada`);
+    };
+    this.servers.set(name, server);
+  }
+
+  /**
+   * A server that died is started again before the next call. The call itself is never
+   * repeated: it may have had an effect before the connection dropped.
+   */
+  private async reconnect(server: ConnectedServer): Promise<ConnectedServer> {
+    await log("info", `[MCP] reconectando "${server.name}"`);
+    await server.transport.close().catch(() => {});
+    const previousTools = server.tools;
+    await this.connect(server.name, server.config);
+    const fresh = this.servers.get(server.name)!;
+    // The schemas the model already has stay valid even if the list could not be read again.
+    if (!fresh.tools.length) fresh.tools = previousTools;
+    return fresh;
   }
 
   allTools(): McpTool[] {
@@ -135,9 +176,10 @@ export class McpManager {
     args: Record<string, unknown>,
     signal?: AbortSignal
   ): Promise<{ result: string; isError: boolean }> {
-    for (const s of this.servers.values()) {
-      const tool = s.tools.find((t) => t.name === name);
+    for (const known of [...this.servers.values()]) {
+      const tool = known.tools.find((t) => t.name === name);
       if (!tool) continue;
+      const s = known.closed ? await this.reconnect(known) : known;
       const res = await s.client.callTool(
         { name: tool.originalName ?? tool.name, arguments: args },
         undefined,
