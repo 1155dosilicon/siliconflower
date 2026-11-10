@@ -46,7 +46,7 @@ Antes de dar uma tarefa por concluída: `bun run typecheck` e `bun test`.
 - **Argumentos do modelo não são confiáveis**: caminhos passam por `isPathBlockedSafe`, números por clamp.
 - **GUI**: a lógica da conversa fica em `session.ts`, não na interface. Texto do modelo nunca vira HTML (sem `innerHTML`; use `textContent`). Não relaxe as checagens de token, `Host`, `Origin` nem a CSP de `gui/server.ts`: o agente executa comandos e qualquer site pode tentar acessar a porta local.
 - **Abortar stream**: o SDK da OpenAI encerra a iteração em silêncio ao abortar. Confira `signal.aborted` depois do stream (`llm.ts`), senão o turno cancelado parece concluído e as ferramentas recebidas executam.
-- **Versão**: `package.json`, `desktop/package.json` e `src/version.ts` mudam juntos (`tests/version.test.ts` verifica).
+- **Versão**: `package.json`, `desktop/package.json` e `src/version.ts` mudam juntos (`tests/version.test.ts` verifica), com o badge do README e a seção do `CHANGELOG.md` (`tests/docs-sync.test.ts`).
 - **Desktop**: a URL de `gui --managed` traz o token, nunca a grave em log. Não dê preload às janelas de projeto: elas exibem texto do modelo. No `main.ts`, não use `__dirname` (o bundler o troca pela pasta do código-fonte) nem posições fixas no `argv` (o Chromium reordena os argumentos). O nome do agente muda por SO (`siliconflower` / `siliconflower.exe`), e em Unix ele roda em grupo de processos próprio para o kill forçado alcançar os filhos.
 
 ## Ao mudar comportamento
@@ -55,6 +55,8 @@ Antes de dar uma tarefa por concluída: `bun run typecheck` e `bun test`.
 - `CHANGELOG.md`: uma linha por item em `[Unreleased]`.
 - `README.md` se a mudança afeta quem usa; `docs/ARCHITECTURE.md` se afeta fluxo ou arquitetura; `SECURITY.md` se afeta garantias de segurança.
 - Contagens (número de ferramentas etc.) aparecem só no README.
+- `tests/docs-sync.test.ts` confere o badge de versão e a contagem e a lista de ferramentas do README e do ARCHITECTURE: se falhar, atualize a doc, não o teste.
+- **Antes de concluir**, releia o que mudou (`git diff --stat`) e confira cada doc acima: o que o usuário vê, o fluxo descrito no ARCHITECTURE, a tabela de diferenças do `docs/PLATAFORMAS.md`. Trechos que citam números ou nomes do código (limites, timeouts, mensagens do protocolo) são os que mais ficam velhos.
 
 ## Referência
 

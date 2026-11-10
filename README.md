@@ -1,6 +1,6 @@
 # 🌸 SILICONFLOWER
 
-![Version](https://img.shields.io/badge/version-0.8.0-blue.svg)
+![Version](https://img.shields.io/badge/version-0.10.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D6.svg)
 ![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black.svg)
@@ -83,7 +83,8 @@ Testado de verdade no elementary OS 8 e no Ubuntu 24.04. No Ubuntu 14.04 e 16.04
 | Cancelar a resposta ou a pergunta em andamento | `Esc` ou **Parar** |
 | Modo de trabalho | seletor **Modo**: `ultracódigo` (o modo `programação`), `sistema` ou `plano` |
 | Raciocínio | seletor **Pensamento**: `none`, `low`, `medium`, `high` |
-| Conversas | lateral: **+ Nova conversa**, clique para retomar, **×** para apagar |
+| Conversas | lateral: **+ Nova conversa**, clique para retomar, **✎** para renomear, **×** para apagar; o campo de busca aparece com duas ou mais |
+| Editar a última mensagem | botão **Editar** ao passar o mouse sobre ela |
 
 Enquanto o agente trabalha, aparece **Pensando...** (o texto do raciocínio não é mostrado) e cada ferramenta ganha um cartão com argumentos e resultado. As conversas ficam salvas por projeto; uma resposta só é salva ao terminar ou ser interrompida.
 

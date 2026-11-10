@@ -6,6 +6,9 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Changed
+- Documentação: badge de versão do README, compactação só por tokens, revisão `rev` das conversas e mensagens do WebSocket no ARCHITECTURE; `tests/docs-sync.test.ts` falha quando versão, contagem ou lista de ferramentas da doc ficam para trás.
+
 ## [0.10.0] - 2026-11-10
 
 ### Changed
