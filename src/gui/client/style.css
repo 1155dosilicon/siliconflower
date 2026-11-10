@@ -33,6 +33,14 @@
   }
 }
 
+@font-face {
+  font-family: "JetBrains Mono SF";
+  src: url("/fonts/jetbrains-mono-extrabold.woff2") format("woff2");
+  font-weight: 800;
+  font-display: swap;
+  unicode-range: U+0020-007E, U+00A0-00FF;
+}
+
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 
@@ -216,7 +224,34 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
   overflow-y: auto;
 }
 .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 8px; font-size: 13px; color: var(--muted); }
-.controls select { padding: 1px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.controls select:not(#mode) { padding: 1px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+/* Mode picker: the native select sits invisible over a styled chip, so the keyboard, screen readers
+   and the system dropdown keep working. */
+.mode-chip { position: relative; vertical-align: middle; display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.mode-chip::after { content: "▾"; font-size: 11px; opacity: .7; }
+.mode-chip select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.mode-chip select:disabled { cursor: not-allowed; }
+.mode-chip:has(select:disabled) { opacity: .6; }
+.mode-chip:has(select:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* "ultracódigo": the letters themselves carry the rainbow (background-clip: text). Darker shades
+   in the light theme, where pastel yellow and green would be unreadable on white. */
+.mode-chip { --rainbow: #ff6b6b, #ffa94d, #ffd43b, #69db7c, #4dabf7, #b197fc, #f783ac; }
+@media (prefers-color-scheme: light) {
+  .mode-chip { --rainbow: #e03131, #e8590c, #b08800, #2b8a3e, #1971c2, #7048e8, #c2255c; }
+}
+.mode-chip[data-mode="programação"] .mode-label {
+  font-family: "JetBrains Mono SF", var(--mono);
+  font-weight: 800;
+  letter-spacing: .02em;
+  /* Two copies of the spectrum: a full rainbow is always visible and the loop has no seam. */
+  background: linear-gradient(90deg, var(--rainbow), var(--rainbow)) 0 0 / 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: ultra-flow 8s linear infinite;
+}
+@keyframes ultra-flow { to { background-position: 100% 0; } }
+@media (prefers-reduced-motion: reduce) { .mode-chip[data-mode="programação"] .mode-label { animation: none; } }
 .status.busy { color: var(--accent); }
 .stats { margin-left: auto; overflow-wrap: anywhere; }
 .hint { margin-top: 4px; font-size: 12px; color: var(--muted); }

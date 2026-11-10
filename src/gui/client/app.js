@@ -489,6 +489,8 @@ function renderChrome() {
   const select = $("mode");
   select.value = state.mode;
   select.disabled = state.streaming;
+  $("mode-chip").dataset.mode = state.mode;
+  $("mode-label").textContent = modeLabel(state.mode);
   const reasoning = $("reasoning");
   reasoning.value = state.reasoning;
   reasoning.disabled = state.streaming;
@@ -582,6 +584,13 @@ function sendToServer(message) {
   return true;
 }
 
+/** Display names only: the mode values (saved config, prompts, protocol) stay the same. */
+const MODE_LABELS = { "programação": "ultracódigo" };
+
+function modeLabel(mode) {
+  return MODE_LABELS[mode] ?? mode;
+}
+
 function fillSelect(select, options) {
   select.replaceChildren();
   for (const { value, label } of options) {
@@ -596,7 +605,7 @@ function handleHello(message) {
   activities = message.activities;
   questionShown = null;
   const { meta } = message;
-  fillSelect($("mode"), meta.modes.map((value) => ({ value, label: value })));
+  fillSelect($("mode"), meta.modes.map((value) => ({ value, label: modeLabel(value) })));
   fillSelect($("reasoning"), meta.reasoningOptions.map(({ value, label }) => ({ value, label: REASONING_NAMES[label] ?? label })));
   workingFolder = meta.cwd;
   $("empty-cwd").textContent = `Pasta de trabalho: ${meta.cwd}`;

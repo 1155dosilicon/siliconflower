@@ -70,7 +70,7 @@ describe("GUI server access control", () => {
 
   test("pages require the session cookie", async () => {
     const { base } = setup();
-    for (const path of ["/", "/app.js", "/style.css", "/markdown.js"]) {
+    for (const path of ["/", "/app.js", "/style.css", "/markdown.js", "/fonts/jetbrains-mono-extrabold.woff2"]) {
       expect((await fetch(base + path)).status).toBe(401);
     }
   });
@@ -110,6 +110,21 @@ describe("GUI server access control", () => {
     expect(csp).toContain("script-src 'self'");
     expect(csp).not.toContain("unsafe");
     expect(csp).toContain("frame-ancestors 'none'");
+    // Fonts only from the app itself: never from a third-party CDN.
+    expect(csp).toContain("font-src 'self';");
+  });
+
+  test("serves the embedded font of the mode chip", async () => {
+    const { server, base } = setup();
+    const cookie = await login(server);
+    const res = await fetch(`${base}/fonts/jetbrains-mono-extrabold.woff2`, { headers: { Cookie: cookie } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("font/woff2");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect(new TextDecoder().decode(bytes.slice(0, 4))).toBe("wOF2");
+    // A second request must still get the whole file (the body is reused).
+    const again = await fetch(`${base}/fonts/jetbrains-mono-extrabold.woff2`, { headers: { Cookie: cookie } });
+    expect((await again.arrayBuffer()).byteLength).toBe(bytes.length);
   });
 
   test("the WebSocket refuses a missing cookie and a foreign Origin", async () => {

@@ -6,6 +6,9 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Changed
+- Na interface, o modo `programação` aparece como **ultracódigo**, com as letras em arco-íris animado e fonte JetBrains Mono (OFL, embutida e recortada para Latin-1, 7 KB); o valor do modo, os prompts e a config salva não mudam (`src/gui/client/`, `src/gui/server.ts`).
+
 ## [0.9.1] - 2026-11-10
 
 ### Fixed

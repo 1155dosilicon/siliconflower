@@ -11,6 +11,8 @@ import indexHtml from "./client/index.html" with { type: "text" };
 import styleCss from "./client/style.css" with { type: "text" };
 import appJs from "./client/app.js" with { type: "text" };
 import markdownJs from "./client/markdown.js" with { type: "text" };
+// Embedded in the compiled binary too; JetBrains Mono (OFL), subset to Latin-1 (see client/fonts/OFL.txt).
+import monoFontPath from "./client/fonts/jetbrains-mono-extrabold.woff2" with { type: "file" };
 
 const HOST = "127.0.0.1";
 const TOPIC = "session";
@@ -23,12 +25,13 @@ const DEFAULT_GRACE_MS = 15_000;
 
 const FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><g fill="#e77fb3"><circle cx="16" cy="7" r="6"/><circle cx="25" cy="13" r="6"/><circle cx="21" cy="24" r="6"/><circle cx="11" cy="24" r="6"/><circle cx="7" cy="13" r="6"/><circle cx="16" cy="16" r="8"/></g><circle cx="16" cy="16" r="4" fill="#f7d774"/></svg>`;
 
-const ASSETS: Record<string, { body: string; type: string }> = {
+const ASSETS: Record<string, { body: string | Blob; type: string }> = {
   "/": { body: indexHtml, type: "text/html; charset=utf-8" },
   "/style.css": { body: styleCss, type: "text/css; charset=utf-8" },
   "/app.js": { body: appJs, type: "text/javascript; charset=utf-8" },
   "/markdown.js": { body: markdownJs, type: "text/javascript; charset=utf-8" },
   "/favicon.svg": { body: FAVICON, type: "image/svg+xml" },
+  "/fonts/jetbrains-mono-extrabold.woff2": { body: Bun.file(monoFontPath), type: "font/woff2" },
 };
 
 export interface GuiServerOptions {
@@ -229,7 +232,7 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
 
   let port = options.port ?? 0;
   const securityHeaders = () => ({
-    "Content-Security-Policy": `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src ws://${HOST}:${port}; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+    "Content-Security-Policy": `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src ws://${HOST}:${port}; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Cross-Origin-Resource-Policy": "same-origin",

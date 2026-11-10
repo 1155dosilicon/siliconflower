@@ -15,3 +15,8 @@ declare module "*/markdown.js" {
   const text: string;
   export default text;
 }
+// Binary assets are embedded as files (`with { type: "file" }`): the import is a path for Bun.file().
+declare module "*.woff2" {
+  const path: string;
+  export default path;
+}

@@ -45,7 +45,7 @@ A página controla um agente que executa comandos, e qualquer site aberto no nav
 - o servidor escuta só em `127.0.0.1`;
 - cada execução gera um token aleatório de 256 bits. A URL com o token troca por um cookie `HttpOnly` e `SameSite=Strict` e redireciona, tirando o token da barra de endereços e do histórico;
 - toda requisição precisa do cookie e do cabeçalho `Host` esperado, o que barra *DNS rebinding*. O WebSocket também confere `Origin`, o que barra outros sites;
-- a CSP bloqueia scripts inline e de terceiros, conexões externas, imagens externas e uso em frames;
+- a CSP bloqueia scripts inline e de terceiros, conexões externas, imagens e fontes externas e uso em frames;
 - o texto do modelo e das ferramentas nunca vira HTML: tags aparecem como texto, links só aceitam `http`, `https` e `mailto`, e imagens viram links, sem carregar nada;
 - a chave de API não é enviada à página.
 

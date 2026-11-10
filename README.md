@@ -81,13 +81,13 @@ Testado de verdade no elementary OS 8 e no Ubuntu 24.04. No Ubuntu 14.04 e 16.04
 | :--- | :--- |
 | Enviar / quebrar linha | `Enter` / `Shift+Enter` |
 | Cancelar a resposta ou a pergunta em andamento | `Esc` ou **Parar** |
-| Modo de trabalho | seletor **Modo**: `programação`, `sistema` ou `plano` |
+| Modo de trabalho | seletor **Modo**: `ultracódigo` (o modo `programação`), `sistema` ou `plano` |
 | Raciocínio | seletor **Pensamento**: `none`, `low`, `medium`, `high` |
 | Conversas | lateral: **+ Nova conversa**, clique para retomar, **×** para apagar |
 
 Enquanto o agente trabalha, aparece **Pensando...** (o texto do raciocínio não é mostrado) e cada ferramenta ganha um cartão com argumentos e resultado. As conversas ficam salvas por projeto; uma resposta só é salva ao terminar ou ser interrompida.
 
-**Modos:** `programação` e `sistema` só mudam o foco do prompt (código ou administração do sistema) e não limitam nada. `plano` só deixa ler, buscar e perguntar: edições, comandos, subagentes e MCP ficam bloqueados.
+**Modos:** `programação` (que a interface mostra como **ultracódigo**, só no nome) e `sistema` só mudam o foco do prompt (código ou administração do sistema) e não limitam nada. `plano` só deixa ler, buscar e perguntar: edições, comandos, subagentes e MCP ficam bloqueados.
 
 ### App de desktop
 
@@ -218,4 +218,4 @@ docs/         ARCHITECTURE.md (referência técnica) e PLATAFORMAS.md (Windows x
 AGENTS.md     guia para quem mexe no código, pessoas ou agentes de IA
 ```
 
-[CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [CHANGELOG.md](CHANGELOG.md) · Licença **MIT** ([LICENSE](LICENSE)).
+[CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [CHANGELOG.md](CHANGELOG.md) · Licença **MIT** ([LICENSE](LICENSE)). A interface embute a fonte [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), sob a SIL Open Font License 1.1 ([src/gui/client/fonts/OFL.txt](src/gui/client/fonts/OFL.txt)).
