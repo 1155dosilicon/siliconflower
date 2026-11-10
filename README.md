@@ -214,7 +214,7 @@ O log fica em `~/.siliconflower/logs/siliconflower.log` (`siliconflower logs --l
 src/          código do agente (mapa em AGENTS.md)
 desktop/      app de desktop (Electron)
 tests/        bun test
-scripts/      instalação no PATH e do AppImage
+scripts/      instalação no PATH e do AppImage, release e checagens do CI
 docs/         ARCHITECTURE.md (referência técnica) e PLATAFORMAS.md (Windows x Linux)
 AGENTS.md     guia para quem mexe no código, pessoas ou agentes de IA
 ```

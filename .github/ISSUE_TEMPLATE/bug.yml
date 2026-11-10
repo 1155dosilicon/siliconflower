@@ -1,0 +1,51 @@
+name: Bug
+description: Algo não funciona como deveria
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: O que aconteceu
+      description: E o que você esperava que acontecesse.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Como reproduzir
+      placeholder: |
+        1. Abra o app em um projeto...
+        2. Peça ao agente...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versão
+      description: Em Configurações, ou `siliconflower --version`.
+      placeholder: "0.10.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Sistema
+      options:
+        - Windows 10/11
+        - Linux (.deb)
+        - Linux (AppImage)
+        - Linux (agente avulso / navegador)
+        - Windows (agente avulso / navegador)
+    validations:
+      required: true
+  - type: input
+    id: provider
+    attributes:
+      label: Provedor e modelo
+      placeholder: "SiliconFlow, deepseek-ai/DeepSeek-V4-Pro"
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: "Saída de `siliconflower logs --level error -n 50`. Confira se não há chaves ou dados pessoais."
+      render: text

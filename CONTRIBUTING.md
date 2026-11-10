@@ -46,5 +46,14 @@ O mapa do código, os comandos e as regras que já evitaram bugs estão em [AGEN
 1. Faça um fork e crie uma branch a partir de `main`.
 2. `bun run typecheck` e `bun test` precisam passar.
 3. Adicione ou atualize testes do comportamento alterado. Correções de bug ganham um teste em `tests/regressions.test.ts`.
-4. Registre a mudança em `CHANGELOG.md`, seção `[Unreleased]`, com **uma linha** por item.
-5. Na descrição do PR, explique a motivação, a mudança e qualquer impacto em compatibilidade.
+4. Registre a mudança em `CHANGELOG.md`, seção `[Unreleased]`, com **uma linha** por item. O CI recusa mudanças em `src/`, `desktop/src/`, `scripts/` ou `bin/` sem linha no CHANGELOG; refatorações e testes que não afetam ninguém levam `[skip changelog]` na mensagem do commit.
+5. Confira as docs, mesmo que não precisem mudar: o template do PR lista quais. `tests/docs-sync.test.ts` pega versão, ferramentas e comandos fora do README.
+6. Na descrição do PR, explique a motivação, a mudança e qualquer impacto em compatibilidade.
+
+## Lançando uma versão
+
+```bash
+bun run release 0.11.0   # versão nos 3 arquivos, badge do README e [Unreleased] -> [0.11.0]
+```
+
+O script recusa versão menor que a atual, `[Unreleased]` vazio e mudanças sem commit. Ele não faz commit: mostra o que mudou no código e nas docs desde a última tag, para conferir se README, `docs/` e `SECURITY.md` acompanham, e depois os comandos de commit, tag e push. A tag `vX.Y.Z` dispara `.github/workflows/release.yml`, que gera os pacotes e cria a release em rascunho com a seção do CHANGELOG como descrição; revise e publique à mão.

@@ -15,6 +15,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: changelog e docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Code changes need a CHANGELOG line; also warns when no doc was touched.
+      - name: Check CHANGELOG
+        run: bun scripts/check-changes.ts "${{ github.event.pull_request.base.sha || github.event.before }}"
+
   test:
     name: ${{ matrix.os }}
     strategy:

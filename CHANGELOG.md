@@ -6,8 +6,14 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Added
+- `bun run release <versão>` atualiza versão, badge do README e CHANGELOG de uma vez e mostra o que mudou desde a última tag para revisar as docs (`scripts/release.ts`).
+- O CI recusa mudança de código sem linha no CHANGELOG e avisa quando nenhuma doc mudou (`scripts/check-changes.ts`).
+- A release no GitHub usa a seção do CHANGELOG como descrição (`scripts/release-notes.ts`).
+- Templates de PR, com checklist das docs, e de issue (bug e recurso) em `.github/`.
+
 ### Changed
-- Documentação: badge de versão do README, compactação só por tokens, revisão `rev` das conversas e mensagens do WebSocket no ARCHITECTURE; `tests/docs-sync.test.ts` falha quando versão, contagem ou lista de ferramentas da doc ficam para trás.
+- Documentação: badge de versão do README, compactação só por tokens, revisão `rev` das conversas e mensagens do WebSocket no ARCHITECTURE; `tests/docs-sync.test.ts` falha quando versão, contagem ou lista de ferramentas ou comandos da CLI da doc ficam para trás.
 
 ## [0.10.0] - 2026-11-10
 

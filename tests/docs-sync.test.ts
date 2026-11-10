@@ -27,6 +27,13 @@ describe("docs in sync with the code", () => {
     expect(Number(count?.[1])).toBe(toolNames.length);
   });
 
+  test("every CLI command is in the README", () => {
+    const commands = [...read("src/index.tsx").matchAll(/\.command\("([a-z-]+)"\)/g)].map((m) => m[1]!);
+    const readme = read("README.md");
+    const missing = [...new Set(commands)].filter((name) => !new RegExp(`siliconflower[^\\n]*\\b${name}\\b`).test(readme));
+    expect(missing).toEqual([]);
+  });
+
   test("every native tool is listed in the README and in ARCHITECTURE", () => {
     const readme = read("README.md");
     const architecture = read("docs/ARCHITECTURE.md");
