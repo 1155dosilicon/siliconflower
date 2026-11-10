@@ -43,7 +43,7 @@ O mapa do código, os comandos e as regras que já evitaram bugs estão em [AGEN
 
 ## Fluxo de pull request
 
-1. Faça um fork e crie uma branch a partir de `main`.
+1. Faça um fork e crie uma branch a partir de `main`. A `main` é protegida: tudo entra por PR, com o CI verde.
 2. `bun run typecheck` e `bun test` precisam passar.
 3. Adicione ou atualize testes do comportamento alterado. Correções de bug ganham um teste em `tests/regressions.test.ts`.
 4. Registre a mudança em `CHANGELOG.md`, seção `[Unreleased]`, com **uma linha** por item. O CI recusa mudanças em `src/`, `desktop/src/`, `scripts/` ou `bin/` sem linha no CHANGELOG; refatorações e testes que não afetam ninguém levam `[skip changelog]` na mensagem do commit.
