@@ -11,6 +11,7 @@ import {
   cleanTitle,
   conversationTitle,
   newConversationId,
+  newRevision,
   type ConversationStore,
   type ConversationSummary,
   type ToolActivity,
@@ -129,7 +130,7 @@ export class AgentSession {
   private statusTimer: ReturnType<typeof setTimeout> | undefined;
   private unsubscribeTodos: (() => void) | undefined;
   private unsubscribeTasks: (() => void) | undefined;
-  /** `updatedAt` this session last saw in each conversation file: see ConversationStore.save. */
+  /** Stamp (`rev`) this session last saw in each conversation file: see ConversationStore.save. */
   private readonly stamps = new Map<string, string>();
   private started = false;
   private sending = false;
@@ -300,13 +301,14 @@ export class AgentSession {
     // A title the user gave (renameConversation) stays.
     const title = this.state.conversations.find((c) => c.id === id)?.title ?? conversationTitle(first);
     const updatedAt = new Date().toISOString();
+    const rev = newRevision();
     try {
       const savedAs = await this.store.save(
-        { id, title, updatedAt, messageCount: this.state.messages.length },
+        { id, title, updatedAt, messageCount: this.state.messages.length, rev },
         { history: stripMediaData(this.history), messages: this.state.messages, activities: this.activities, todos: this.state.todos },
         this.stamps.get(id)
       );
-      this.stamps.set(savedAs, updatedAt);
+      this.stamps.set(savedAs, rev);
       if (savedAs !== id) {
         // Another window wrote this conversation meanwhile: ours went on as a copy.
         this.stamps.delete(id);

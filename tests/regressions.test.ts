@@ -7,6 +7,7 @@ import { runShell, decodeClixml } from "../src/shell.js";
 import { htmlToMarkdown, isPrivateAddress, webFetch } from "../src/services/web.js";
 import { buildOpenAIMessages, isOfficialOpenAIEndpoint, NOT_RUN_AFTER_CANCEL, streamChat } from "../src/llm.js";
 import { AgentSession } from "../src/session.js";
+import { ConversationStore, newRevision } from "../src/services/conversations.js";
 import { normalize } from "../src/config.js";
 import { createArtifact, readArtifact, listArtifacts, deleteArtifact, getArtifactsDir } from "../src/services/artifact.js";
 import { smartEditFile } from "../src/services/smart-edit.js";
@@ -1054,5 +1055,29 @@ describe("background commands", () => {
     } finally {
       await killAllBackgroundTasks();
     }
+  });
+});
+
+describe("two windows saving in the same millisecond", () => {
+  // The conflict check compared only `updatedAt`, which has millisecond resolution: on a fast
+  // machine both windows saved with the same stamp and the second one wrote over the first.
+  test("a save from another window is noticed even with the same updatedAt", async () => {
+    const store = new ConversationStore(join(tmp, "same-ms"));
+    const body = { history: [], messages: [], activities: [], todos: [] };
+    const updatedAt = "2026-01-01T00:00:00.000Z";
+    const seen = newRevision();
+    await store.save({ id: "c", title: "t", updatedAt, messageCount: 0, rev: seen }, body);
+    // The other window saves within the same millisecond.
+    await store.save({ id: "c", title: "t", updatedAt, messageCount: 1, rev: newRevision() }, body, seen);
+    const savedAs = await store.save({ id: "c", title: "t", updatedAt, messageCount: 2, rev: newRevision() }, body, seen);
+    expect(savedAs).not.toBe("c");
+  });
+
+  test("files without rev still compare by updatedAt", async () => {
+    const store = new ConversationStore(join(tmp, "no-rev"));
+    const body = { history: [], messages: [], activities: [], todos: [] };
+    await store.save({ id: "c", title: "t", updatedAt: "2026-01-01T00:00:00.000Z", messageCount: 0 }, body);
+    expect(await store.stamp("c")).toBe("2026-01-01T00:00:00.000Z");
+    expect(await store.save({ id: "c", title: "t", updatedAt: "x", messageCount: 0, rev: "r" }, body, "2026-01-01T00:00:00.000Z")).toBe("c");
   });
 });

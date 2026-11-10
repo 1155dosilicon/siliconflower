@@ -13,6 +13,11 @@ export interface ConversationSummary {
   title: string;
   updatedAt: string;
   messageCount: number;
+  /**
+   * Random per save: tells two saves apart even within the same millisecond, which
+   * `updatedAt` alone does not. Files saved before it existed fall back to `updatedAt`.
+   */
+  rev?: string;
 }
 
 export interface ToolActivity {
@@ -39,6 +44,15 @@ export interface ConversationBody {
   messages: StoredMessage[];
   activities: ToolActivity[];
   todos: TodoItem[];
+}
+
+export function newRevision(): string {
+  return randomBytes(8).toString("hex");
+}
+
+/** What `save` compares to tell whether another window wrote the file. */
+function stampOf(header: ConversationSummary): string {
+  return typeof header.rev === "string" && header.rev ? header.rev : header.updatedAt;
 }
 
 export function newConversationId(): string {
@@ -163,15 +177,16 @@ export class ConversationStore {
     return run;
   }
 
-  /** `updatedAt` of the saved file, or undefined when there is none. */
+  /** Revision of the saved file (`rev`, or `updatedAt` in older files); undefined when there is none. */
   async stamp(id: string): Promise<string | undefined> {
     this.file(id); // validates the id
-    return (await this.readHeader(`${id}.jsonl`))?.updatedAt;
+    const header = await this.readHeader(`${id}.jsonl`);
+    return header ? stampOf(header) : undefined;
   }
 
   /**
    * Saves the conversation and returns the id it was saved under. `expected` is the
-   * `updatedAt` this session last saw in the file: when the file has another one, a second
+   * stamp (see `stamp`) this session last saw in the file: when the file has another one, a second
    * window (browser and app on the same project) wrote it meanwhile, and saving over it
    * would lose that window's turns. The conversation is then saved as a copy, under a new id.
    * The check runs inside the queue, so a delete or a save already queued comes first.
@@ -182,8 +197,8 @@ export class ConversationStore {
     await this.enqueue(async () => {
       await mkdir(this.dir, { recursive: true });
       if (expected !== undefined) {
-        const onDisk = (await this.readHeader(`${id}.jsonl`))?.updatedAt;
-        if (onDisk !== undefined && onDisk !== expected) id = newConversationId();
+        const header = await this.readHeader(`${id}.jsonl`);
+        if (header && stampOf(header) !== expected) id = newConversationId();
       }
       const target = this.file(id);
       const temp = `${target}.${process.pid}.tmp`;

@@ -6,6 +6,11 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-10
+
+### Fixed
+- Duas janelas que salvavam a mesma conversa no mesmo milissegundo não percebiam o conflito, e uma gravava por cima da outra: cada gravação leva agora uma revisão aleatória (`rev`), e arquivos antigos seguem comparados por `updatedAt` (`src/services/conversations.ts`, `src/session.ts`).
+
 ## [0.9.0] - 2026-11-09
 
 Correções da revisão da 0.8.1 e o que faltava na interface: anexos, edição da última mensagem, tarefas em background, busca e renomeação de conversas. O projeto passa a ser só para Windows e Linux em x86_64.
