@@ -18,6 +18,17 @@ bun start -- gui    # roda a GUI a partir do código-fonte (sem argumentos, só 
 
 Antes de dar uma tarefa por concluída: `bun run typecheck` e `bun test`.
 
+**Git**: a `main` é protegida e só recebe PR com o CI verde (testes em Windows e Linux e `changelog e docs`). Nunca faça commit nem push na `main`, mesmo que o usuário diga "sobe para o GitHub":
+
+```bash
+git switch -c <tipo>/<assunto>    # fix/, feat/, docs/, ci/
+git push -u origin <branch>
+gh pr create --fill                # preencha o checklist do template
+gh pr checks --watch               # espere o CI; se falhar, corrija na mesma branch
+```
+
+O merge (`gh pr merge --squash --delete-branch`) só depois do CI verde e com o usuário de acordo.
+
 ## Mapa do código
 
 - `src/index.tsx`: CLI (commander). `config.ts`/`wizard.ts`: configuração.
