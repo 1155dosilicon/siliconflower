@@ -39,7 +39,7 @@ Na primeira vez, o app pede provedor, chave e modelo; depois, escolha a pasta do
 
 ### Agente avulso (sem o app)
 
-Baixe `siliconflower.exe` (Windows) ou `siliconflower-linux-x64` (Linux; renomeie para `siliconflower`) e coloque numa pasta do `PATH` (`~/.local/bin` no Linux). Dentro da pasta do projeto, `siliconflower gui` abre a interface no navegador e, na primeira vez, o assistente de configuração no terminal. Sem argumentos, o comando só mostra a ajuda.
+Baixe `siliconflower-portatil-windows-x64.exe` (Windows) ou `siliconflower-portatil-linux-x64` (Linux), renomeie para `siliconflower.exe` ou `siliconflower` e coloque numa pasta do `PATH` (`~/.local/bin` no Linux). Dentro da pasta do projeto, `siliconflower gui` abre a interface no navegador e, na primeira vez, o assistente de configuração no terminal. Sem argumentos, o comando só mostra a ajuda.
 
 ### A partir do código-fonte
 

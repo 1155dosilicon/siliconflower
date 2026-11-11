@@ -11,4 +11,14 @@ if (!body) {
   console.error(`CHANGELOG.md nao tem a secao [${version}], ou ela esta vazia.`);
   process.exit(1);
 }
-console.log(body);
+console.log(`${body}
+
+### Qual baixar?
+
+**Windows**
+- \`Siliconflower-Setup-${version}.exe\`: o app de desktop, com instalador e atalho. **Se não sabe qual, é este.**
+- \`siliconflower-portatil-windows-x64.exe\`: só o agente, sem instalar; \`siliconflower gui\` abre a interface no navegador.
+
+**Linux**
+- \`Siliconflower-${version}-amd64.deb\` ou \`Siliconflower-${version}-x86_64.AppImage\` (com \`install-appimage.sh\`): o app de desktop.
+- \`siliconflower-portatil-linux-x64\`: só o agente, sem instalar.`);

@@ -49,7 +49,7 @@ Esta lista é tudo o que **deve** ser diferente entre os sistemas. Fora daqui, o
 | :--- | :--- | :--- | :--- |
 | Build | `dist/siliconflower.exe` | `dist/siliconflower` (`build.ts` escolhe `bun-<sistema>-<arquitetura>` pela máquina atual) | `build.ts` |
 | `install:bin` | `scripts/install.ps1` (`%LOCALAPPDATA%\Programs\siliconflower` + `PATH`) | `scripts/install-bin.js`: `~/.local/bin` em Unix (`scripts/install.sh`), `install.ps1` no Windows | `package.json`, `scripts/` |
-| Release | `siliconflower.exe` e `Siliconflower-Setup-<versão>.exe` (job `windows-latest`) | `siliconflower-linux-x64`, `Siliconflower-<versão>-x86_64.AppImage`, `Siliconflower-<versão>-amd64.deb` e `install-appimage.sh` (job `ubuntu-latest`) | `.github/workflows/release.yml` |
+| Release | `siliconflower-portatil-windows-x64.exe` e `Siliconflower-Setup-<versão>.exe` (job `windows-latest`) | `siliconflower-portatil-linux-x64`, `Siliconflower-<versão>-x86_64.AppImage`, `Siliconflower-<versão>-amd64.deb` e `install-appimage.sh` (job `ubuntu-latest`) | `.github/workflows/release.yml` |
 
 ## Requisitos mínimos
 
