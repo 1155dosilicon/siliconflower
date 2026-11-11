@@ -19,13 +19,13 @@ jobs:
           - os: windows-latest
             dist: dist:win
             agent: dist/siliconflower.exe
-            agent_name: siliconflower.exe
+            agent_name: siliconflower-portatil-windows-x64.exe
             app: dist-desktop/Siliconflower-Setup-*.exe
             extra: ""
           - os: ubuntu-latest
             dist: dist:linux
             agent: dist/siliconflower
-            agent_name: siliconflower-linux-x64
+            agent_name: siliconflower-portatil-linux-x64
             app: dist-desktop/Siliconflower-*.AppImage dist-desktop/Siliconflower-*.deb
             extra: scripts/install-appimage.sh
     runs-on: ${{ matrix.os }}

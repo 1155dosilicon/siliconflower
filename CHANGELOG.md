@@ -11,8 +11,10 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 - O CI recusa mudança de código sem linha no CHANGELOG e avisa quando nenhuma doc mudou (`scripts/check-changes.ts`).
 - A release no GitHub usa a seção do CHANGELOG como descrição (`scripts/release-notes.ts`).
 - Templates de PR, com checklist das docs, e de issue (bug e recurso) em `.github/`.
+- A descrição da release traz um guia "Qual baixar?" separando o app de desktop do agente portátil (`scripts/release-notes.ts`).
 
 ### Changed
+- O agente avulso sai na release como `siliconflower-portatil-windows-x64.exe` e `siliconflower-portatil-linux-x64`, para não ser confundido com o instalador (`.github/workflows/release.yml`).
 - Documentação: badge de versão do README, compactação só por tokens, revisão `rev` das conversas e mensagens do WebSocket no ARCHITECTURE; `tests/docs-sync.test.ts` falha quando versão, contagem ou lista de ferramentas ou comandos da CLI da doc ficam para trás.
 
 ## [0.10.0] - 2026-11-10
