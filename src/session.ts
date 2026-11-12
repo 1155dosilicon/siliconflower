@@ -54,7 +54,7 @@ export interface SessionBackgroundTask {
 }
 
 export const MAX_UPLOADS = 4;
-const EMPTY_RESPONSE_NOTE = "[O modelo encerrou a resposta sem escrever nada. Envie a mensagem de novo ou reformule o pedido.]";
+export const EMPTY_RESPONSE_NOTE ="[O modelo encerrou a resposta sem escrever nada. Envie a mensagem de novo ou reformule o pedido.]";
 
 export interface SessionQuestion {
   question: string;

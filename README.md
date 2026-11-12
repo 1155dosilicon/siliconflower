@@ -165,6 +165,7 @@ Tudo fica em `~/.siliconflower/` (ou em `SILICONFLOWER_DATA_DIR`, se definida):
 
 ```bash
 siliconflower gui            # interface no navegador (--port <n>, --no-open, --resume-latest)
+siliconflower run "<pedido>" # executa um pedido até o fim, sem interface, e imprime a resposta (scripts e CI)
 siliconflower config         # assistente de configuração
 siliconflower show           # configuração (chave mascarada), projeto ativo e pasta de dados
 siliconflower init           # cria SILICONFLOWER.md aqui (--agents cria AGENTS.md)
@@ -174,6 +175,8 @@ siliconflower logs -n 100 --level error --search timeout   # --clear apaga o log
 ```
 
 Opções globais, só para aquela execução: `-m/--model`, `-r/--reasoning`, `--mode`, `--base-url`, `--api-key`. A partir do código-fonte, use `bun run start -- <comando>`.
+
+**`siliconflower run`** serve para scripts e CI. Sem o pedido (ou com `-`), ele é lido da entrada padrão: `git diff | siliconflower run`. Só a resposta final vai para a saída padrão; o progresso das ferramentas vai para a saída de erro (`-q` desliga). O código de saída é `0` quando a resposta veio, `1` em erro e `130` se foi interrompido. Não precisa de `config.json`: bastam `SILICONFLOWER_API_KEY`, `SILICONFLOWER_BASE_URL` e `SILICONFLOWER_MODEL`. Como não há ninguém para responder, `ask_question` recebe uma resposta automática mandando o modelo decidir sozinho, e a conversa não é salva. O agente roda com todas as ferramentas, sem confirmação: veja o [SECURITY.md](SECURITY.md#execução-sem-interface-siliconflower-run) antes de usar com texto de terceiros.
 
 ---
 
