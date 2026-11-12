@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
-import { configExists, loadConfig, loadStoredConfig, applyEnvOverrides, isValid, configFile, configDir } from "./config.js";
+import { configExists, loadConfig, loadStoredConfig, applyEnvOverrides, isValid, normalize, configFile, configDir } from "./config.js";
 import { ensureConfig, runSetup } from "./wizard.js";
 import type { AppConfig, Mode, ReasoningLevel } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
@@ -70,6 +70,46 @@ program
       managed,
       resumeLatest: Boolean(opts.resumeLatest),
     });
+  });
+
+program
+  .command("run")
+  .description("Run one prompt to the end with no interface and print the answer (scripts and CI; accepts the global options above)")
+  .argument("[prompt]", 'the request; when omitted or "-", it is read from stdin')
+  .option("-q, --quiet", "do not print tool progress on stderr")
+  .action(async (promptArg: string | undefined, _opts, cmd: Command) => {
+    const opts = cmd.optsWithGlobals();
+    let prompt = promptArg ?? "-";
+    if (prompt === "-") {
+      if (process.stdin.isTTY) throw new Error('Informe o pedido: siliconflower run "<pedido>", ou envie-o pela entrada padrão.');
+      const chunks: Buffer[] = [];
+      for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+      prompt = Buffer.concat(chunks).toString("utf8");
+    }
+    if (!prompt.trim()) throw new Error("O pedido está vazio.");
+    // Nobody is there to answer the wizard; the environment alone may configure a CI run.
+    const resolved = await resolveRun(opts, { interactive: false, envOnly: true });
+    await log("info", "=== siliconflower iniciado por run ===");
+    const { AgentSession } = await import("./session.js");
+    const { runHeadless, closeHeadless } = await import("./run.js");
+    const session = new AgentSession(resolved.config, resolved.overrides);
+    for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => session.cancel());
+    let code = 1;
+    try {
+      const result = await runHeadless(session, prompt, { onProgress: opts.quiet ? undefined : (line) => console.error(line) });
+      if (result.ok) {
+        // Only the answer goes to stdout, and it must be flushed before process.exit.
+        await new Promise<void>((resolve) => process.stdout.write(`${result.text}\n`, () => resolve()));
+        code = 0;
+      } else {
+        console.error(`Erro: ${result.error}`);
+        code = result.cancelled ? 130 : 1;
+      }
+    } finally {
+      await closeHeadless(session);
+    }
+    // Background tasks and MCP handles could otherwise keep the process running.
+    process.exit(code);
   });
 
 program
@@ -216,7 +256,7 @@ async function resolveRun(
     baseUrl?: string;
     apiKey?: string;
   },
-  { interactive = true }: { interactive?: boolean } = {}
+  { interactive = true, envOnly = false }: { interactive?: boolean; /** Without config.json, use SILICONFLOWER_* and the options alone. */ envOnly?: boolean } = {}
 ): Promise<{ config: AppConfig; overrides: { model?: string; reasoning?: ReasoningLevel; mode?: Mode } }> {
   const overrides: { model?: string; reasoning?: ReasoningLevel; mode?: Mode } = {};
   if (opts.model) overrides.model = opts.model;
@@ -232,6 +272,17 @@ async function resolveRun(
   // The wizard always works on (and saves) the stored file; environment overrides are
   // applied on top only for this run and never written back to config.json.
   let config: AppConfig | null = (await configExists()) ? await loadConfig() : null;
+  if (envOnly) {
+    config ??= normalize({});
+    if (opts.baseUrl) config.baseURL = opts.baseUrl;
+    if (opts.apiKey) config.apiKey = opts.apiKey;
+    if (!isValid(config)) {
+      throw new Error(
+        "Falta configurar o provedor de IA: rode `siliconflower config`, ou defina SILICONFLOWER_API_KEY, SILICONFLOWER_BASE_URL e SILICONFLOWER_MODEL."
+      );
+    }
+    return { config, overrides };
+  }
   if (!config) {
     if (!interactive) throw new ConfigRequiredError();
     config = applyEnvOverrides(await runSetup(null));

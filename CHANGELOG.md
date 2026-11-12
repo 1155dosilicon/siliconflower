@@ -7,6 +7,7 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 ## [Unreleased]
 
 ### Added
+- Comando `siliconflower run "<pedido>"`: executa um pedido até o fim sem interface e imprime a resposta, para scripts e CI; lê o pedido da entrada padrão, funciona só com as variáveis `SILICONFLOWER_*` e responde `ask_question` automaticamente (`src/run.ts`).
 - `bun run release <versão>` atualiza versão, badge do README e CHANGELOG de uma vez e mostra o que mudou desde a última tag para revisar as docs (`scripts/release.ts`).
 - O CI recusa mudança de código sem linha no CHANGELOG e avisa quando nenhuma doc mudou (`scripts/check-changes.ts`).
 - A release no GitHub usa a seção do CHANGELOG como descrição (`scripts/release-notes.ts`).

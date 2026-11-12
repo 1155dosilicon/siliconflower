@@ -51,6 +51,14 @@ A página controla um agente que executa comandos, e qualquer site aberto no nav
 
 **Limitações:** a conexão local não é criptografada, e outro programa rodando na sua conta consegue ler o token (na linha de comando do navegador, nos dados do navegador ou na saída do terminal). A interface não é uma barreira contra software local: ela tem os mesmos privilégios do resto do agente. Não exponha a porta com proxy ou túnel e não compartilhe a URL.
 
+## Execução sem interface (`siliconflower run`)
+
+O `run` executa o pedido até o fim sem ninguém acompanhando: não há como parar uma ação no meio pela interface, e `ask_question` recebe uma resposta automática em vez de esperar você. As ferramentas são as mesmas da GUI, com os mesmos privilégios.
+
+- **O pedido é uma instrução.** Se ele traz texto de terceiros (uma issue, um comentário de PR, uma página), quem escreveu esse texto está, na prática, dando ordens a um agente com shell. Num CI, restrinja quem pode disparar a execução e dê ao job só as permissões e os segredos de que ele precisa.
+- **`--mode plano`** limita o agente à allowlist de leitura e é a escolha certa quando o pedido só precisa de análise.
+- Passe o pedido pela entrada padrão, não interpolado na linha de comando: texto de terceiros dentro de um comando de shell é injeção de comando antes mesmo de chegar ao agente.
+
 ## Conversas salvas
 
 A GUI e o app guardam as conversas em `~/.siliconflower/workspaces/<projeto>/sessions/`, **em texto puro**. Isso inclui suas mensagens e a saída das ferramentas: um arquivo `.env` que o agente tenha lido, por exemplo, fica nelas. A chave de API do provedor não é gravada, mas um segredo que passe pela conversa é. Os arquivos ficam com as permissões da sua conta: em Linux/Unix, confira que `~/.siliconflower` não é legível por outros usuários (o `config.json` é gravado com `0600`, mas as conversas seguem a `umask`). Apague pelo **×** na lateral o que não deve ficar guardado. De imagens, áudios e vídeos lidos com `read_media`, só o caminho é gravado; o conteúdo vai ao provedor, mas não para o disco.
