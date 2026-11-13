@@ -28,6 +28,7 @@ Esta lista é tudo o que **deve** ser diferente entre os sistemas. Fora daqui, o
 | Ponto | Windows | Linux/Unix | Onde |
 | :--- | :--- | :--- | :--- |
 | `config.json` | gravação atômica | gravação atômica com permissão `0600` (e correção de arquivos antigos ao ler); resolve links simbólicos antes de substituir (dotfiles, Nix/Home Manager); apaga o temporário em caso de falha | `src/config.ts` |
+| Pasta de dados no diagnóstico (botão 🩺, `siliconflower doctor`) | só confere se dá para gravar nela | também avisa quando outros usuários podem ler a pasta (as conversas ficam nela em texto puro); a correção automática aplica `chmod 700` | `src/doctor.ts` (`checkDataDir`) |
 | Memória chamada `memory` | arquivo `memory_.md`, porque `memory.md` seria o próprio índice `MEMORY.md` (sistema de arquivos sem distinção de maiúsculas) | arquivo `memory.md` | `src/services/memory.ts` (`fileNameFor`) |
 | ID do workspace | caminho em minúsculas (sistema de arquivos sem distinção de maiúsculas) | caminho como está, para duas pastas que diferem só em maiúsculas não colidirem | `src/fs-util.ts` |
 | Projetos recentes do app | `folderKey` em minúsculas | `folderKey` mantém maiúsculas | `desktop/src/projects.ts` |
@@ -62,7 +63,7 @@ objdump -T dist/siliconflower | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1
 
 ## Testes
 
-Os testes que dependem do shell ou de caminhos escolhem o lado pela plataforma (`process.platform === "win32"`). Os de processos órfãos contam `sleep` com `ps` em Unix e `powershell.exe` com `Get-CimInstance` no Windows (`tests/regressions.test.ts`). Só em Unix: `tests/config-save.test.ts` (permissão `0600` e links simbólicos) e o teste de `folderKey` que mantém maiúsculas. Só no Windows: o de `folderKey` sem distinção de maiúsculas (`tests/desktop.test.ts`).
+Os testes que dependem do shell ou de caminhos escolhem o lado pela plataforma (`process.platform === "win32"`). Os de processos órfãos contam `sleep` com `ps` em Unix e `powershell.exe` com `Get-CimInstance` no Windows (`tests/regressions.test.ts`). Só em Unix: `tests/config-save.test.ts` (permissão `0600` e links simbólicos), o teste de `folderKey` que mantém maiúsculas e o da permissão da pasta de dados no `doctor` (`tests/doctor.test.ts`). Só no Windows: o de `folderKey` sem distinção de maiúsculas (`tests/desktop.test.ts`) e o do `doctor` que não olha permissões.
 
 ## Histórico
 

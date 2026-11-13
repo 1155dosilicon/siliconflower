@@ -1,6 +1,6 @@
 # 🌸 SILICONFLOWER
 
-![Version](https://img.shields.io/badge/version-0.11.0-blue.svg)
+![Version](https://img.shields.io/badge/version-0.12.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D6.svg)
 ![Bun](https://img.shields.io/badge/Bun-%3E%3D1.3-black.svg)
@@ -19,7 +19,7 @@ Agente de IA para desenvolvimento de software em **Windows e Linux** (x86_64), c
 - 🌳 **Git worktrees** em `<repo>/.worktrees/<branch>`, sem mexer na sua área de trabalho.
 - 🗺️ **RepoMap**: mapa de símbolos (TS, JS, Python, Go, Rust) com poucos tokens.
 - 🧩 **MCP, hooks e skills**: servidores MCP por stdio ou HTTP, comandos disparados por eventos e instruções em Markdown carregadas sob demanda.
-- 📎 **Na interface**: anexe imagens (botão 📎, colar ou arrastar; áudio e vídeo na API Xiaomi MiMo), edite e reenvie a última mensagem, busque e renomeie conversas, e acompanhe ou encerre o que roda em background.
+- 📎 **Na interface**: anexe imagens (botão 📎, colar ou arrastar; áudio e vídeo na API Xiaomi MiMo), edite e reenvie a última mensagem, busque e renomeie conversas, acompanhe ou encerre o que roda em background e confira a instalação pelo botão 🩺 (**Diagnóstico**), sem abrir um terminal.
 - 📦 **Binário único** feito com o Bun: não precisa de Node.js instalado.
 
 ---
@@ -85,6 +85,7 @@ Testado de verdade no elementary OS 8 e no Ubuntu 24.04. No Ubuntu 14.04 e 16.04
 | Raciocínio | seletor **Pensamento**: `none`, `low`, `medium`, `high`, `max`, `ultra` (os dois últimos só existem em alguns provedores; se o seu recusar, o pedido segue com `high`) |
 | Conversas | lateral: **+ Nova conversa**, clique para retomar, **✎** para renomear, **×** para apagar; o campo de busca aparece com duas ou mais |
 | Editar a última mensagem | botão **Editar** ao passar o mouse sobre ela |
+| Conferir se está tudo funcionando | botão **🩺** no canto superior direito ([Diagnóstico](#-diagnóstico)) |
 
 Enquanto o agente trabalha, aparece **Pensando...** (o texto do raciocínio não é mostrado) e cada ferramenta ganha um cartão com argumentos e resultado. As conversas ficam salvas por projeto; uma resposta só é salva ao terminar ou ser interrompida.
 
@@ -165,9 +166,9 @@ Tudo fica em `~/.siliconflower/` (ou em `SILICONFLOWER_DATA_DIR`, se definida):
 
 ```bash
 siliconflower gui            # interface no navegador (--port <n>, --no-open, --resume-latest)
-siliconflower run "<pedido>" # executa um pedido até o fim, sem interface, e imprime a resposta (scripts e CI)
 siliconflower config         # assistente de configuração
 siliconflower show           # configuração (chave mascarada), projeto ativo e pasta de dados
+siliconflower doctor         # o diagnóstico do botão 🩺, para quando a interface não abre (--fix, --offline)
 siliconflower init           # cria SILICONFLOWER.md aqui (--agents cria AGENTS.md)
 siliconflower ensure         # cria a configuração se não existir
 siliconflower skills list    # lista as skills; `skills sync` (ou `sync`) copia os exemplos
@@ -175,8 +176,6 @@ siliconflower logs -n 100 --level error --search timeout   # --clear apaga o log
 ```
 
 Opções globais, só para aquela execução: `-m/--model`, `-r/--reasoning`, `--mode`, `--base-url`, `--api-key`. A partir do código-fonte, use `bun run start -- <comando>`.
-
-**`siliconflower run`** serve para scripts e CI. Sem o pedido (ou com `-`), ele é lido da entrada padrão: `git diff | siliconflower run`. Só a resposta final vai para a saída padrão; o progresso das ferramentas vai para a saída de erro (`-q` desliga). O código de saída é `0` quando a resposta veio, `1` em erro e `130` se foi interrompido. Não precisa de `config.json`: bastam `SILICONFLOWER_API_KEY`, `SILICONFLOWER_BASE_URL` e `SILICONFLOWER_MODEL`. Como não há ninguém para responder, `ask_question` recebe uma resposta automática mandando o modelo decidir sozinho, e a conversa não é salva. O agente roda com todas as ferramentas, sem confirmação: veja o [SECURITY.md](SECURITY.md#execução-sem-interface-siliconflower-run) antes de usar com texto de terceiros.
 
 ---
 
@@ -195,6 +194,14 @@ O agente não tem sandbox: leia o [SECURITY.md](SECURITY.md) antes de dar acesso
 
 ## 🩺 Diagnóstico
 
+Comece pelo botão **🩺** no canto superior direito da interface (app ou navegador). Ele confere a configuração, faz um pedido mínimo ao provedor (chave, endereço e modelo), mostra como estão os servidores MCP, roda um comando no shell e olha a pasta de dados, o git, os hooks, as conversas salvas e os erros recentes do log. Cada item aparece como certo (✓), aviso (!) ou problema (✕), e os dois últimos trazem o jeito de resolver.
+
+- **Corrigir o que der** aparece quando há algo que dá para resolver sozinho, sem apagar nada: renomeia conversas danificadas para `*.jsonl.danificada` (o aviso some da interface) e, no Linux, fecha a pasta de dados para outros usuários (`chmod 700`).
+- **Verificar de novo** repete as verificações depois de você mexer em algo.
+- Se o app nem abre o projeto, ele mostra as **Configurações**, onde **Testar conexão** faz o mesmo pedido ao provedor.
+
+No terminal, `siliconflower doctor` faz as mesmas verificações (com `--fix` e `--offline`, que pula o provedor e os servidores MCP) e sai com código `1` quando algo impede o agente de funcionar.
+
 O log fica em `~/.siliconflower/logs/siliconflower.log` (`siliconflower logs --level error`), também para o app.
 
 - **HTTP 401:** confira a chave no `config.json` e em `SILICONFLOWER_API_KEY`.
@@ -206,6 +213,7 @@ O log fica em `~/.siliconflower/logs/siliconflower.log` (`siliconflower logs --l
 - **Memória de outro projeto, ou nenhuma:** a memória de projeto só existe dentro de uma pasta com `SILICONFLOWER.md`/`AGENTS.md`. Confira com `siliconflower show` (linha `Project`).
 - **Comando em background parou ao fechar:** fechar a janela ou a GUI encerra esses comandos. O que deve continuar precisa ser iniciado fora do agente (`systemd`, `tmux`, `nohup`).
 - **Resposta ou arquivo cortado:** cada resposta tem até 32768 tokens de saída (16384 se o provedor recusar). O modelo é avisado e pode escrever em partes; num texto cortado, envie `continue`.
+- **O agente não para de chamar ferramentas:** não há limite de passos por mensagem, para tarefas longas irem até o fim. Se o modelo ficar repetindo a mesma chamada, use `Esc` ou **Parar**: o que as ferramentas já fizeram fica no histórico.
 - **AppImage pede FUSE / `libfuse.so.2`:** use o `.deb` ou o `install-appimage.sh`. **Nunca** `apt install fuse` (veja o aviso acima).
 - **`siliconflower: command not found`:** abra um novo terminal e confira se `~/.local/bin` está no `PATH`. O app de desktop não instala esse comando.
 

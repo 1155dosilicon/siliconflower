@@ -568,6 +568,64 @@ function setComposerEnabled(enabled) {
   $("action").disabled = !enabled;
 }
 
+/* ----------------------------------- Diagnosis ----------------------------------- */
+
+const DOCTOR_MARKS = { ok: "✓", warn: "!", fail: "✕", skip: "–" };
+const DOCTOR_STATUS_NAMES = { ok: "certo", warn: "aviso", fail: "problema", skip: "não verificado" };
+/** A request is out: the checks start a shell and call the provider, so one at a time. */
+let doctorRunning = false;
+
+function doctorCheckNode(check) {
+  const item = el("li", "doctor-check");
+  item.dataset.status = check.status;
+  const mark = el("span", "doctor-mark", DOCTOR_MARKS[check.status] ?? "?");
+  mark.setAttribute("role", "img");
+  mark.setAttribute("aria-label", DOCTOR_STATUS_NAMES[check.status] ?? "");
+  mark.title = DOCTOR_STATUS_NAMES[check.status] ?? "";
+  const body = el("div", "doctor-body");
+  // Paths, provider messages and log lines: always as text, never as markup.
+  body.appendChild(el("div")).append(el("span", "doctor-title", `${check.title}: `), el("span", "doctor-detail", check.detail));
+  if (check.items?.length) {
+    const list = body.appendChild(el("ul", "doctor-items"));
+    for (const entry of check.items) list.append(el("li", "", entry));
+  }
+  if (check.fixed) body.append(el("div", "doctor-fixed", `Corrigido: ${check.fixed}`));
+  if (check.hint) body.append(el("div", "doctor-hint", `Como resolver: ${check.hint}`));
+  item.append(mark, body);
+  return item;
+}
+
+function showDoctor({ summary, tone, checks = [], fixable = false }) {
+  const node = $("doctor-summary");
+  node.textContent = summary;
+  node.dataset.tone = tone;
+  $("doctor-list").replaceChildren(...checks.map(doctorCheckNode));
+  $("doctor-fix").hidden = !fixable;
+  $("doctor-fix").disabled = doctorRunning;
+  $("doctor-again").disabled = doctorRunning;
+}
+
+function requestDoctor(fix = false) {
+  if (doctorRunning) return; // the answer on its way fills the dialog
+  doctorRunning = sendToServer({ type: "doctor", ...(fix ? { fix: true } : {}) });
+  showDoctor(
+    doctorRunning
+      ? { summary: fix ? "Corrigindo e verificando de novo..." : "Verificando... pode levar alguns segundos.", tone: "busy" }
+      : { summary: "Sem conexão com o agente: não dá para verificar agora.", tone: "bad" }
+  );
+}
+
+function handleDoctor(message) {
+  doctorRunning = false;
+  if (!message.report) {
+    showDoctor({ summary: message.error ?? "Não consegui rodar o diagnóstico.", tone: "bad" });
+    return;
+  }
+  const { checks, ok } = message.report;
+  const tone = !ok ? "bad" : checks.some((check) => check.status === "warn") ? "warn" : "ok";
+  showDoctor({ summary: message.summary, tone, checks, fixable: checks.some((check) => check.fixable) });
+}
+
 /* ---------------------------------- Connection ---------------------------------- */
 
 /** False when the message was not sent: the caller keeps what the user typed. */
@@ -650,11 +708,16 @@ function connect() {
       case "tool":
         handleTool(message.activity);
         break;
+      case "doctor":
+        handleDoctor(message);
+        return;
     }
     scheduleRender();
   });
   socket.addEventListener("close", () => {
     setComposerEnabled(false);
+    // The answer was for this connection and will not come any more.
+    if (doctorRunning) handleDoctor({ error: "A conexão com o agente caiu antes do resultado. Verifique de novo." });
     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
       setConnection("sessão encerrada", "bad");
       return;
@@ -770,7 +833,22 @@ $("reasoning").addEventListener("change", (event) => sendToServer({ type: "reaso
 
 $("cancel-edit").addEventListener("click", stopEditingLast);
 
+const doctorDialog = $("doctor-dialog");
+$("doctor").addEventListener("click", () => {
+  doctorDialog.showModal();
+  requestDoctor();
+});
+$("doctor-again").addEventListener("click", () => requestDoctor());
+$("doctor-fix").addEventListener("click", () => requestDoctor(true));
+$("doctor-close").addEventListener("click", () => doctorDialog.close());
+// A click outside the box lands on the dialog itself (its backdrop).
+doctorDialog.addEventListener("click", (event) => {
+  if (event.target === doctorDialog) doctorDialog.close();
+});
+
 document.addEventListener("keydown", (event) => {
+  // Esc there closes the dialog: it must not also stop the running answer.
+  if (doctorDialog.open) return;
   if (event.key === "Escape" && editingLast) stopEditingLast();
   else if (event.key === "Escape" && state?.streaming) sendToServer({ type: "cancel" });
 });

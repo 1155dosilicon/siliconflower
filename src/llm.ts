@@ -162,7 +162,6 @@ export function isOfficialOpenAIEndpoint(baseURL: string): boolean {
 const MAX_OUTPUT_TOKENS = 32768;
 // Models and providers with a smaller cap reject the value above instead of clamping it.
 const FALLBACK_OUTPUT_TOKENS = 16384;
-export const MAX_STEPS = 50;
 // Keeps room for the conversation even when many MCP tools fill most of the context budget.
 const MIN_HISTORY_TOKENS = 20_000;
 
@@ -277,7 +276,9 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
 
   void log("info", `LLM request: model=${config.model}, tools=${apiTools.length}, reasoning=${reasoning}`);
 
-  for (let step = 0; step < MAX_STEPS; step++) {
+  // No step cap: a long task ends when the model answers without tools, on an error or when
+  // the turn is cancelled. The history is re-compacted on every step, so it stays in budget.
+  for (let step = 0; ; step++) {
     throwIfAborted(signal);
     const buildRequest = () =>
       buildOpenAIMessages(config, compressHistory(pruneMedia(history), historyBudget, { keepToolCallReasoning: isXiaomiMimo }));
@@ -538,10 +539,4 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
     void log("info", `LLM step ${step}: histórico agora: ${history.length} mensagens`);
     // loop continues: model sees tool results and may respond or call again.
   }
-
-  // Step budget exhausted: tell the user instead of ending silently.
-  const notice = `[Limite de ${MAX_STEPS} passos de ferramentas atingido nesta mensagem. Envie "continue" para prosseguir.]`;
-  finalContent += (finalContent ? "\n\n" : "") + notice;
-  yield { type: "text", text: notice };
-  yield { type: "done", content: finalContent, reasoning: finalThinking, messages: turn };
 }

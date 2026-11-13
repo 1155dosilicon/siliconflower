@@ -34,7 +34,8 @@ O merge (`gh pr merge --squash --delete-branch`) só depois do CI verde e com o 
 - `src/index.tsx`: CLI (commander). `config.ts`/`wizard.ts`: configuração.
 - `src/session.ts`: `AgentSession`, a conversa sem interface: histórico da API, despacho de ferramentas, cancelamento e `ask_question`.
 - `src/gui/`: interface web (`server.ts` com WebSocket, `client/` em HTML/CSS/JS puros, sem build).
-- `src/llm.ts`: loop de streaming e ferramentas (até 50 passos), compactação por passo, fallbacks de parâmetros. `context.ts`: compactação e truncamento de saídas.
+- `src/llm.ts`: loop de streaming e ferramentas (sem limite de passos: termina na resposta sem ferramentas, em erro ou no cancelamento), compactação por passo, fallbacks de parâmetros. `context.ts`: compactação e truncamento de saídas.
+- `src/doctor.ts`: as verificações do botão 🩺 da GUI (mensagem `doctor` em `gui/server.ts`) e de `siliconflower doctor`, e o que a correção automática muda; não depende de interface. `provider-check.ts`: pedido mínimo ao provedor, usado pelo doctor e pelo **Testar conexão** do app.
 - `src/tools.ts`: ferramentas nativas (schema + `run`). `read_skill` fica em `skills.ts`. `tool-policy.ts`: allowlist do modo `plano`.
 - `src/shell.ts`: toda execução de shell (PowerShell no Windows, `$SHELL -c` em Unix). `platform.ts`: detecção de SO e shell padrão. `project.ts`: detecção de projeto (`SILICONFLOWER.md`/`AGENTS.md`).
 - `src/services/`: memória, mídia, subagentes, tarefas em background, conversas salvas, web, artefatos, worktrees, repomap, smart-edit.
