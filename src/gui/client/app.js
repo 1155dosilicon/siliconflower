@@ -10,7 +10,7 @@ const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 // The formats of services/media.ts: checked here so a wrong file never costs the typed message.
 const ATTACHMENT_TYPES = /\.(jpe?g|png|gif|webp|bmp|mp3|wav|flac|m4a|ogg|mp4|mov|avi|wmv)$/i;
 const STICK_TO_BOTTOM_PX = 80;
-const REASONING_NAMES = { off: "desligado", on: "ligado", low: "baixo", med: "médio", high: "alto" };
+const REASONING_NAMES = { off: "desligado", on: "ligado", low: "baixo", med: "médio", high: "alto", max: "máximo", ultra: "ultra" };
 
 let socket = null;
 let reconnectAttempts = 0;

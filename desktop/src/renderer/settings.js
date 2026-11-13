@@ -58,7 +58,8 @@ async function fillReasoning(wanted) {
     option.textContent = label;
     return option;
   }));
-  select.value = choices.some((choice) => choice.value === wanted) ? wanted : choices.at(-1).value;
+  // Not the last one: the list may end in levels deeper (and slower) than the default.
+  select.value = choices.some((choice) => choice.value === wanted) ? wanted : "high";
 }
 
 $("preset").addEventListener("change", () => {
@@ -108,7 +109,8 @@ async function load() {
   const firstRun = !settings.keyHint && !settings.baseURL && !settings.fileError;
   $("welcome").hidden = !firstRun;
   $("title").textContent = firstRun ? "Bem-vindo ao Siliconflower" : "Configurações";
-  $("baseURL").value = settings.baseURL || $("preset").value;
+  // No provider is assumed on first use: the user picks one from the list or types the address.
+  $("baseURL").value = settings.baseURL;
   $("model").value = settings.model;
   $("system").value = settings.system;
   $("mcp").value = settings.mcp;

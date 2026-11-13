@@ -87,6 +87,12 @@ describe("settings", () => {
     expect(applyInput(stored, form({ baseURL: "https://api.xiaomimimo.com/v1", reasoning: "low" })).config?.reasoning).toBe("high");
   });
 
+  test("the deeper levels are kept, and an unknown one becomes high, not the deepest", () => {
+    expect(applyInput(stored, form({ reasoning: "max" })).config?.reasoning).toBe("max");
+    expect(applyInput(stored, form({ reasoning: "ultra" })).config?.reasoning).toBe("ultra");
+    expect(applyInput(stored, form({ reasoning: "banana" })).config?.reasoning).toBe("high");
+  });
+
   test("MCP accepts the two usual shapes and explains what is wrong", () => {
     const server = { arquivos: { command: "npx", args: ["-y", "x"] } };
     expect(parseMcp(JSON.stringify(server)).servers).toEqual(server);

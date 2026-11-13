@@ -8,6 +8,8 @@ const LABELS: Record<ReasoningLevel, string> = {
   low: "Low (fast)",
   medium: "Medium (balanced)",
   high: "High (deep)",
+  max: "Max (deeper and slower; falls back to high if the provider refuses it)",
+  ultra: "Ultra (deepest and slowest; falls back to high if the provider refuses it)",
 };
 
 function validateUrl(url: string): boolean {

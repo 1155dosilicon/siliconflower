@@ -82,7 +82,7 @@ Testado de verdade no elementary OS 8 e no Ubuntu 24.04. No Ubuntu 14.04 e 16.04
 | Enviar / quebrar linha | `Enter` / `Shift+Enter` |
 | Cancelar a resposta ou a pergunta em andamento | `Esc` ou **Parar** |
 | Modo de trabalho | seletor **Modo**: `ultracódigo` (o modo `programação`), `sistema` ou `plano` |
-| Raciocínio | seletor **Pensamento**: `none`, `low`, `medium`, `high` |
+| Raciocínio | seletor **Pensamento**: `none`, `low`, `medium`, `high`, `max`, `ultra` (os dois últimos só existem em alguns provedores; se o seu recusar, o pedido segue com `high`) |
 | Conversas | lateral: **+ Nova conversa**, clique para retomar, **✎** para renomear, **×** para apagar; o campo de busca aparece com duas ou mais |
 | Editar a última mensagem | botão **Editar** ao passar o mouse sobre ela |
 

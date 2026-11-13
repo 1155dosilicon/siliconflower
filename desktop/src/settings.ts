@@ -1,5 +1,5 @@
 import { ConfigFileError, isValid, loadConfig, loadStoredConfig, normalize, saveConfig } from "../../src/config.js";
-import { reasoningLabel, reasoningOptions } from "../../src/reasoning.js";
+import { DEFAULT_REASONING, reasoningLabel, reasoningOptions } from "../../src/reasoning.js";
 import type { AppConfig, McpServerConfig, ReasoningLevel } from "../../src/types.js";
 
 const TEST_TIMEOUT_MS = 30_000;
@@ -11,7 +11,7 @@ const MAX_FIELD_CHARS: Record<keyof SettingsInput, number> = {
   system: 200_000,
   mcp: 200_000,
 };
-const REASONING_NAMES: Record<string, string> = { off: "desligado", on: "ligado", low: "baixo", med: "médio", high: "alto" };
+const REASONING_NAMES: Record<string, string> = { off: "desligado", on: "ligado", low: "baixo", med: "médio", high: "alto", max: "máximo", ultra: "ultra" };
 
 /** What the page sees. The API key itself never leaves the main process. */
 export interface SettingsView {
@@ -130,8 +130,7 @@ export function applyInput(stored: AppConfig | null, input: SettingsInput): { co
   if (mcp.error) errors.mcp = mcp.error;
   if (Object.keys(errors).length) return { errors };
 
-  const options = reasoningOptions(baseURL);
-  const reasoning = options.includes(input.reasoning as ReasoningLevel) ? (input.reasoning as ReasoningLevel) : options.at(-1)!;
+  const reasoning = reasoningOptions(baseURL).includes(input.reasoning as ReasoningLevel) ? (input.reasoning as ReasoningLevel) : DEFAULT_REASONING;
   return {
     config: {
       ...normalize({ ...stored, baseURL, apiKey, model, reasoning, system: input.system, mcpServers: mcp.servers }, { applyEnv: false }),
