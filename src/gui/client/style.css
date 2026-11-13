@@ -280,6 +280,32 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
 .attachment button:hover { color: var(--danger); }
 .input-box.dragging textarea { border-color: var(--accent); }
 
+/* Diagnosis */
+#doctor { font-size: 16px; }
+.doctor { width: min(720px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); }
+.doctor[open] { display: flex; flex-direction: column; }
+.doctor::backdrop { background: rgba(0, 0, 0, .55); }
+.doctor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.doctor-head h2 { margin: 0; font-size: 16px; }
+.doctor-summary { margin: 0; padding: 12px 16px 6px; font-weight: 600; }
+.doctor-summary[data-tone="ok"] { color: var(--ok); }
+.doctor-summary[data-tone="warn"] { color: var(--warn); }
+.doctor-summary[data-tone="bad"] { color: var(--danger); }
+.doctor-summary[data-tone="busy"] { color: var(--muted); font-weight: 400; }
+.doctor-list { flex: 1; min-height: 0; margin: 0; padding: 0 16px; overflow-y: auto; list-style: none; }
+.doctor-check { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 13px; line-height: 1.5; }
+.doctor-mark { flex: none; width: 18px; font-weight: 700; text-align: center; color: var(--muted); }
+.doctor-check[data-status="ok"] .doctor-mark { color: var(--ok); }
+.doctor-check[data-status="warn"] .doctor-mark { color: var(--warn); }
+.doctor-check[data-status="fail"] .doctor-mark { color: var(--danger); }
+.doctor-body { min-width: 0; overflow-wrap: anywhere; }
+.doctor-title { font-weight: 600; }
+.doctor-items { margin: 4px 0 0; padding-left: 18px; color: var(--muted); }
+.doctor-hint { margin-top: 4px; }
+.doctor-check[data-status="ok"] .doctor-detail, .doctor-check[data-status="skip"] .doctor-detail { color: var(--muted); }
+.doctor-fixed { margin-top: 4px; color: var(--ok); }
+.doctor-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--border); }
+
 /* Code highlighting */
 .tok-comment { color: var(--muted); font-style: italic; }
 .tok-string { color: var(--ok); }

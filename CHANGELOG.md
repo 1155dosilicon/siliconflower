@@ -6,6 +6,17 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Added
+- Diagnóstico na interface: o botão 🩺 no topo confere configuração, provedor (um pedido mínimo), servidores MCP, shell, git, pasta de dados, hooks, conversas salvas e erros recentes do log, e diz como resolver cada problema; **Corrigir o que der** renomeia conversas danificadas e, no Linux, fecha a pasta de dados para outros usuários, sem apagar nada (`src/doctor.ts`, `src/gui/`).
+- Comando `siliconflower doctor`, com as mesmas verificações no terminal, para quando a interface não abre (`--fix`, `--offline`).
+
+### Removed
+- Comando `siliconflower run` (execução sem interface para scripts e CI): era a base de um bot para o GitHub que não foi adiante. Com ele saem `src/run.ts`, a configuração só por variáveis de ambiente (sem `config.json`) e a seção correspondente do `SECURITY.md`.
+
+### Changed
+- O limite de 50 passos de ferramentas por mensagem acabou: uma tarefa longa segue até o modelo responder, dar erro ou ser cancelada, sem pedir `continue` (`src/llm.ts`, `src/modes.ts`).
+- O **Testar conexão** do app e o `doctor` usam o mesmo pedido mínimo ao provedor (`src/provider-check.ts`, `desktop/src/settings.ts`).
+
 ## [0.11.0] - 2026-11-13
 
 ### Added

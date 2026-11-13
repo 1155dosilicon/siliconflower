@@ -37,9 +37,17 @@ function withTimeout<T>(promise: Promise<T>, ms: number, serverName: string): Pr
   });
 }
 
+/** How one configured server stands: the tools it listed, or why it did not connect. */
+export interface McpServerStatus {
+  server: string;
+  tools: number;
+  error?: string;
+}
+
 export class McpManager {
   private servers = new Map<string, ConnectedServer>();
   private failures: McpConnectFailure[] = [];
+  private configured: string[] = [];
 
   /**
    * Connects every configured server. Failures never throw: they are logged to the log
@@ -47,6 +55,7 @@ export class McpManager {
    */
   async connectAll(config: Record<string, McpServerConfig> | undefined): Promise<McpTool[]> {
     this.failures = [];
+    this.configured = Object.keys(config ?? {});
     if (!config) return [];
     const entries = Object.entries(config);
     const results = await Promise.allSettled(
@@ -65,6 +74,15 @@ export class McpManager {
 
   connectFailures(): McpConnectFailure[] {
     return [...this.failures];
+  }
+
+  /** Every server given to connectAll, in the order of the config, for the diagnosis to show. */
+  status(): McpServerStatus[] {
+    return this.configured.map((server) => ({
+      server,
+      tools: this.servers.get(server)?.tools.length ?? 0,
+      error: this.failures.find((f) => f.server === server)?.error,
+    }));
   }
 
   private transportFor(name: string, cfg: McpServerConfig): Transport {

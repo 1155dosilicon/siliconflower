@@ -1,4 +1,3 @@
-import { MAX_STEPS } from "./llm.js";
 import type { Skill } from "./skills.js";
 import type { Mode } from "./types.js";
 import { getDefaultShell, getOsLabel, isWindows } from "./platform.js";
@@ -26,8 +25,7 @@ const EXECUTION_RULES = `## Execução
 - Leia um arquivo antes de editá-lo.
 - Confira o resultado quando puder (teste, build, releitura ou saída do comando). Relate falhas e o que não conseguiu verificar; não afirme sucesso sem ter visto.
 - Se uma ferramenta falhar, leia o erro e mude a abordagem em vez de repetir a mesma chamada.
-- Cada resposta tem limite de saída, e os argumentos das ferramentas contam nele. Para um arquivo muito grande, crie-o com a primeira parte e acrescente o restante com edit_file, em chamadas separadas.
-- Cada mensagem permite até ${MAX_STEPS} passos de ferramentas, executados em sequência.`;
+- Cada resposta tem limite de saída, e os argumentos das ferramentas contam nele. Para um arquivo muito grande, crie-o com a primeira parte e acrescente o restante com edit_file, em chamadas separadas.`;
 
 const SHELL_RULE = isWindows()
   ? `execute_command roda o Windows PowerShell 5.1: não existem \`&&\`, \`||\`, \`?:\` nem \`??\`. Encadeie com \`;\` ou \`if ($?) { ... }\`.`

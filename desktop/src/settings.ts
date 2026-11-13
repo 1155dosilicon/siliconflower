@@ -1,8 +1,8 @@
 import { ConfigFileError, isValid, loadConfig, loadStoredConfig, normalize, saveConfig } from "../../src/config.js";
 import { DEFAULT_REASONING, reasoningLabel, reasoningOptions } from "../../src/reasoning.js";
 import type { AppConfig, McpServerConfig, ReasoningLevel } from "../../src/types.js";
+import { checkProvider } from "../../src/provider-check.js";
 
-const TEST_TIMEOUT_MS = 30_000;
 const MAX_FIELD_CHARS: Record<keyof SettingsInput, number> = {
   baseURL: 2_000,
   apiKey: 2_000,
@@ -187,43 +187,12 @@ export async function isConfigured(): Promise<boolean> {
   return Boolean(config && isValid(config));
 }
 
-/** Provider messages can echo the request: never let the key reach the page. */
-function scrub(text: string, apiKey: string): string {
-  return apiKey ? text.split(apiKey).join("***") : text;
-}
-
 /** Sends the smallest possible request, so the form tells a typo from a real answer. */
 export async function testConnection(input: SettingsInput, fetchImpl: typeof fetch = fetch): Promise<{ ok: boolean; message: string }> {
   // Only reads the file (for the saved key): a damaged one just means there is no saved key.
   const { config, errors } = applyInput((await storedConfig()).stored, input);
   if (!config) return { ok: false, message: Object.values(errors ?? {})[0] ?? "Formulário inválido." };
-
-  const url = `${config.baseURL.replace(/\/+$/, "")}/chat/completions`;
-  const request = (limit: Record<string, number>) => fetchImpl(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${config.apiKey}` },
-    body: JSON.stringify({ model: config.model, messages: [{ role: "user", content: "Responda apenas: ok" }], ...limit }),
-    signal: AbortSignal.timeout(TEST_TIMEOUT_MS),
-  });
-  try {
-    let response = await request({ max_tokens: 16 });
-    let body = await response.text();
-    // Some models accept only the newer name of this parameter.
-    if (response.status === 400 && /max_tokens/.test(body)) {
-      response = await request({ max_completion_tokens: 16 });
-      body = await response.text();
-    }
-    if (response.ok) return { ok: true, message: `Conexão ok: o modelo ${config.model} respondeu.` };
-    let detail = body;
-    try {
-      const parsed = JSON.parse(body);
-      detail = parsed?.error?.message ?? parsed?.message ?? body;
-    } catch {
-      // not JSON: show it as it came
-    }
-    return { ok: false, message: scrub(`O provedor respondeu ${response.status}: ${String(detail).slice(0, 400)}`, config.apiKey) };
-  } catch (e) {
-    const reason = e instanceof Error && e.name === "TimeoutError" ? "o provedor não respondeu a tempo" : e instanceof Error ? e.message : String(e);
-    return { ok: false, message: scrub(`Não consegui conectar: ${reason}`, config.apiKey) };
-  }
+  // The message is already free of the key: the provider may echo it back.
+  const { ok, message } = await checkProvider(config, fetchImpl);
+  return { ok, message };
 }

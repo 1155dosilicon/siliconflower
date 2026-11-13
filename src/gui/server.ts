@@ -7,6 +7,7 @@ import { MODES } from "../modes.js";
 import { reasoningLabel, reasoningOptions } from "../reasoning.js";
 import { log, logFile } from "../logger.js";
 import { APP_VERSION } from "../version.js";
+import { runDoctor, summarizeDoctorReport } from "../doctor.js";
 import indexHtml from "./client/index.html" with { type: "text" };
 import styleCss from "./client/style.css" with { type: "text" };
 import appJs from "./client/app.js" with { type: "text" };
@@ -40,6 +41,8 @@ export interface GuiServerOptions {
   graceMs?: number;
   /** Called when the last page has been gone for longer than the grace period. */
   onIdle?: () => void;
+  /** Replaceable in tests: the real one starts a shell and calls the provider. */
+  doctor?: typeof runDoctor;
 }
 
 export interface GuiServer {
@@ -168,8 +171,35 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
     publish(helloMessage());
   };
 
-  const handleMessage = (raw: string | Buffer) => {
-    let msg: { type?: unknown; text?: unknown; mode?: unknown; level?: unknown; id?: unknown; attachments?: unknown; title?: unknown };
+  /**
+   * The diagnosis button of the page. One run at a time (each starts a shell and calls the
+   * provider), and the report goes only to the page that asked. It tests what this session
+   * runs with, and reports its MCP servers as they are instead of starting them again.
+   */
+  const doctor = options.doctor ?? runDoctor;
+  let doctorQueue: Promise<void> = Promise.resolve();
+  const runDoctorFor = (ws: ServerWebSocket<undefined>, fix: boolean) => {
+    doctorQueue = doctorQueue.then(async () => {
+      let reply: unknown;
+      try {
+        const report = await doctor({
+          fix,
+          cwd: process.cwd(),
+          overrides: { baseURL: session.config.baseURL, apiKey: session.config.apiKey, model: session.getState().model },
+          mcp: session.mcpStatus() ?? "connecting",
+        });
+        reply = { type: "doctor", report, summary: summarizeDoctorReport(report) };
+      } catch (e) {
+        await log("error", `GUI doctor: ${String(e)}`);
+        reply = { type: "doctor", error: "Não consegui rodar o diagnóstico. O log tem o motivo." };
+      }
+      // The page may be gone by now.
+      if (!stopped && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(reply));
+    });
+  };
+
+  const handleMessage = (ws: ServerWebSocket<undefined>, raw: string | Buffer) => {
+    let msg: { type?: unknown; text?: unknown; mode?: unknown; level?: unknown; id?: unknown; attachments?: unknown; title?: unknown; fix?: unknown };
     try {
       msg = JSON.parse(String(raw));
     } catch {
@@ -226,6 +256,9 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
         if (typeof msg.id === "string") {
           void session.deleteConversation(msg.id).then(publishConversation);
         }
+        break;
+      case "doctor":
+        runDoctorFor(ws, msg.fix === true);
         break;
     }
   };
@@ -284,8 +317,8 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
         ws.send(JSON.stringify(helloMessage()));
         ws.subscribe(TOPIC);
       },
-      message(_ws, raw) {
-        handleMessage(raw);
+      message(ws, raw) {
+        handleMessage(ws, raw);
       },
       close() {
         clients--;

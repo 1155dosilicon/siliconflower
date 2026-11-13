@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { startGuiServer, type GuiServer } from "../src/gui/server.js";
+import { startGuiServer, type GuiServer, type GuiServerOptions } from "../src/gui/server.js";
+import type { DoctorOptions, DoctorReport } from "../src/doctor.js";
 import { parseInline, parseMarkdown, safeHref } from "../src/gui/client/markdown.js";
 import { AgentSession } from "../src/session.js";
 import type { ChatOptions } from "../src/llm.js";
@@ -15,7 +16,7 @@ afterEach(() => {
   for (const server of running.splice(0)) server.stop();
 });
 
-function setup(turns: FakeTurn[] = [], options: { graceMs?: number; onIdle?: () => void } = {}) {
+function setup(turns: FakeTurn[] = [], options: GuiServerOptions = {}) {
   let index = 0;
   const session = new AgentSession(config, {}, { stream: (opts) => turns[index++](opts) });
   const server = startGuiServer(session, options);
@@ -277,6 +278,57 @@ describe("GUI protocol", () => {
     client.ws.send(JSON.stringify({ type: "cancel" }));
     await client.waitFor((m) => m.type === "state" && m.changes.streaming === false);
     expect(session.getState().status).toBe("cancelado");
+    client.ws.close();
+  });
+
+  test("the diagnosis button checks what this session runs with and answers only the page that asked", async () => {
+    const asked: DoctorOptions[] = [];
+    const report: DoctorReport = {
+      ok: true,
+      checks: [
+        { id: "shell", title: "Shell", status: "ok", detail: "funciona" },
+        { id: "conversations", title: "Conversas salvas", status: "warn", detail: "1 arquivo danificado", fixable: true },
+      ],
+    };
+    const { server, base } = setup([], {
+      doctor: async (options = {}) => {
+        asked.push(options);
+        return report;
+      },
+    });
+    const cookie = await login(server);
+    const client = await connect(base, cookie);
+    const other = await connect(base, cookie);
+    await client.waitFor((m) => m.type === "hello");
+    await other.waitFor((m) => m.type === "hello");
+
+    client.ws.send(JSON.stringify({ type: "doctor" }));
+    const first = await client.waitFor((m) => m.type === "doctor");
+    expect(first.report).toEqual(report);
+    expect(first.summary).toBe("0 problemas e 1 aviso.");
+    // The session's own provider and model, and its MCP servers instead of a second connection.
+    expect(asked[0]).toMatchObject({ fix: false, overrides: { baseURL: config.baseURL, apiKey: API_KEY, model: "teste" }, mcp: "connecting" });
+    expect(JSON.stringify(first)).not.toContain(API_KEY);
+
+    // Only an explicit `fix: true` changes anything.
+    client.ws.send(JSON.stringify({ type: "doctor", fix: "sim" }));
+    client.ws.send(JSON.stringify({ type: "doctor", fix: true }));
+    await client.waitFor((m) => m.type === "doctor" && client.received.filter((x) => x.type === "doctor").length === 3);
+    expect(asked.map((o) => o.fix)).toEqual([false, false, true]);
+
+    expect(other.received.some((m) => m.type === "doctor")).toBe(false);
+    client.ws.close();
+    other.ws.close();
+  });
+
+  test("a diagnosis that breaks answers with a message instead of leaving the page waiting", async () => {
+    const { server, base } = setup([], { doctor: async () => { throw new Error("quebrou"); } });
+    const client = await connect(base, await login(server));
+    await client.waitFor((m) => m.type === "hello");
+    client.ws.send(JSON.stringify({ type: "doctor" }));
+    const reply = await client.waitFor((m) => m.type === "doctor");
+    expect(reply.report).toBeUndefined();
+    expect(reply.error).toContain("diagnóstico");
     client.ws.close();
   });
 

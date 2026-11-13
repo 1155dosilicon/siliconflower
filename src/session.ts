@@ -1,5 +1,5 @@
 import { buildOpenAITools, streamChat } from "./llm.js";
-import { McpManager } from "./mcp.js";
+import { McpManager, type McpServerStatus } from "./mcp.js";
 import { builtinToolsAsMcp, isBuiltin, runBuiltin } from "./tools.js";
 import { loadSkills, readSkillContent, SKILL_TOOL, type Skill } from "./skills.js";
 import { buildSystemPrompt, nextMode, type Mode } from "./modes.js";
@@ -54,7 +54,7 @@ export interface SessionBackgroundTask {
 }
 
 export const MAX_UPLOADS = 4;
-export const EMPTY_RESPONSE_NOTE ="[O modelo encerrou a resposta sem escrever nada. Envie a mensagem de novo ou reformule o pedido.]";
+const EMPTY_RESPONSE_NOTE = "[O modelo encerrou a resposta sem escrever nada. Envie a mensagem de novo ou reformule o pedido.]";
 
 export interface SessionQuestion {
   question: string;
@@ -122,6 +122,7 @@ export class AgentSession {
   // rendered UI messages, so the model keeps the context of what its tools did.
   private history: ChatMessage[] = [];
   private mcp: McpManager | null = null;
+  private mcpReady = false;
   private skills: Skill[] = [];
   private memoryPrompt = "";
   private schemaTokens?: { toolCount: number; tokens: number };
@@ -370,6 +371,7 @@ export class AgentSession {
     this.patch({ status: "conectando MCP..." });
     try {
       const tools = await mcp.connectAll(this.config.mcpServers);
+      this.mcpReady = true;
       if (this.closed) return;
       this.patch({ toolCount: builtinToolsAsMcp().length + 1 + tools.length });
       await log("ok", `MCP conectado: ${mcp.serverCount()} servidores, ${tools.length} ferramentas`);
@@ -386,6 +388,11 @@ export class AgentSession {
       await log("error", `MCP indisponivel: ${String(e)}`);
       this.patch({ status: "MCP indisponivel" });
     }
+  }
+
+  /** The MCP servers of this session as they stand; null while they are still connecting. */
+  mcpStatus(): McpServerStatus[] | null {
+    return this.mcp && this.mcpReady ? this.mcp.status() : null;
   }
 
   /** Aborts the running turn, runs the session hook and disconnects the MCP servers. */

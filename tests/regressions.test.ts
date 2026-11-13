@@ -735,6 +735,33 @@ describe("an interrupted turn keeps what its tools did", () => {
   }, 30_000);
 });
 
+describe("a long task is not cut by a step limit", () => {
+  // The loop used to stop after 50 tool steps and ask the user to send "continue".
+  test("a turn with more than 50 tool steps runs until the model answers", async () => {
+    const steps = 60;
+    let n = 0;
+    const provider = fakeProvider(() => (++n <= steps ? { tools: [{ name: "passo", args: { n } }] } : { text: "terminei" }));
+    try {
+      let ran = 0;
+      let answer: string | undefined;
+      for await (const ev of streamChat({
+        config: provider.config,
+        messages: [{ role: "user", content: "tarefa longa" }],
+        tools: [],
+        reasoning: "none",
+        executeTool: async () => ({ result: `ok ${++ran}`, isError: false }),
+      })) {
+        if (ev.type === "done") answer = ev.content;
+      }
+      expect(ran).toBe(steps);
+      expect(provider.requests).toHaveLength(steps + 1);
+      expect(answer).toBe("terminei");
+    } finally {
+      provider.stop();
+    }
+  }, 30_000);
+});
+
 describe("tool results are bounded wherever they come from", () => {
   // MCP servers, background task status and subagents skipped processToolOutput: one big
   // result made the compaction cut the user's request and every other message.

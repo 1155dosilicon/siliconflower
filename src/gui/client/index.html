@@ -14,6 +14,7 @@
     <div class="brand"><span aria-hidden="true">🌸</span> Siliconflower</div>
     <div id="project" class="project"></div>
     <div id="connection" class="connection" role="status"></div>
+    <button id="doctor" type="button" class="icon-button" title="Diagnóstico: confere se está tudo funcionando" aria-label="Diagnóstico" aria-haspopup="dialog">🩺</button>
   </header>
 
   <div class="layout">
@@ -78,5 +79,18 @@
       <div class="hint">Enter envia · Shift+Enter quebra a linha · Esc cancela a resposta · cole ou arraste uma imagem para anexar</div>
     </div>
   </footer>
+
+  <dialog id="doctor-dialog" class="doctor" aria-labelledby="doctor-title">
+    <div class="doctor-head">
+      <h2 id="doctor-title"><span aria-hidden="true">🩺</span> Diagnóstico</h2>
+      <button id="doctor-close" type="button" class="icon-button" aria-label="Fechar o diagnóstico">×</button>
+    </div>
+    <p id="doctor-summary" class="doctor-summary" role="status"></p>
+    <ul id="doctor-list" class="doctor-list"></ul>
+    <div class="doctor-actions">
+      <button id="doctor-fix" type="button" class="primary" hidden title="Só faz o que não perde dados: nada é apagado">Corrigir o que der</button>
+      <button id="doctor-again" type="button">Verificar de novo</button>
+    </div>
+  </dialog>
 </body>
 </html>

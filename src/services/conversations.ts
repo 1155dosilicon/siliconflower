@@ -139,18 +139,28 @@ export class ConversationStore {
     }
   }
 
-  /** Most recent first. Damaged files are counted and left alone. */
-  async list(): Promise<{ items: ConversationSummary[]; damaged: number }> {
+  /** Every conversation file with its summary, null when the file is damaged. */
+  private async headers(): Promise<{ name: string; header: ConversationSummary | null }[]> {
     let names: string[];
     try {
       names = (await readdir(this.dir)).filter((name) => name.endsWith(".jsonl"));
     } catch {
-      return { items: [], damaged: 0 }; // no conversation saved yet
+      return []; // no conversation saved yet
     }
-    const headers = await Promise.all(names.map((name) => this.readHeader(name)));
-    const items = headers.filter((h): h is ConversationSummary => h !== null);
+    return Promise.all(names.map(async (name) => ({ name, header: await this.readHeader(name) })));
+  }
+
+  /** Most recent first. Damaged files are counted and left alone. */
+  async list(): Promise<{ items: ConversationSummary[]; damaged: number }> {
+    const headers = await this.headers();
+    const items = headers.map((entry) => entry.header).filter((h): h is ConversationSummary => h !== null);
     items.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return { items, damaged: headers.length - items.length };
+  }
+
+  /** Paths of the files `list` counts as damaged, for `siliconflower doctor` to name them. */
+  async damagedFiles(): Promise<string[]> {
+    return (await this.headers()).filter((entry) => entry.header === null).map((entry) => join(this.dir, entry.name));
   }
 
   /** Throws when the conversation does not exist or is damaged. */
