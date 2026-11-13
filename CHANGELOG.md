@@ -6,6 +6,8 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-13
+
 ### Added
 - Diagnóstico na interface: o botão 🩺 no topo confere configuração, provedor (um pedido mínimo), servidores MCP, shell, git, pasta de dados, hooks, conversas salvas e erros recentes do log, e diz como resolver cada problema; **Corrigir o que der** renomeia conversas danificadas e, no Linux, fecha a pasta de dados para outros usuários, sem apagar nada (`src/doctor.ts`, `src/gui/`).
 - Comando `siliconflower doctor`, com as mesmas verificações no terminal, para quando a interface não abre (`--fix`, `--offline`).
