@@ -6,6 +6,8 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-13
+
 ### Added
 - Comando `siliconflower run "<pedido>"`: executa um pedido até o fim sem interface e imprime a resposta, para scripts e CI; lê o pedido da entrada padrão, funciona só com as variáveis `SILICONFLOWER_*` e responde `ask_question` automaticamente (`src/run.ts`).
 - `bun run release <versão>` atualiza versão, badge do README e CHANGELOG de uma vez e mostra o que mudou desde a última tag para revisar as docs (`scripts/release.ts`).
