@@ -69,7 +69,7 @@ Todos os provedores usam Chat Completions compatível com OpenAI (`llm.ts`):
   - o raciocínio vira `thinking.type` `enabled`/`disabled`;
   - `reasoning_content` é preservado na mensagem `assistant` que antecede resultados de ferramenta;
   - o seletor **Pensamento** só oferece `none` e `high` (desligado/ligado).
-- **Demais provedores**: `low`/`medium`/`high` vão como `reasoning_effort`, e o seletor **Pensamento** oferece os quatro níveis.
+- **Demais provedores**: `low`/`medium`/`high`/`max`/`ultra` vão como `reasoning_effort`, e o seletor **Pensamento** oferece os seis níveis (com `none`). `max` e `ultra` só existem em alguns provedores: se o provedor recusar um deles, a requisição é repetida com `high`.
 - **Limite de saída** (32768 tokens): vai em `max_completion_tokens` para `api.openai.com` e em `max_tokens` nos demais. Se o provedor recusar o valor, a requisição é repetida com 16384. Se a resposta for cortada nele, uma chamada de ferramenta incompleta não executa (o modelo recebe o erro, e o histórico guarda `{}` no lugar do JSON quebrado) e um texto cortado termina com um aviso. O mesmo vale para um stream encerrado sem `finish_reason`, tratado como resposta interrompida.
 - **HTTP 400 só com "Request failed"**: o Xiaomi MiMo devolve isso às vezes para pedidos válidos, e a requisição é repetida uma vez.
 

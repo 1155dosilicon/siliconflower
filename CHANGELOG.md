@@ -13,8 +13,10 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 - A release no GitHub usa a seção do CHANGELOG como descrição (`scripts/release-notes.ts`).
 - Templates de PR, com checklist das docs, e de issue (bug e recurso) em `.github/`.
 - A descrição da release traz um guia "Qual baixar?" separando o app de desktop do agente portátil (`scripts/release-notes.ts`).
+- Níveis de pensamento `max` e `ultra`, no seletor, em `--reasoning` e no `config.json`; se o provedor recusar um deles, o pedido é repetido com `high` em vez de sem `reasoning_effort` (`src/reasoning.ts`, `src/llm.ts`).
 
 ### Changed
+- A tela de configurações do app não vem mais com o SiliconFlow escolhido nem com o endereço dele preenchido no primeiro uso, e o campo do modelo não sugere mais IDs de um provedor específico (`desktop/src/renderer/`).
 - O agente avulso sai na release como `siliconflower-portatil-windows-x64.exe` e `siliconflower-portatil-linux-x64`, para não ser confundido com o instalador (`.github/workflows/release.yml`).
 - Documentação: badge de versão do README, compactação só por tokens, revisão `rev` das conversas e mensagens do WebSocket no ARCHITECTURE; `tests/docs-sync.test.ts` falha quando versão, contagem ou lista de ferramentas ou comandos da CLI da doc ficam para trás.
 

@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { log } from "./logger.js";
 import { compressHistory, contextBudget, estimateTokens, processToolOutput } from "./context.js";
 import type { AppConfig, ChatMessage, MediaAttachment, McpTool, ReasoningLevel, StreamEvent, ToolResult } from "./types.js";
-import { isXiaomiMimoEndpoint } from "./reasoning.js";
+import { DEFAULT_REASONING, isExtendedReasoning, isXiaomiMimoEndpoint } from "./reasoning.js";
 import { hasMediaData, mediaNote, pruneMedia, rejectMedia, userContent } from "./services/media.js";
 
 export interface ChatOptions {
@@ -254,7 +254,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey });
   const apiTools = buildOpenAITools(tools);
   const isXiaomiMimo = isXiaomiMimoEndpoint(config.baseURL);
-  const effort = !isXiaomiMimo && reasoning !== "none" ? reasoning : undefined;
+  let effort = !isXiaomiMimo && reasoning !== "none" ? reasoning : undefined;
   let supportsEffort = true;
   let outputLimit = MAX_OUTPUT_TOKENS;
   let tokenParam: "max_tokens" | "max_completion_tokens" = isOfficialOpenAIEndpoint(config.baseURL)
@@ -340,6 +340,10 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
           void log("warn", `Provedor recusou um pedido com mídia; repetindo sem ela: ${describeApiError(err)}`);
           rejectMedia(history);
           working = buildRequest();
+        } else if (attempt < 3 && supportsEffort && effort && isExtendedReasoning(effort) && /reasoning/i.test(msg)) {
+          // Most providers stop at "high": keep thinking on instead of dropping the parameter.
+          void log("warn", `Provedor rejeitou reasoning_effort=${effort}; repetindo com ${DEFAULT_REASONING}`);
+          effort = DEFAULT_REASONING;
         } else if (attempt < 3 && supportsEffort && effort && /reasoning/i.test(msg)) {
           supportsEffort = false;
           void log("warn", "Provedor rejeitou reasoning_effort; repetindo sem ele");

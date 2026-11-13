@@ -234,6 +234,63 @@ describe("a provider that refuses a valid request without explaining", () => {
   });
 });
 
+describe("a provider that does not know the deeper reasoning levels", () => {
+  const chunk = `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", model: "m", choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`;
+
+  /** `accepted` are the reasoning_effort values the fake provider takes. */
+  async function run(reasoning: "high" | "max" | "ultra", accepted: string[]) {
+    const efforts: (string | undefined)[] = [];
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(req) {
+        const effort = ((await req.json()) as { reasoning_effort?: string }).reasoning_effort;
+        efforts.push(effort);
+        if (effort !== undefined && !accepted.includes(effort)) {
+          return Response.json({ error: { message: `'reasoning_effort' must be one of: ${accepted.join(", ")}` } }, { status: 400 });
+        }
+        return new Response(chunk, { headers: { "Content-Type": "text/event-stream" } });
+      },
+    });
+    const events: { type: string; content?: string; message?: string }[] = [];
+    try {
+      const stream = streamChat({
+        config: { baseURL: `http://127.0.0.1:${server.port}/v1`, apiKey: "k", model: "m", reasoning, mcpServers: {} },
+        messages: [{ role: "user", content: "oi" }],
+        tools: [],
+        reasoning,
+        executeTool: async () => ({ result: "", isError: false }),
+      });
+      for await (const event of stream) events.push(event);
+    } finally {
+      server.stop(true);
+    }
+    return { efforts, events };
+  }
+
+  test("max and ultra are sent as they are when the provider takes them", async () => {
+    expect((await run("max", ["high", "max", "ultra"])).efforts).toEqual(["max"]);
+    expect((await run("ultra", ["high", "max", "ultra"])).efforts).toEqual(["ultra"]);
+  });
+
+  test("a refused max falls back to high, keeping the thinking on", async () => {
+    const { efforts, events } = await run("max", ["low", "medium", "high"]);
+    expect(efforts).toEqual(["max", "high"]);
+    expect(events.some((e) => e.type === "error")).toBe(false);
+    expect(events.find((e) => e.type === "done")?.content).toBe("ok");
+  });
+
+  test("a provider with no reasoning_effort at all still answers", async () => {
+    const { efforts, events } = await run("ultra", []);
+    expect(efforts).toEqual(["ultra", "high", undefined]);
+    expect(events.find((e) => e.type === "done")?.content).toBe("ok");
+  });
+
+  test("a refused high is still dropped, as before", async () => {
+    expect((await run("high", [])).efforts).toEqual(["high", undefined]);
+  });
+});
+
 describe.skipIf(isWin)("closing the app", () => {
   const start = async (build: (marker: string) => string) => {
     const marker = `29.${Date.now() % 100000}${Math.floor(Math.random() * 1000)}`; // unique sleep argument, to find it in ps

@@ -1,4 +1,4 @@
-export type ReasoningLevel = "none" | "low" | "medium" | "high";
+export type ReasoningLevel = "none" | "low" | "medium" | "high" | "max" | "ultra";
 export type Mode = "programação" | "sistema" | "plano";
 
 /** A server started here and reached by stdio (`command`), or a remote one by HTTP (`url`). */
@@ -93,4 +93,4 @@ export interface McpTool {
   inputSchema: Record<string, unknown>;
 }
 
-export const REASONING_LEVELS: ReasoningLevel[] = ["none", "low", "medium", "high"];
+export const REASONING_LEVELS: ReasoningLevel[] = ["none", "low", "medium", "high", "max", "ultra"];
