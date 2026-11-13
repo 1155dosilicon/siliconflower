@@ -47,6 +47,7 @@ export async function startGui(config: AppConfig, overrides: SessionOverrides, o
 
   const server = startGuiServer(session, {
     port: options.port,
+    managed,
     // A window with a crashed page still exists: only the parent can tell it is gone.
     onIdle: managed ? undefined : () => void shutdown(),
   });

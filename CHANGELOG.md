@@ -6,6 +6,14 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-13
+
+### Added
+- `siliconflower doctor --json` (o relatório numa linha de JSON) e `--projects [pastas...]` (confere essas pastas no lugar da atual), usados pelo app para rodar o diagnóstico fora de um projeto (`src/index.tsx`, `src/doctor.ts`).
+
+### Changed
+- No app, o **🩺 Diagnóstico** saiu da janela do projeto e foi para a tela inicial: funciona antes de abrir uma pasta e confere os hooks e as conversas de todos os projetos recentes de uma vez. No navegador, o botão continua no topo da página (`desktop/src/doctor.ts`, `desktop/src/renderer/`, `src/gui/`).
+
 ## [0.12.0] - 2026-11-13
 
 ### Added

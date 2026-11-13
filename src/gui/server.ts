@@ -41,6 +41,8 @@ export interface GuiServerOptions {
   graceMs?: number;
   /** Called when the last page has been gone for longer than the grace period. */
   onIdle?: () => void;
+  /** Inside the desktop app, whose start screen has the diagnosis: the page hides its own button. */
+  managed?: boolean;
   /** Replaceable in tests: the real one starts a shell and calls the provider. */
   doctor?: typeof runDoctor;
 }
@@ -157,6 +159,7 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
         version: APP_VERSION,
         cwd: process.cwd(),
         logFile: logFile(),
+        managed: options.managed ?? false,
         modes: MODES,
         reasoningOptions: reasoningOptions(baseURL).map((value) => ({ value, label: reasoningLabel(value, baseURL) })),
       },
@@ -172,7 +175,8 @@ export function startGuiServer(session: AgentSession, options: GuiServerOptions 
   };
 
   /**
-   * The diagnosis button of the page. One run at a time (each starts a shell and calls the
+   * The diagnosis button of the page (in the browser: the app has it on its start screen,
+   * see desktop/src/doctor.ts). One run at a time (each starts a shell and calls the
    * provider), and the report goes only to the page that asked. It tests what this session
    * runs with, and reports its MCP servers as they are instead of starting them again.
    */

@@ -229,6 +229,69 @@ describe("siliconflower doctor", () => {
     expect(existsSync(workspaceHooksFile(cwd))).toBe(false);
   }, 60_000);
 
+  describe("for the start screen of the app, which has no project of its own", () => {
+    let other: string;
+
+    beforeEach(() => {
+      other = mkdtempSync(join(tmpdir(), "sf-doctor-"));
+    });
+
+    afterEach(() => {
+      rmSync(other, { recursive: true, force: true });
+      rmSync(getWorkspaceDataDir(other), { recursive: true, force: true });
+    });
+
+    function damage(folder: string): string {
+      const sessions = join(getWorkspaceDataDir(folder), "sessions");
+      mkdirSync(sessions, { recursive: true });
+      const file = join(sessions, "abc.jsonl");
+      writeFileSync(file, "isto não é uma conversa");
+      return file;
+    }
+
+    test("the recent projects are checked together, and --fix reaches all of them", async () => {
+      writeConfig(VALID);
+      const damaged = [damage(cwd), damage(other)];
+      // The same project twice (the app lists folders, and two can share a project) counts once.
+      const projects = [cwd, other, cwd];
+
+      const report = await runDoctor({ offline: true, projects });
+      expect(report.checks.map((c) => c.id)).not.toContain("project");
+      const before = find(report, "conversations");
+      expect(before).toMatchObject({ status: "warn", fixable: true, items: damaged });
+      expect(before.detail).toContain("0 em 2 projetos recentes");
+
+      const fixed = find(await runDoctor({ offline: true, projects, fix: true }), "conversations");
+      expect(fixed.status).toBe("ok");
+      expect(fixed.fixed).toContain("2 arquivos danificados renomeados");
+      for (const file of damaged) expect(readFileSync(`${file}.danificada`, "utf8")).toBe("isto não é uma conversa");
+    }, 90_000);
+
+    test("each hooks.json inside a repository is listed with where to move it", async () => {
+      writeConfig({ ...VALID, hooks: { onEdit: "echo editou" } });
+      for (const folder of [cwd, other]) {
+        mkdirSync(join(folder, ".siliconflower"), { recursive: true });
+        writeFileSync(join(folder, ".siliconflower", "hooks.json"), JSON.stringify({ preTool: "echo do-repositorio" }));
+      }
+
+      const hooks = find(await runDoctor({ offline: true, projects: [cwd, other] }), "hooks");
+      expect(hooks.status).toBe("warn");
+      expect(hooks.detail).toContain("em vigor: onEdit; 2 arquivos hooks.json não rodam");
+      expect(hooks.items).toHaveLength(2);
+      expect(hooks.items?.[1]).toContain(join(other, ".siliconflower", "hooks.json"));
+      expect(hooks.items?.[1]).toContain(workspaceHooksFile(other));
+    }, 60_000);
+
+    test("with no recent project, only what does not depend on one is checked", async () => {
+      writeConfig(VALID);
+      const report = await runDoctor({ cwd, offline: true, projects: [] });
+
+      const ids = report.checks.map((c) => c.id);
+      expect(ids).toEqual(["system", "data-dir", "config", "provider", "mcp", "shell", "git", "skills", "logs"]);
+      expect(report.ok).toBe(true);
+    }, 60_000);
+  });
+
   test("only the errors of the last 24 hours are reported, with the latest one", async () => {
     writeConfig(VALID);
     await log("info", "garante que o arquivo de log existe");

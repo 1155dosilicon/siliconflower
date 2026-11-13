@@ -668,6 +668,8 @@ function handleHello(message) {
   workingFolder = meta.cwd;
   $("empty-cwd").textContent = `Pasta de trabalho: ${meta.cwd}`;
   document.title = `Siliconflower ${meta.version}`;
+  // Hidden until here: in the app, the diagnosis is on the start screen, before any project.
+  $("doctor").hidden = Boolean(meta.managed);
   rebuildTimeline();
   setConnection("conectado", "ok");
   setComposerEnabled(true);

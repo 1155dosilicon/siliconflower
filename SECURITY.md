@@ -48,13 +48,13 @@ A página controla um agente que executa comandos, e qualquer site aberto no nav
 - a CSP bloqueia scripts inline e de terceiros, conexões externas, imagens e fontes externas e uso em frames;
 - o texto do modelo e das ferramentas nunca vira HTML: tags aparecem como texto, links só aceitam `http`, `https` e `mailto`, e imagens viram links, sem carregar nada;
 - a chave de API não é enviada à página;
-- o botão de diagnóstico (🩺) só dispara verificações fixas do servidor. A página não escolhe comando, endereço nem arquivo, e **Corrigir o que der** só renomeia conversas danificadas e, em Linux/Unix, fecha a pasta de dados (`chmod 700`). O relatório mostra caminhos e a última linha de erro do log, nunca a chave.
+- o botão de diagnóstico (🩺, que aparece no navegador; no app ele fica na tela inicial) só dispara verificações fixas do servidor. A página não escolhe comando, endereço nem arquivo, e **Corrigir o que der** só renomeia conversas danificadas e, em Linux/Unix, fecha a pasta de dados (`chmod 700`). O relatório mostra caminhos e a última linha de erro do log, nunca a chave.
 
 **Limitações:** a conexão local não é criptografada, e outro programa rodando na sua conta consegue ler o token (na linha de comando do navegador, nos dados do navegador ou na saída do terminal). A interface não é uma barreira contra software local: ela tem os mesmos privilégios do resto do agente. Não exponha a porta com proxy ou túnel e não compartilhe a URL.
 
 ## Conversas salvas
 
-A GUI e o app guardam as conversas em `~/.siliconflower/workspaces/<projeto>/sessions/`, **em texto puro**. Isso inclui suas mensagens e a saída das ferramentas: um arquivo `.env` que o agente tenha lido, por exemplo, fica nelas. A chave de API do provedor não é gravada, mas um segredo que passe pela conversa é. Os arquivos ficam com as permissões da sua conta: em Linux/Unix, confira que `~/.siliconflower` não é legível por outros usuários (o `config.json` é gravado com `0600`, mas as conversas seguem a `umask`): o diagnóstico (botão 🩺 da interface, ou `siliconflower doctor`) avisa quando é, e **Corrigir o que der** (ou `--fix`) aplica `chmod 700` à pasta. Apague pelo **×** na lateral o que não deve ficar guardado. De imagens, áudios e vídeos lidos com `read_media`, só o caminho é gravado; o conteúdo vai ao provedor, mas não para o disco.
+A GUI e o app guardam as conversas em `~/.siliconflower/workspaces/<projeto>/sessions/`, **em texto puro**. Isso inclui suas mensagens e a saída das ferramentas: um arquivo `.env` que o agente tenha lido, por exemplo, fica nelas. A chave de API do provedor não é gravada, mas um segredo que passe pela conversa é. Os arquivos ficam com as permissões da sua conta: em Linux/Unix, confira que `~/.siliconflower` não é legível por outros usuários (o `config.json` é gravado com `0600`, mas as conversas seguem a `umask`): o diagnóstico (**🩺** na tela inicial do app ou no topo da página no navegador, ou `siliconflower doctor`) avisa quando é, e **Corrigir o que der** (ou `--fix`) aplica `chmod 700` à pasta. Apague pelo **×** na lateral o que não deve ficar guardado. De imagens, áudios e vídeos lidos com `read_media`, só o caminho é gravado; o conteúdo vai ao provedor, mas não para o disco.
 
 ## App de desktop (`desktop/`)
 
@@ -63,6 +63,7 @@ A janela mostra a mesma página, com texto vindo do modelo e de repositórios, e
 - as janelas rodam com `sandbox` e `contextIsolation`, sem Node. A janela de um projeto não tem nenhuma ponte com o processo principal; só a tela inicial, página local, tem uma, e o processo principal confere o remetente e os argumentos;
 - a chave de API não vai para a tela de configurações, que recebe no máximo `***1234`. **Testar conexão** envia a chave ao endereço escrito no formulário, e a resposta do provedor é filtrada para não exibi-la;
 - a página só pede para abrir um projeto que já está nos recentes. Uma pasta nova só vem do seletor nativo, escolhida pelo usuário;
+- o **Diagnóstico** da tela inicial roda o `siliconflower doctor` do próprio agente. A página só diz se é para corrigir: as verificações são fixas, as pastas são os projetos recentes e a correção é a mesma do botão do navegador. O processo principal só repassa à página um relatório no formato esperado, exibido como texto, e ele nunca traz a chave;
 - a janela só navega na origem do seu servidor local. Links abrem no navegador padrão, e só `http` e `https`;
 - todas as permissões são negadas, menos escrever na área de transferência (botão **Copiar**), e downloads são cancelados;
 - cada projeto tem sessão própria, em memória, então o cookie de um não chega ao outro;

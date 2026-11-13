@@ -11,7 +11,7 @@ import { log } from "./logger.js";
 import { getWorkspaceDataDir, getWorkspaceId } from "./fs-util.js";
 import { findProject, markerIn, resolveWorkspaceRoot, DEFAULT_MARKER, PROJECT_TEMPLATE } from "./project.js";
 import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { APP_VERSION } from "./version.js";
 import { emitManagedEvent } from "./gui/managed.js";
 
@@ -206,16 +206,21 @@ program
   .description("Check the setup (config, provider, MCP, shell, data folder) and say how to fix what is wrong (accepts the global options above)")
   .option("--fix", "apply the fixes that are safe to make without asking (nothing is deleted)")
   .option("--offline", "skip the checks that contact the provider and the MCP servers")
+  .option("--json", "print the report as one line of JSON (what the desktop app reads)")
+  .option("--projects [dirs...]", "check these folders in place of the current one (the desktop app passes its recent projects)")
   .action(async (_opts, cmd: Command) => {
     const opts = cmd.optsWithGlobals();
-    const { runDoctor, formatDoctorReport } = await import("./doctor.js");
+    const { runDoctor, formatDoctorReport, summarizeDoctorReport } = await import("./doctor.js");
     const report = await runDoctor({
       fix: Boolean(opts.fix),
       offline: Boolean(opts.offline),
       overrides: { baseURL: opts.baseUrl, apiKey: opts.apiKey, model: opts.model },
+      // `--projects` alone is a list with no folder: the start screen before any project was opened.
+      ...(opts.projects ? { projects: Array.isArray(opts.projects) ? opts.projects.map((dir: string) => resolve(dir)) : [] } : {}),
     });
+    const output = opts.json ? JSON.stringify({ report, summary: summarizeDoctorReport(report) }) : formatDoctorReport(report);
     // Flushed before process.exit, which is needed: an MCP handle could keep the process running.
-    await new Promise<void>((resolve) => process.stdout.write(`${formatDoctorReport(report)}\n`, () => resolve()));
+    await new Promise<void>((done) => process.stdout.write(`${output}\n`, () => done()));
     process.exit(report.ok ? 0 : 1);
   });
 

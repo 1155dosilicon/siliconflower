@@ -14,6 +14,7 @@ import {
 import { statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { AgentStartError, startAgentProcess, type AgentExit, type AgentProcess } from "./agent-process.js";
+import { runAgentDoctor, type DoctorResult } from "./doctor.js";
 import { addRecent, folderKey, loadRecents, removeRecent } from "./projects.js";
 import { isConfigured, parseInput, readSettings, reasoningChoices, testConnection, writeSettings } from "./settings.js";
 
@@ -321,8 +322,45 @@ function showHome(): void {
   });
   home = window;
   window.once("ready-to-show", () => window.show());
-  window.once("closed", () => { if (home === window) home = undefined; });
+  window.once("closed", () => {
+    if (home === window) home = undefined;
+    // Nobody is left to read the report.
+    doctorRun?.abort.abort();
+  });
   void window.loadFile(buildPath("renderer", "home.html"));
+}
+
+// ---- Diagnosis ------------------------------------------------------------------------
+
+let doctorRun: { result: Promise<DoctorResult>; abort: AbortController } | undefined;
+
+/**
+ * The diagnosis button of the start screen: the agent's own `doctor`, over the recent projects
+ * that still exist. One run at a time: each starts a shell and calls the provider.
+ */
+function runHomeDoctor(fix: boolean): Promise<DoctorResult> {
+  if (doctorRun) {
+    const previous = doctorRun;
+    // Cancelled by a start screen that closed: this one is another, and gets its own run.
+    return previous.abort.signal.aborted ? previous.result.then(() => runHomeDoctor(fix)) : previous.result;
+  }
+  const abort = new AbortController();
+  const result = runAgentDoctor({
+    exe: agentExe(),
+    cwd: app.getPath("home"),
+    projects: loadRecents(recentsFile()).map((p) => p.path).filter(isDirectory),
+    fix,
+    signal: abort.signal,
+  });
+  const run = { result, abort };
+  doctorRun = run;
+  // Like a closing agent: the app does not quit while it runs.
+  const done = result.then(() => {
+    if (doctorRun === run) doctorRun = undefined;
+  });
+  stopping.add(done);
+  void done.finally(() => stopping.delete(done));
+  return result;
 }
 
 // ---- Settings -------------------------------------------------------------------------
@@ -383,6 +421,8 @@ function registerIpc(): void {
     });
   };
   handle("settings:open", () => showSettings());
+  // The page only says whether to fix: the checks and the folders are chosen here.
+  handle("doctor:run", (_event, fix) => runHomeDoctor(fix === true));
   handleSettings("settings:get", () => readSettings());
   handleSettings("settings:reasoning", (baseURL) => reasoningChoices(typeof baseURL === "string" ? baseURL : ""));
   handleSettings("settings:test", (raw) => {
@@ -515,6 +555,7 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     if (quitting) return;
     quitting = true;
+    doctorRun?.abort.abort();
     for (const project of [...projects.values()]) project.window.destroy();
     void (async () => {
       while (projects.size || stopping.size) {
