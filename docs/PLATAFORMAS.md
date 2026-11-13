@@ -40,7 +40,7 @@ Esta lista é tudo o que **deve** ser diferente entre os sistemas. Fora daqui, o
 | Abrir o navegador | `Start-Process '<url>'` | `xdg-open`, via `runShell` | `src/gui/index.ts` (`openUrlCommand`) |
 | Sinais da GUI | `SIGINT`, `SIGTERM`, `SIGBREAK` | `SIGINT`, `SIGTERM`, `SIGHUP` | `src/gui/index.ts` |
 | Executável do agente | `siliconflower.exe` | `siliconflower` | `desktop/src/main.ts` (`AGENT_EXE`), `desktop/electron-builder.yml` |
-| Encerramento forçado do agente | `taskkill /T /F` | o agente roda em grupo de processos próprio (`detached`) e o grupo recebe `SIGKILL` | `desktop/src/agent-process.ts` |
+| Encerramento forçado do agente (o de um projeto e o que roda o diagnóstico da tela inicial) | `taskkill /T /F` | o agente roda em grupo de processos próprio (`detached`) e o grupo recebe `SIGKILL` | `desktop/src/agent-process.ts` (`killTree`), `desktop/src/doctor.ts` |
 | Pacote | instalador NSIS por usuário (`.exe`), ícone `.ico` | `.deb` (sistema, em `/opt`, sem FUSE) e AppImage (instalável por usuário com `scripts/install-appimage.sh`, que o extrai: sem FUSE), ícone `icon.png`; `win:` continua no `electron-builder.yml` | `desktop/electron-builder.yml`, `desktop/package.json` (`dist`, `dist:win`, `dist:linux`) |
 | `app.setAppUserModelId` | agrupa na barra de tarefas | sem efeito (mantido igual ao Windows) | `desktop/src/main.ts` |
 

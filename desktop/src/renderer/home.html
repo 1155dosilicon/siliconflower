@@ -21,7 +21,23 @@
       <p id="empty" hidden>Nenhum projeto aberto ainda.</p>
       <ul id="recents"></ul>
     </section>
-    <footer><button id="settings" class="link" type="button">Configurações</button></footer>
+    <footer>
+      <button id="settings" class="link" type="button">Configurações</button>
+      <button id="doctor" class="link" type="button" title="Confere se está tudo funcionando" aria-haspopup="dialog"><span aria-hidden="true">🩺</span> Diagnóstico</button>
+    </footer>
   </main>
+
+  <dialog id="doctor-dialog" class="doctor" aria-labelledby="doctor-title">
+    <div class="doctor-head">
+      <h2 id="doctor-title"><span aria-hidden="true">🩺</span> Diagnóstico</h2>
+      <button id="doctor-close" type="button" class="doctor-close" aria-label="Fechar o diagnóstico">×</button>
+    </div>
+    <p id="doctor-summary" class="doctor-summary" role="status"></p>
+    <ul id="doctor-list" class="doctor-list"></ul>
+    <div class="doctor-actions">
+      <button id="doctor-fix" type="button" class="primary" hidden title="Só faz o que não perde dados: nada é apagado">Corrigir o que der</button>
+      <button id="doctor-again" type="button">Verificar de novo</button>
+    </div>
+  </dialog>
 </body>
 </html>

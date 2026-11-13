@@ -19,7 +19,7 @@ Agente de IA para desenvolvimento de software em **Windows e Linux** (x86_64), c
 - 🌳 **Git worktrees** em `<repo>/.worktrees/<branch>`, sem mexer na sua área de trabalho.
 - 🗺️ **RepoMap**: mapa de símbolos (TS, JS, Python, Go, Rust) com poucos tokens.
 - 🧩 **MCP, hooks e skills**: servidores MCP por stdio ou HTTP, comandos disparados por eventos e instruções em Markdown carregadas sob demanda.
-- 📎 **Na interface**: anexe imagens (botão 📎, colar ou arrastar; áudio e vídeo na API Xiaomi MiMo), edite e reenvie a última mensagem, busque e renomeie conversas, acompanhe ou encerre o que roda em background e confira a instalação pelo botão 🩺 (**Diagnóstico**), sem abrir um terminal.
+- 📎 **Na interface**: anexe imagens (botão 📎, colar ou arrastar; áudio e vídeo na API Xiaomi MiMo), edite e reenvie a última mensagem, busque e renomeie conversas, acompanhe ou encerre o que roda em background e confira a instalação pelo **🩺 Diagnóstico** (na tela inicial do app; no navegador, no topo da página), sem abrir um terminal.
 - 📦 **Binário único** feito com o Bun: não precisa de Node.js instalado.
 
 ---
@@ -85,7 +85,7 @@ Testado de verdade no elementary OS 8 e no Ubuntu 24.04. No Ubuntu 14.04 e 16.04
 | Raciocínio | seletor **Pensamento**: `none`, `low`, `medium`, `high`, `max`, `ultra` (os dois últimos só existem em alguns provedores; se o seu recusar, o pedido segue com `high`) |
 | Conversas | lateral: **+ Nova conversa**, clique para retomar, **✎** para renomear, **×** para apagar; o campo de busca aparece com duas ou mais |
 | Editar a última mensagem | botão **Editar** ao passar o mouse sobre ela |
-| Conferir se está tudo funcionando | botão **🩺** no canto superior direito ([Diagnóstico](#-diagnóstico)) |
+| Conferir se está tudo funcionando | no app, **🩺 Diagnóstico** na tela inicial, antes de abrir uma pasta; no navegador, botão **🩺** no canto superior direito ([Diagnóstico](#-diagnóstico)) |
 
 Enquanto o agente trabalha, aparece **Pensando...** (o texto do raciocínio não é mostrado) e cada ferramenta ganha um cartão com argumentos e resultado. As conversas ficam salvas por projeto; uma resposta só é salva ao terminar ou ser interrompida.
 
@@ -93,7 +93,7 @@ Enquanto o agente trabalha, aparece **Pensando...** (o texto do raciocínio não
 
 ### App de desktop
 
-Cada projeto abre em sua própria janela, com seu agente: `Ctrl+O` abre outra pasta, `Ctrl+Shift+O` mostra os recentes e **Arquivo > Configurações** (`Ctrl+,`) muda provedor, chave e modelo (**Testar conexão** confere antes de salvar; a chave nunca volta para a tela). Fechar a janela encerra o agente e os comandos em background daquele projeto. Reabrir começa com uma conversa vazia; a anterior está na lateral.
+Cada projeto abre em sua própria janela, com seu agente: `Ctrl+O` abre outra pasta, `Ctrl+Shift+O` mostra a tela inicial (os recentes e o **🩺 Diagnóstico**) e **Arquivo > Configurações** (`Ctrl+,`) muda provedor, chave e modelo (**Testar conexão** confere antes de salvar; a chave nunca volta para a tela). Fechar a janela encerra o agente e os comandos em background daquele projeto. Reabrir começa com uma conversa vazia; a anterior está na lateral.
 
 No Linux, há três jeitos de instalar:
 
@@ -194,7 +194,7 @@ O agente não tem sandbox: leia o [SECURITY.md](SECURITY.md) antes de dar acesso
 
 ## 🩺 Diagnóstico
 
-Comece pelo botão **🩺** no canto superior direito da interface (app ou navegador). Ele confere a configuração, faz um pedido mínimo ao provedor (chave, endereço e modelo), mostra como estão os servidores MCP, roda um comando no shell e olha a pasta de dados, o git, os hooks, as conversas salvas e os erros recentes do log. Cada item aparece como certo (✓), aviso (!) ou problema (✕), e os dois últimos trazem o jeito de resolver.
+No app, comece por **🩺 Diagnóstico**, no rodapé da tela inicial (a que lista os projetos recentes; `Ctrl+Shift+O` volta a ela). Ele funciona antes de abrir qualquer pasta e olha os hooks e as conversas de todos os projetos recentes de uma vez. No navegador, o botão **🩺** fica no canto superior direito da página e olha o projeto aberto. Nos dois, ele confere a configuração, faz um pedido mínimo ao provedor (chave, endereço e modelo), mostra como estão os servidores MCP, roda um comando no shell e olha a pasta de dados, o git, os hooks, as conversas salvas e os erros recentes do log. Cada item aparece como certo (✓), aviso (!) ou problema (✕), e os dois últimos trazem o jeito de resolver.
 
 - **Corrigir o que der** aparece quando há algo que dá para resolver sozinho, sem apagar nada: renomeia conversas danificadas para `*.jsonl.danificada` (o aviso some da interface) e, no Linux, fecha a pasta de dados para outros usuários (`chmod 700`).
 - **Verificar de novo** repete as verificações depois de você mexer em algo.

@@ -45,7 +45,7 @@ export function childEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 const isWindows = process.platform === "win32";
 
 /** Windows: taskkill /T. Unix: the agent leads its own process group (detached), so the whole group gets SIGKILL. */
-function killTree(pid: number): Promise<void> {
+export function killTree(pid: number): Promise<void> {
   if (!isWindows) {
     try {
       process.kill(-pid, "SIGKILL");

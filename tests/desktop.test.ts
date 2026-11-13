@@ -3,6 +3,8 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { AgentStartError, childEnv, startAgentProcess } from "../desktop/src/agent-process.js";
+import { parseDoctorOutput, runAgentDoctor, type AgentDoctorOptions, type DoctorResult } from "../desktop/src/doctor.js";
+import { getWorkspaceId } from "../src/fs-util.js";
 import { addRecent, folderKey, loadRecents, MAX_RECENTS, removeRecent } from "../desktop/src/projects.js";
 import { applyInput, isConfigured, maskKey, parseInput, parseMcp, readSettings, testConnection, writeSettings, type SettingsInput } from "../desktop/src/settings.js";
 import { configFile } from "../src/config.js";
@@ -267,6 +269,98 @@ describe("agent process", () => {
     const error = await agent.ready.catch((e) => e);
     expect(error.failure).toBe("spawn_failed");
     await agent.stop();
+  });
+});
+
+describe("diagnosis of the start screen", () => {
+  let dataDir: string;
+  let recent: string;
+
+  beforeAll(() => {
+    dataDir = tempDir();
+    recent = tempDir();
+  });
+
+  afterAll(() => {
+    for (const dir of [dataDir, recent]) rmSync(dir, { recursive: true, force: true });
+  });
+
+  const run = (options: Partial<AgentDoctorOptions> = {}) => {
+    const env: NodeJS.ProcessEnv = { ...process.env, SILICONFLOWER_DATA_DIR: dataDir };
+    for (const name of ["SILICONFLOWER_API_KEY", "SILICONFLOWER_BASE_URL", "SILICONFLOWER_MODEL"]) delete env[name];
+    return runAgentDoctor({ exe: process.execPath, prefixArgs: ["run", ENTRY], cwd: recent, projects: [recent], env, ...options });
+  };
+  const find = (result: DoctorResult, id: string) => result.report!.checks.find((c) => c.id === id);
+
+  test("runs the agent's own doctor over the recent projects, and the fix reaches them", async () => {
+    // No config.json in this data folder: the provider is not contacted.
+    const sessions = join(dataDir, "workspaces", getWorkspaceId(recent), "sessions");
+    mkdirSync(sessions, { recursive: true });
+    const damaged = join(sessions, "abc.jsonl");
+    writeFileSync(damaged, "isto não é uma conversa");
+
+    const before = await run();
+    expect(before.error).toBeUndefined();
+    // A report with a failure (exit code 1) is still a report.
+    expect(before.report!.ok).toBe(false);
+    expect(before.summary).toContain("1 problema");
+    expect(find(before, "config")).toMatchObject({ status: "fail" });
+    expect(find(before, "shell")).toMatchObject({ status: "ok" });
+    expect(find(before, "project")).toBeUndefined();
+    expect(find(before, "conversations")).toMatchObject({ status: "warn", fixable: true, detail: expect.stringContaining("0 em 1 projeto recente"), items: [damaged] });
+
+    const after = await run({ fix: true });
+    expect(find(after, "conversations")).toMatchObject({ status: "ok", fixed: expect.stringContaining("1 arquivo danificado renomeado") });
+    expect(readFileSync(`${damaged}.danificada`, "utf8")).toBe("isto não é uma conversa");
+  }, 90_000);
+
+  test("before any project was opened there is still a report", async () => {
+    const result = await run({ projects: [] });
+    const ids = result.report!.checks.map((c) => c.id);
+    expect(ids).toContain("shell");
+    expect(ids).not.toContain("conversations");
+    expect(ids).not.toContain("hooks");
+  }, 60_000);
+
+  test("an agent that cannot start is the result, not a crash", async () => {
+    const result = await run({ exe: join(recent, "nao-existe.exe"), prefixArgs: [] });
+    expect(result.report).toBeUndefined();
+    expect(result.error).toContain("Não consegui iniciar o agente");
+  });
+
+  test("an agent that hangs is killed, and so is one whose window closed", async () => {
+    const script = join(recent, "hangs.ts");
+    writeFileSync(script, "setInterval(() => {}, 1000);");
+    const slow = await run({ prefixArgs: ["run", script], timeoutMs: 300 });
+    expect(slow.error).toContain("demorou demais");
+
+    const abort = new AbortController();
+    const closed = run({ prefixArgs: ["run", script], signal: abort.signal });
+    setTimeout(() => abort.abort(), 200);
+    expect((await closed).error).toContain("cancelado");
+  }, 30_000);
+
+  test("only a well-formed report reaches the page", () => {
+    const check = { id: "c", title: "Conversas salvas", status: "warn", detail: "d", items: ["a"], hint: "h", fixable: true, fixed: "f" };
+    const line = JSON.stringify({ report: { checks: [check], ok: true }, summary: "0 problemas e 1 aviso." });
+    expect(parseDoctorOutput(`aviso de uma dependência\n${line}\n`)).toEqual({ report: { checks: [check], ok: true }, summary: "0 problemas e 1 aviso." } as DoctorResult);
+
+    // Fields of the wrong type are dropped, and anything that is not a report is refused.
+    const odd = JSON.stringify({ report: { checks: [{ ...check, items: ["a", 1], hint: 2, fixable: "sim", extra: "x" }], ok: true }, summary: "s" });
+    expect(parseDoctorOutput(odd)!.report!.checks[0]).toEqual({ id: "c", title: "Conversas salvas", status: "warn", detail: "d", items: ["a"], fixed: "f" });
+    expect(parseDoctorOutput("")).toBeNull();
+    expect(parseDoctorOutput("Diagnóstico do siliconflower")).toBeNull();
+    expect(parseDoctorOutput(JSON.stringify({ report: { checks: [{ ...check, status: "outro" }], ok: true }, summary: "s" }))).toBeNull();
+    expect(parseDoctorOutput(JSON.stringify({ report: { checks: "x", ok: true }, summary: "s" }))).toBeNull();
+  });
+
+  test("the start screen has the button, and the page chooses nothing but whether to fix", () => {
+    const desktop = resolve(import.meta.dir, "..", "desktop", "src");
+    expect(readFileSync(join(desktop, "renderer", "home.html"), "utf8")).toContain('id="doctor"');
+    expect(readFileSync(join(desktop, "preload.ts"), "utf8")).toContain('ipcRenderer.invoke("doctor:run", fix)');
+    expect(readFileSync(join(desktop, "main.ts"), "utf8")).toContain('handle("doctor:run", (_event, fix) => runHomeDoctor(fix === true))');
+    // The page shows paths and log lines from the report.
+    expect(readFileSync(join(desktop, "renderer", "home.js"), "utf8")).not.toContain("innerHTML");
   });
 });
 

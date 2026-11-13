@@ -39,6 +39,11 @@ export interface DoctorOptions {
   /** Skips the checks that contact the provider and the MCP servers. */
   offline?: boolean;
   cwd?: string;
+  /**
+   * The folders to check in place of `cwd`. The start screen of the app has no project of its
+   * own: it reports its recent ones together, and none of them when the list is empty.
+   */
+  projects?: string[];
   /** What is in use (a running session, the global options of the CLI), tested in place of the saved values. */
   overrides?: { baseURL?: string; apiKey?: string; model?: string };
   /**
@@ -261,19 +266,33 @@ async function checkGit(): Promise<DoctorCheck> {
   };
 }
 
-async function checkHooks(config: AppConfig | null, cwd: string): Promise<DoctorCheck> {
+async function checkHooks(config: AppConfig | null, folders: string[]): Promise<DoctorCheck> {
   const check = { id: "hooks", title: "Hooks" };
-  const hooks = await resolveHooks(config?.hooks, cwd);
-  const events = Object.keys(hooks ?? {});
-  const detail = events.length ? `em vigor: ${events.join(", ")}` : "nenhum configurado";
-  const ignored = await ignoredRepoHooksFile(cwd);
-  if (!ignored) return { ...check, status: "ok", detail };
+  const events = new Set<string>();
+  const ignored: { file: string; target: string }[] = [];
+  for (const folder of folders) {
+    for (const event of Object.keys((await resolveHooks(config?.hooks, folder)) ?? {})) events.add(event);
+    const file = await ignoredRepoHooksFile(folder);
+    if (file && !ignored.some((entry) => entry.file === file)) ignored.push({ file, target: workspaceHooksFile(folder) });
+  }
+  const detail = events.size ? `em vigor: ${[...events].join(", ")}` : "nenhum configurado";
+  if (!ignored.length) return { ...check, status: "ok", detail };
+  // Never moved by --fix: that would run commands that came with a cloned repository.
+  if (ignored.length === 1) {
+    const only = ignored[0]!;
+    return {
+      ...check,
+      status: "warn",
+      detail: `${detail}; ${only.file} não roda, porque fica dentro do repositório`,
+      hint: `Se os comandos desse arquivo são seus, mova-o para ${only.target}.`,
+    };
+  }
   return {
     ...check,
     status: "warn",
-    detail: `${detail}; ${ignored} não roda, porque fica dentro do repositório`,
-    // Never moved by --fix: that would run commands that came with a cloned repository.
-    hint: `Se os comandos desse arquivo são seus, mova-o para ${workspaceHooksFile(cwd)}.`,
+    detail: `${detail}; ${ignored.length} arquivos hooks.json não rodam, porque ficam dentro do repositório`,
+    items: ignored.map((entry) => `${entry.file} (para manter, mova para ${entry.target})`),
+    hint: "Mova só os arquivos cujos comandos são seus, cada um para o caminho ao lado dele.",
   };
 }
 
@@ -289,11 +308,20 @@ async function checkSkills(): Promise<DoctorCheck> {
   return { id: "skills", title: "Skills", status: "ok", detail: `${skills.length} em ${skillsDir()}` };
 }
 
-async function checkConversations(cwd: string, fix: boolean): Promise<DoctorCheck> {
+/** `recents`: the folders are the recent projects of the app, not the one the agent runs in. */
+async function checkConversations(folders: string[], recents: boolean, fix: boolean): Promise<DoctorCheck> {
   const check = { id: "conversations", title: "Conversas salvas" };
-  const store = new ConversationStore(join(getWorkspaceDataDir(cwd), "sessions"));
-  const [{ items: saved }, damaged] = await Promise.all([store.list(), store.damagedFiles()]);
-  const detail = `${saved.length} neste projeto`;
+  // Two folders of the same project share the data folder.
+  const dirs = [...new Set(folders.map((folder) => join(getWorkspaceDataDir(folder), "sessions")))];
+  let saved = 0;
+  const damaged: string[] = [];
+  for (const dir of dirs) {
+    const store = new ConversationStore(dir);
+    const [{ items }, files] = await Promise.all([store.list(), store.damagedFiles()]);
+    saved += items.length;
+    damaged.push(...files);
+  }
+  const detail = recents ? `${saved} em ${plural(dirs.length, "projeto recente", "projetos recentes")}` : `${saved} neste projeto`;
   if (!damaged.length) return { ...check, status: "ok", detail };
   if (!fix) {
     return {
@@ -368,6 +396,8 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
   const cwd = options.cwd ?? process.cwd();
   const fix = options.fix ?? false;
   const offline = options.offline ?? false;
+  const recents = options.projects !== undefined;
+  const folders = options.projects ?? [cwd];
 
   // Before the other checks: a server that does not connect is logged as an error by them.
   const logs = await guarded("logs", "Log", checkLogs);
@@ -383,10 +413,11 @@ export async function runDoctor(options: DoctorOptions = {}): Promise<DoctorRepo
     guarded("mcp", "Servidores MCP", () => checkMcp(config, offline, options.mcp)),
     guarded("shell", "Shell", checkShell),
     guarded("git", "Git", checkGit),
-    guarded("hooks", "Hooks", () => checkHooks(config, cwd)),
-    guarded("project", "Projeto", () => checkProject(cwd)),
+    // Per project: left out when there is no project to look at.
+    ...(folders.length ? [guarded("hooks", "Hooks", () => checkHooks(config, folders))] : []),
+    ...(recents ? [] : [guarded("project", "Projeto", () => checkProject(cwd))]),
     guarded("skills", "Skills", checkSkills),
-    guarded("conversations", "Conversas salvas", () => checkConversations(cwd, fix)),
+    ...(folders.length ? [guarded("conversations", "Conversas salvas", () => checkConversations(folders, recents, fix))] : []),
   ]);
 
   const checks = [checkSystem(), dataDir, configCheck, ...rest, logs];

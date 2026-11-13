@@ -321,6 +321,18 @@ describe("GUI protocol", () => {
     other.ws.close();
   });
 
+  test("inside the app the page is told to hide its diagnosis button: the start screen has it", async () => {
+    const browser = setup();
+    const inBrowser = await connect(browser.base, await login(browser.server));
+    expect((await inBrowser.waitFor((m) => m.type === "hello")).meta.managed).toBe(false);
+    inBrowser.ws.close();
+
+    const app = setup([], { managed: true });
+    const inApp = await connect(app.base, await login(app.server));
+    expect((await inApp.waitFor((m) => m.type === "hello")).meta.managed).toBe(true);
+    inApp.ws.close();
+  });
+
   test("a diagnosis that breaks answers with a message instead of leaving the page waiting", async () => {
     const { server, base } = setup([], { doctor: async () => { throw new Error("quebrou"); } });
     const client = await connect(base, await login(server));

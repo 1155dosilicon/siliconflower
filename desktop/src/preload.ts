@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("siliconflower", {
   openRecent: (path: string) => ipcRenderer.invoke("project:open-recent", path),
   forgetRecent: (path: string) => ipcRenderer.invoke("recents:forget", path),
   openSettings: () => ipcRenderer.invoke("settings:open"),
+  runDoctor: (fix: boolean) => ipcRenderer.invoke("doctor:run", fix),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (form: unknown) => ipcRenderer.invoke("settings:save", form),
   testSettings: (form: unknown) => ipcRenderer.invoke("settings:test", form),
