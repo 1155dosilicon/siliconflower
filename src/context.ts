@@ -180,7 +180,11 @@ export function shrinkToolArguments(raw: string): string {
 
 function shrinkMessage(message: ChatMessage): void {
   if (message.content.length > SHRINK_ABOVE_CHARS) {
-    message.content = `${message.content.slice(0, SHRUNK_CHARS)}\n... [conteúdo reduzido por limite de contexto]`;
+    // Only results of earlier steps get here: the model saw them, so it should not ask again.
+    const note = message.role === "tool"
+      ? "[resultado já visto num passo anterior, reduzido por limite de contexto]"
+      : "[conteúdo reduzido por limite de contexto]";
+    message.content = `${message.content.slice(0, SHRUNK_CHARS)}\n... ${note}`;
   }
   if (message.toolCalls) {
     message.toolCalls = message.toolCalls.map((call) => ({
@@ -199,6 +203,88 @@ function currentRequestIndex(messages: ChatMessage[]): number {
 }
 
 /**
+ * The results of the step that just ran, at the end of the history (only the step's media note
+ * may come after them). The model has not seen them yet: cutting them to a few characters made
+ * it read the same files again and again.
+ */
+function unseenResultIndexes(messages: ChatMessage[]): number[] {
+  let i = messages.length - 1;
+  while (i >= 0 && isToolMediaMessage(messages[i]!)) i--;
+  const indexes: number[] = [];
+  for (; i >= 0 && messages[i]!.role === "tool"; i--) indexes.unshift(i);
+  return indexes.length && messages[i]?.role === "assistant" && messages[i]!.toolCalls?.length ? indexes : [];
+}
+
+// Room kept in a cut result for the note that says how to get the rest.
+const CUT_NOTE_CHARS = 320;
+// Below this share per unseen result, the request is shortened first (it is usually short, but
+// it can be a huge paste).
+const MIN_UNSEEN_TOKENS = 300;
+
+const lineNumberOf = (line: string): number | undefined => {
+  const match = /^(\d+): /.exec(line);
+  return match ? Number(match[1]) : undefined;
+};
+
+/** Where to go on in a read_file result ("N: text" lines) cut after `kept`. */
+function readFileCutNote(content: string, kept: string): string | undefined {
+  const first = lineNumberOf(content);
+  if (first === undefined) return undefined; // an error message, not lines of the file
+  const keptLines = kept ? kept.split("\n") : [];
+  const lastLineWhole = content[kept.length] === "\n";
+  let next = first;
+  for (let i = keptLines.length - 1; i >= 0; i--) {
+    const n = lineNumberOf(keptLines[i]!);
+    if (n === undefined) continue;
+    next = i === keptLines.length - 1 && !lastLineWhole ? n : n + 1;
+    break;
+  }
+  const allLines = content.split("\n");
+  let lastRead = first;
+  for (let i = allLines.length - 1; i >= 0; i--) {
+    const n = lineNumberOf(allLines[i]!);
+    if (n !== undefined) {
+      lastRead = n;
+      break;
+    }
+  }
+  const shown = next > first
+    ? `só couberam as linhas ${first}–${next - 1} das ${first}–${lastRead} lidas`
+    : kept ? `só coube o começo da linha ${first}` : "não coube nenhuma linha";
+  return `[resultado cortado para caber no contexto: ${shown}. Para o resto, chame read_file com offset=${next} e um limit menor, ou leia um arquivo por vez.]`;
+}
+
+/**
+ * The start of a result the model has not seen, in at most about `maxChars`, ending at a line
+ * break when there is one, and a note that says how to get the rest.
+ */
+export function cutUnseenResult(content: string, toolName: string | undefined, maxChars: number): string {
+  if (content.length <= maxChars) return content;
+  let kept = content.slice(0, Math.max(0, maxChars - CUT_NOTE_CHARS));
+  const lastBreak = kept.lastIndexOf("\n");
+  if (lastBreak > 0 && lastBreak >= kept.length / 2) kept = kept.slice(0, lastBreak);
+  const note = (toolName === "read_file" ? readFileCutNote(content, kept) : undefined)
+    ?? `[resultado cortado para caber no contexto: mostrados ${kept.length} de ${content.length} caracteres. Para ver o resto, peça uma parte menor (filtre a saída ou use offset e limit, se a ferramenta tiver) ou faça uma chamada por vez.]`;
+  return kept ? `${kept}\n... ${note}` : note;
+}
+
+/**
+ * Fits the unseen results in `roomTokens`: the small ones stay whole and the large ones share
+ * the rest equally, instead of each becoming a few characters.
+ */
+function fitUnseenResults(messages: ChatMessage[], indexes: number[], roomTokens: number): void {
+  // estimateTokens rounds each message up.
+  let room = Math.max(0, Math.floor((roomTokens - indexes.length) * CHARS_PER_TOKEN));
+  const bySize = [...indexes].sort((a, b) => messages[a]!.content.length - messages[b]!.content.length);
+  for (const [k, i] of bySize.entries()) {
+    const message = messages[i]!;
+    const share = Math.floor(room / (bySize.length - k));
+    message.content = cutUnseenResult(message.content, message.toolName, share);
+    room = Math.max(0, room - message.content.length);
+  }
+}
+
+/**
  * Compresses chat history when the token budget is exceeded.
  * Keeps system/recent messages intact, compresses old tool outputs.
  */
@@ -212,7 +298,10 @@ export function compressHistory(messages: ChatMessage[], maxTokens = CONTEXT_TOK
 
   // Preserve message ordering/protocol while progressively reducing oversized content.
   const KEEP_RECENT = 20;
-  const splitAt = Math.max(0, messages.length - KEEP_RECENT);
+  const unseen = unseenResultIndexes(messages);
+  // The step being answered is never old, however many calls it made.
+  const stepStart = unseen.length ? unseen[0]! - 1 : messages.length;
+  const splitAt = Math.max(0, Math.min(messages.length - KEEP_RECENT, stepStart));
   const oldMessages = messages.slice(0, splitAt);
   const recentMessages = messages.slice(splitAt);
 
@@ -245,24 +334,38 @@ export function compressHistory(messages: ChatMessage[], maxTokens = CONTEXT_TOK
   }
 
   // Keep every message so tool-call role ordering remains valid, and shrink what the model
-  // needs least first: tool results, then its own messages, then the user's. The request
-  // being worked on goes last: without it the model loses the task.
+  // needs least first: tool results it already saw, then its own messages, then the user's.
+  // The results of the step that just ran come next, cut to a share each instead of a few
+  // characters, and the request being worked on goes last: without it the model loses the task.
   const request = currentRequestIndex(result);
+  const isUnseen = new Set(unseen);
   const indexes = (keep: (m: ChatMessage, i: number) => boolean) => result.flatMap((m, i) => (keep(m, i) ? [i] : []));
   const order = [
-    ...indexes((m) => m.role === "tool"),
+    ...indexes((m, i) => m.role === "tool" && !isUnseen.has(i)),
     ...indexes((m) => m.role === "assistant"),
     ...indexes((m, i) => m.role === "user" && i !== request),
-    ...(request >= 0 ? [request] : []),
   ];
   let total = estimateMessagesTokens(result);
-  for (const i of order) {
-    if (total <= maxTokens) break;
+  let requestShrunk = false;
+  const shrinkAt = (i: number) => {
     const message = result[i]!;
     const before = estimateMessagesTokens([message]);
     shrinkMessage(message);
     total += estimateMessagesTokens([message]) - before;
+    if (i === request) requestShrunk = true;
+  };
+  for (const i of order) {
+    if (total <= maxTokens) break;
+    shrinkAt(i);
   }
+  if (total > maxTokens && unseen.length) {
+    const unseenTokens = () => estimateMessagesTokens(unseen.map((i) => result[i]!));
+    if (request >= 0 && maxTokens - (total - unseenTokens()) < unseen.length * MIN_UNSEEN_TOKENS) shrinkAt(request);
+    const others = total - unseenTokens();
+    fitUnseenResults(result, unseen, maxTokens - others);
+    total = others + unseenTokens();
+  }
+  if (total > maxTokens && request >= 0 && !requestShrunk) shrinkAt(request);
 
   // If metadata and many small messages still exceed the budget, discard the oldest turns.
   // Discard whole turns at once: dropping only the leading "assistant" message of a

@@ -128,6 +128,18 @@ function stringValues(value: unknown): Record<string, string> | undefined {
   return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 }
 
+/** Tool steps of one turn before asking whether to go on (`askAfterSteps`): a loop stops there. */
+export const DEFAULT_ASK_AFTER_STEPS = 150;
+const MAX_ASK_AFTER_STEPS = 100_000;
+
+/** `askAfterSteps` of config.json, bounded; 0 never asks; the default when absent or not a number. */
+export function askAfterSteps(value: unknown): number {
+  const n = Number(value);
+  return value !== undefined && value !== null && Number.isFinite(n)
+    ? Math.min(MAX_ASK_AFTER_STEPS, Math.max(0, Math.floor(n)))
+    : DEFAULT_ASK_AFTER_STEPS;
+}
+
 export function normalize(data: Partial<AppConfig>, opts: { applyEnv?: boolean } = {}): AppConfig {
   const applyEnv = opts.applyEnv ?? true;
   const env = (name: string) => (applyEnv ? process.env[name]?.trim() : undefined);
@@ -158,6 +170,9 @@ export function normalize(data: Partial<AppConfig>, opts: { applyEnv?: boolean }
     system: text(data.system).trim() || undefined,
     ...(data.contextTokens !== undefined && Number.isFinite(Number(data.contextTokens))
       ? { contextTokens: contextBudget(data.contextTokens) }
+      : {}),
+    ...(data.askAfterSteps !== undefined && Number.isFinite(Number(data.askAfterSteps))
+      ? { askAfterSteps: askAfterSteps(data.askAfterSteps) }
       : {}),
     mcpServers: (data.mcpServers && typeof data.mcpServers === "object" && !Array.isArray(data.mcpServers)
       ? data.mcpServers

@@ -136,6 +136,7 @@ Tudo fica em `~/.siliconflower/` (ou em `SILICONFLOWER_DATA_DIR`, se definida):
   "mode": "programação",
   "system": "prompt personalizado (opcional)",
   "contextTokens": 90000,
+  "askAfterSteps": 150,
   "mcpServers": {
     "filesystem": {
       "command": "npx",
@@ -155,8 +156,9 @@ Tudo fica em `~/.siliconflower/` (ou em `SILICONFLOWER_DATA_DIR`, se definida):
 ```
 
 - **Variáveis de ambiente:** `SILICONFLOWER_API_KEY`, `SILICONFLOWER_BASE_URL` e `SILICONFLOWER_MODEL` substituem os campos do `config.json` sem serem gravadas nele.
-- **Contexto:** `contextTokens` é quanto cada pedido pode usar (prompt, ferramentas e histórico); acima disso o histórico antigo é compactado. O padrão é 90 mil; aumente em modelos com janela maior (de 8 mil a 2 milhões).
-- **MCP:** um servidor sobe por stdio (`command`) ou é acessado por HTTP (`url`, com `headers` opcionais). As ferramentas aparecem para o modelo como `mcp_<servidor>_<ferramenta>_<hash>`. Um servidor que caiu é reconectado na chamada seguinte.
+- **Contexto:** `contextTokens` é quanto cada pedido pode usar (prompt, ferramentas e histórico); acima disso o histórico antigo é compactado. O padrão é 90 mil; aumente em modelos com janela maior (de 8 mil a 2 milhões). Os resultados que o modelo ainda não viu são os últimos a encolher: se não couberem inteiros, cada um mostra o começo e diz como ler o resto.
+- **Passos por resposta:** não há limite, mas a cada `askAfterSteps` passos de ferramentas numa mesma resposta (padrão 150) a interface pergunta se deve continuar. `0` desliga a pergunta. Subagentes, que não têm a quem perguntar, param nesse ponto.
+- **MCP:** um servidor sobe por stdio (`command`) ou é acessado por HTTP (`url`, com `headers` opcionais). As ferramentas aparecem para o modelo como `mcp_<servidor>_<ferramenta>_<hash>`; se ele esquecer o `_<hash>` e só uma ferramenta tiver aquele nome, ela é usada mesmo assim. Um servidor que caiu é reconectado na chamada seguinte.
 - **Hooks:** `preTool`, `postTool`, `onEdit`, `onCommand`, `onSessionStart` e `onSessionEnd`, no `config.json` ou num `hooks.json` em `workspaces/<workspace-id>/` ou na raiz de `~/.siliconflower/`. Cada evento vem do `config.json` quando está lá e, se não, do `hooks.json`; um `hooks.json` dentro do repositório não roda. Quando cada um roda e as variáveis que recebe: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#hooks-corehooksts).
 - **Skills:** arquivos Markdown em `~/.siliconflower/skills/`, lidos pelo agente com `read_skill` quando relevantes.
 - **Projeto:** `siliconflower init` cria `SILICONFLOWER.md` na pasta atual. Sem esse arquivo (ou `AGENTS.md`) na pasta ou acima dela, a memória de projeto fica desligada.
@@ -212,8 +214,9 @@ O log fica em `~/.siliconflower/logs/siliconflower.log` (`siliconflower logs --l
 - **Alias ou função do shell não funciona em `execute_command` (Linux/Unix):** os comandos rodam com `$SHELL -c`, sem carregar `.bashrc`/`.zshrc`. Use caminhos completos.
 - **Memória de outro projeto, ou nenhuma:** a memória de projeto só existe dentro de uma pasta com `SILICONFLOWER.md`/`AGENTS.md`. Confira com `siliconflower show` (linha `Project`).
 - **Comando em background parou ao fechar:** fechar a janela ou a GUI encerra esses comandos. O que deve continuar precisa ser iniciado fora do agente (`systemd`, `tmux`, `nohup`).
-- **Resposta ou arquivo cortado:** cada resposta tem até 32768 tokens de saída (16384 se o provedor recusar). O modelo é avisado e pode escrever em partes; num texto cortado, envie `continue`.
-- **O agente não para de chamar ferramentas:** não há limite de passos por mensagem, para tarefas longas irem até o fim. Se o modelo ficar repetindo a mesma chamada, use `Esc` ou **Parar**: o que as ferramentas já fizeram fica no histórico.
+- **Resposta ou arquivo cortado:** cada resposta tem até 32768 tokens de saída (16384 se o provedor recusar). O modelo é avisado e pode escrever em partes; num texto cortado, envie `continue`. Se o modelo gastar o limite inteiro pensando, sem escrever nada, o passo é repetido uma vez com o pensamento em `low`; se acontecer de novo, baixe o **Pensamento** ou divida o pedido.
+- **A conexão caiu no meio da resposta (`ECONNRESET`):** o passo é repetido até duas vezes, e a interface mostra "a conexão caiu; repetindo". Nenhuma ferramenta roda em dobro, porque elas só executam depois que a resposta termina.
+- **O agente não para de chamar ferramentas:** não há limite de passos por mensagem, para tarefas longas irem até o fim. Na 3ª chamada idêntica com o mesmo resultado, o modelo recebe um aviso para mudar de abordagem, e a cada 150 passos (`askAfterSteps`) a interface pergunta se deve continuar. A qualquer momento, `Esc` ou **Parar** encerram a resposta: o que as ferramentas já fizeram fica no histórico.
 - **AppImage pede FUSE / `libfuse.so.2`:** use o `.deb` ou o `install-appimage.sh`. **Nunca** `apt install fuse` (veja o aviso acima).
 - **`siliconflower: command not found`:** abra um novo terminal e confira se `~/.local/bin` está no `PATH`. O app de desktop não instala esse comando.
 
