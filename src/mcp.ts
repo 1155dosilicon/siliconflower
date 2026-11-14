@@ -173,6 +173,13 @@ export class McpManager {
     return fresh;
   }
 
+  /** The tool a name from the model refers to, also without the hash suffix (resolveMcpToolName). */
+  resolveTool(name: string): McpTool | undefined {
+    const tool = resolveMcpToolName(name, [...this.servers.values()].flatMap((s) => s.tools));
+    if (tool && tool.name !== name) void log("info", `[MCP] "${name}" sem o sufixo de hash; usando "${tool.name}"`);
+    return tool;
+  }
+
   allTools(): McpTool[] {
     const out: McpTool[] = [];
     const seen = new Set<string>();
@@ -194,20 +201,18 @@ export class McpManager {
     args: Record<string, unknown>,
     signal?: AbortSignal
   ): Promise<{ result: string; isError: boolean }> {
-    for (const known of [...this.servers.values()]) {
-      const tool = known.tools.find((t) => t.name === name);
-      if (!tool) continue;
-      const s = known.closed ? await this.reconnect(known) : known;
-      const res = await s.client.callTool(
-        { name: tool.originalName ?? tool.name, arguments: args },
-        undefined,
-        { signal, timeout: MCP_CALL_TIMEOUT_MS }
-      );
-      const text = mcpContentText((res.content as unknown[]) ?? []);
-      // MCP servers report tool failures in-band via `isError`, not by rejecting the call.
-      return { result: text || "(empty content)", isError: res.isError === true };
-    }
-    throw new Error(`tool not found: ${name}`);
+    const tool = this.resolveTool(name);
+    const known = tool && this.servers.get(tool.server);
+    if (!tool || !known) throw new Error(toolNotFoundMessage(name, this.allTools().map((t) => t.name)));
+    const s = known.closed ? await this.reconnect(known) : known;
+    const res = await s.client.callTool(
+      { name: tool.originalName ?? tool.name, arguments: args },
+      undefined,
+      { signal, timeout: MCP_CALL_TIMEOUT_MS }
+    );
+    const text = mcpContentText((res.content as unknown[]) ?? []);
+    // MCP servers report tool failures in-band via `isError`, not by rejecting the call.
+    return { result: text || "(empty content)", isError: res.isError === true };
   }
 
   serverCount(): number {
@@ -251,6 +256,54 @@ export function mcpContentText(content: unknown[]): string {
       return JSON.stringify(c);
     })
     .join("\n");
+}
+
+const HASH_SUFFIX = /_[0-9a-f]{8}$/;
+const withoutHash = (name: string) => name.replace(HASH_SUFFIX, "");
+
+/**
+ * The MCP tool a name from the model refers to. Models sometimes leave out the hash suffix of
+ * qualifyMcpToolName ("mcp_brave_brave_web_search"), mostly far from the tool list: when only
+ * one tool has that name before the suffix, it is the one meant.
+ */
+export function resolveMcpToolName(name: string, tools: McpTool[]): McpTool | undefined {
+  const exact = tools.find((t) => t.name === name);
+  if (exact) return exact;
+  const matches = tools.filter((t) => withoutHash(t.name) === name);
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+function editDistance(a: string, b: string): number {
+  let previous = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j++) {
+      current[j] = Math.min(previous[j]! + 1, current[j - 1]! + 1, previous[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    previous = current;
+  }
+  return previous[b.length]!;
+}
+
+const MAX_SUGGESTIONS = 3;
+
+/** The answer to a call of an unknown tool: the right names, so the next call gets it right. */
+export function toolNotFoundMessage(name: string, names: string[]): string {
+  const ambiguous = names.filter((n) => withoutHash(n) === name);
+  if (ambiguous.length > 1) {
+    return `Ferramenta não encontrada: ${name}. Mais de uma ferramenta tem esse nome; chame uma destas, com o nome exato: ${ambiguous.join(", ")}.`;
+  }
+  // The bare name of an MCP tool ("brave_web_search") is the end of its qualified name.
+  const distance = (n: string) => (withoutHash(n).endsWith(`_${name}`) ? 0 : editDistance(name, withoutHash(n)));
+  const similar = names
+    .map((n) => ({ n, d: distance(n) }))
+    .filter(({ d }) => d <= Math.max(2, Math.floor(name.length / 4)))
+    .sort((a, b) => a.d - b.d)
+    .slice(0, MAX_SUGGESTIONS)
+    .map(({ n }) => n);
+  return similar.length
+    ? `Ferramenta não encontrada: ${name}. Nomes parecidos: ${similar.join(", ")}. Chame com o nome exato, como aparece na lista de ferramentas.`
+    : `Ferramenta não encontrada: ${name}. Use um dos nomes da lista de ferramentas.`;
 }
 
 export function qualifyMcpToolName(server: string, tool: string): string {

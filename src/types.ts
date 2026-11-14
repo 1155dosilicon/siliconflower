@@ -20,6 +20,8 @@ export interface AppConfig {
   system?: string;
   /** Tokens one request may use (system prompt, tool schemas and history). Default: 90000. */
   contextTokens?: number;
+  /** Tool steps of one turn before asking the user whether to go on; 0 never asks. Default: 150. */
+  askAfterSteps?: number;
   mcpServers?: Record<string, McpServerConfig>;
   hooks?: {
     preTool?: string;
@@ -77,6 +79,11 @@ export type StreamEvent =
   | { type: "tool_result"; id: string; name: string; result: string; isError: boolean }
   | { type: "usage"; totalTokens?: number; promptTokens?: number; completionTokens?: number }
   | { type: "error"; message: string }
+  /**
+   * The step is being requested again (the connection dropped, or the response was only thinking):
+   * drop the text and thinking received since the last `step`. `message` says why, for the status.
+   */
+  | { type: "retry"; message: string }
   /**
    * A finished tool step: the assistant message with its calls, a result for each call and the
    * media attachment, if any. Always complete, so it can be kept even if the turn fails later.

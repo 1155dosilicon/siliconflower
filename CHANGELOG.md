@@ -6,6 +6,16 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Added
+- `askAfterSteps` no `config.json` (padrão 150, `0` desliga): a cada tantos passos de ferramentas numa mesma resposta, a interface pergunta se continua, em vez de deixar um loop rodar até alguém apertar **Parar**; subagentes param nesse ponto (`src/llm.ts`, `src/session.ts`, `src/config.ts`).
+- A 3ª chamada idêntica no turno (mesma ferramenta, mesmos argumentos e mesmo resultado) chega ao modelo com um aviso para mudar de abordagem (`src/llm.ts`).
+
+### Fixed
+- A compactação cortava para 120 caracteres os resultados que o modelo ainda não tinha visto (vários arquivos grandes lidos num único passo): ele relia os mesmos arquivos em loop. Agora esses resultados são os últimos a encolher, dividem o espaço que sobra e terminam com uma nota que diz como ler o resto, e um passo com mais de 20 chamadas não tem os primeiros resultados tratados como antigos (`src/context.ts`).
+- Ferramenta MCP chamada sem o sufixo `_<hash>` (`mcp_brave_brave_web_search`) dava "tool not found": agora resolve quando só uma ferramenta tem esse nome, e um nome desconhecido recebe os nomes certos ou os mais parecidos (`src/mcp.ts`, `src/session.ts`).
+- Uma resposta que gastava todo o limite de saída só pensando terminava com "Resposta cortada… envie continue": agora o passo é repetido uma vez com o pensamento em `low` e, se ainda assim não vier nada, o aviso diz o que houve, sem guardar o raciocínio no histórico (`src/llm.ts`).
+- Uma conexão perdida no meio da resposta (`ECONNRESET`) encerrava o turno com erro: agora o passo é repetido até duas vezes, descartando o texto parcial, e a interface mostra "a conexão caiu; repetindo" (`src/llm.ts`, `src/session.ts`, `src/services/subagent.ts`).
+
 ## [0.13.0] - 2026-11-13
 
 ### Added

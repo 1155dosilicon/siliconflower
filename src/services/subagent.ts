@@ -220,6 +220,8 @@ async function runSubagentExecution(opts: SubagentOptions, systemPrompt: string,
   const offered = new Set(tools.map((t) => t.name));
 
   let accumulatedContent = "";
+  // Text of the step being received: dropped if the step is requested again ("retry").
+  let stepTextLength = 0;
   let turnMessages: ChatMessage[] = [];
   // Finished tool steps: kept if the run fails, so a follow-up knows what already happened.
   const steps: ChatMessage[] = [];
@@ -261,7 +263,12 @@ async function runSubagentExecution(opts: SubagentOptions, systemPrompt: string,
     for await (const ev of gen as AsyncIterable<StreamEvent>) {
       if (ev.type === "text") {
         accumulatedContent += ev.text;
+        stepTextLength += ev.text.length;
+      } else if (ev.type === "retry") {
+        accumulatedContent = accumulatedContent.slice(0, accumulatedContent.length - stepTextLength);
+        stepTextLength = 0;
       } else if (ev.type === "step") {
+        stepTextLength = 0;
         steps.push(...ev.messages);
       } else if (ev.type === "done") {
         if (ev.content) accumulatedContent = ev.content;

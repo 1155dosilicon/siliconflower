@@ -1,5 +1,7 @@
 import OpenAI from "openai";
+import { createHash } from "node:crypto";
 import { log } from "./logger.js";
+import { askAfterSteps } from "./config.js";
 import { compressHistory, contextBudget, estimateTokens, processToolOutput } from "./context.js";
 import type { AppConfig, ChatMessage, MediaAttachment, McpTool, ReasoningLevel, StreamEvent, ToolResult } from "./types.js";
 import { DEFAULT_REASONING, isExtendedReasoning, isXiaomiMimoEndpoint } from "./reasoning.js";
@@ -12,6 +14,11 @@ export interface ChatOptions {
   reasoning: ReasoningLevel;
   executeTool: (name: string, args: Record<string, unknown>) => Promise<ToolResult>;
   signal?: AbortSignal;
+  /**
+   * Asked every `askAfterSteps` steps of one turn: true goes on. Without it (subagents), the
+   * turn stops there, since nobody could answer.
+   */
+  confirmContinue?: (steps: number) => Promise<boolean>;
 }
 
 export async function* streamChat(opts: ChatOptions): AsyncGenerator<StreamEvent> {
@@ -248,8 +255,76 @@ function throwIfAborted(signal?: AbortSignal): void {
 /** Result of the calls of a step that never ran: every call needs one, or the history is invalid. */
 export const NOT_RUN_AFTER_CANCEL = "Não executada: o usuário cancelou o turno antes desta chamada.";
 
+/** A connection that drops in the middle of a response: the step is requested again this many times. */
+const STREAM_DROP_RETRIES = 2;
+const STREAM_DROP_RETRY_DELAY_MS = 1000;
+const CONNECTION_DROP_CODES = new Set(["ECONNRESET", "ETIMEDOUT", "EPIPE", "ECONNABORTED", "UND_ERR_SOCKET", "ERR_STREAM_PREMATURE_CLOSE"]);
+
+/**
+ * A connection lost while the response was coming (Bun: ECONNRESET, "The socket connection was
+ * closed unexpectedly"; undici: "terminated"). HTTP errors come with a status and are not this.
+ */
+export function isConnectionDrop(err: unknown): boolean {
+  let e = err as { code?: unknown; message?: unknown; status?: unknown; cause?: unknown } | undefined;
+  for (let depth = 0; e && typeof e === "object" && depth < 4; depth++) {
+    if (e.status !== undefined) return false;
+    if (typeof e.code === "string" && CONNECTION_DROP_CODES.has(e.code)) return true;
+    const msg = typeof e.message === "string" ? e.message : "";
+    if (/ECONNRESET|ETIMEDOUT|EPIPE|socket connection was closed|socket hang up|other side closed|^terminated$/i.test(msg)) return true;
+    e = e.cause as typeof e;
+  }
+  return false;
+}
+
+/** Waits `ms`, or less if the turn is cancelled meanwhile. */
+function wait(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    if (signal?.aborted) return done();
+    signal?.addEventListener("abort", done, { once: true });
+  });
+}
+
+/** The same call with the same result this many times in one turn gets a warning in the result. */
+export const REPEATED_CALL_WARNING_AT = 3;
+
+/** JSON with sorted keys: the same arguments in another order are the same call. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(record[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/**
+ * Counts identical calls of a turn and returns the warning to append to the result, if any. A
+ * different result starts the count again: running the tests after each edit, or checking a
+ * background task, is not a loop.
+ */
+function repeatedCallWarning(
+  repeats: Map<string, { digest: string; count: number }>,
+  name: string,
+  args: Record<string, unknown>,
+  result: string
+): string {
+  const key = `${name}\0${canonicalJson(args)}`;
+  const digest = createHash("sha256").update(result).digest("hex");
+  const seen = repeats.get(key);
+  const count = seen?.digest === digest ? seen.count + 1 : 1;
+  repeats.set(key, { digest, count });
+  if (count < REPEATED_CALL_WARNING_AT) return "";
+  return `\n\n[Aviso: é a ${count}ª vez neste turno que você chama ${name} com os mesmos argumentos e recebe o mesmo resultado. Repetir não muda nada: mude de abordagem ou responda ao usuário com o que já tem.]`;
+}
+
 async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
-  const { config, messages, tools, reasoning, executeTool, signal } = opts;
+  const { config, messages, tools, reasoning, executeTool, signal, confirmContinue } = opts;
   const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey });
   const apiTools = buildOpenAITools(tools);
   const isXiaomiMimo = isXiaomiMimoEndpoint(config.baseURL);
@@ -273,13 +348,31 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   const turn: ChatMessage[] = [];
   let finalContent = "";
   let finalThinking = "";
+  const checkpoint = askAfterSteps(config.askAfterSteps);
+  const repeats = new Map<string, { digest: string; count: number }>();
 
   void log("info", `LLM request: model=${config.model}, tools=${apiTools.length}, reasoning=${reasoning}`);
 
   // No step cap: a long task ends when the model answers without tools, on an error or when
   // the turn is cancelled. The history is re-compacted on every step, so it stays in budget.
+  // Every `askAfterSteps` steps the user is asked whether to go on: a loop stops there.
   for (let step = 0; ; step++) {
     throwIfAborted(signal);
+    if (checkpoint && step > 0 && step % checkpoint === 0) {
+      const goOn = confirmContinue ? await confirmContinue(step) : false;
+      throwIfAborted(signal);
+      if (!goOn) {
+        void log("warn", `LLM step ${step}: turno parado no limite de ${checkpoint} passos (askAfterSteps)`);
+        const notice = confirmContinue
+          ? `[Turno pausado a pedido do usuário depois de ${step} passos. Envie uma mensagem para continuar ou mudar o rumo.]`
+          : `[Parado depois de ${step} passos sem uma resposta final.]`;
+        finalContent += (finalContent ? "\n\n" : "") + notice;
+        yield { type: "text", text: notice };
+        turn.push({ role: "assistant", content: notice });
+        yield { type: "done", content: finalContent, reasoning: finalThinking, messages: turn };
+        return;
+      }
+    }
     const buildRequest = () =>
       buildOpenAIMessages(config, compressHistory(pruneMedia(history), historyBudget, { keepToolCallReasoning: isXiaomiMimo }));
     let working = buildRequest();
@@ -290,7 +383,16 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       name: string;
       args: string;
     }[] = [];
-    const argBuffers = new Map<number, { id?: string; name?: string; args: string }>();
+    let argBuffers = new Map<number, { id?: string; name?: string; args: string }>();
+    let finishReason: string | null = null;
+    let toolCallChunkCount = 0;
+    // What earlier steps wrote: a step requested again starts from here.
+    const contentBefore = finalContent;
+    const thinkingBefore = finalThinking;
+    let drops = 0;
+    // The step spent the whole output limit thinking: it is requested again with less thinking.
+    let lowered = false;
+    const canLowerReasoning = () => (isXiaomiMimo ? reasoning !== "none" : Boolean(supportsEffort && effort && effort !== "low"));
 
     let requestController: AbortController | undefined;
     let detachRequestAbort = () => {};
@@ -301,6 +403,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       const onExternalAbort = () => requestController?.abort();
       signal?.addEventListener("abort", onExternalAbort, { once: true });
       detachRequestAbort = () => signal?.removeEventListener("abort", onExternalAbort);
+      const sentEffort = effort && lowered ? "low" : effort;
       return client.chat.completions.create(
         {
           model: config.model,
@@ -308,138 +411,156 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
           stream: true,
           [tokenParam]: outputLimit,
           stream_options: { include_usage: true },
-          ...(withEffort && effort ? { reasoning_effort: effort } : {}),
-          ...(isXiaomiMimo ? { thinking: { type: reasoning === "none" ? "disabled" : "enabled" } } : {}),
+          ...(withEffort && sentEffort ? { reasoning_effort: sentEffort } : {}),
+          ...(isXiaomiMimo ? { thinking: { type: reasoning === "none" || lowered ? "disabled" : "enabled" } } : {}),
           ...(apiTools.length ? { tools: apiTools, tool_choice: "auto" } : {}),
         } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
         { signal: requestController.signal }
       );
     };
 
-    let stream: Awaited<ReturnType<typeof client.chat.completions.create>> | undefined;
-    void log("info", `LLM step ${step}: conectando (timeout=${STREAM_CONNECT_TIMEOUT_MS / 1000}s)`);
-    // Providers differ in which optional parameters they accept. Each rejected parameter
-    // is adjusted at most once and remembered for the following steps.
-    let retriedGeneric = false;
-    for (let attempt = 0; !stream; attempt++) {
+    // One response for this step. Tools only run after it ends, so requesting it again (lost
+    // connection, only thinking) runs nothing twice.
+    for (;;) {
+      content = "";
+      thinking = "";
+      argBuffers = new Map();
+      finishReason = null;
+      toolCallChunkCount = 0;
+      finalContent = contentBefore;
+      finalThinking = thinkingBefore;
+
+      let stream: Awaited<ReturnType<typeof client.chat.completions.create>> | undefined;
+      void log("info", `LLM step ${step}: conectando (timeout=${STREAM_CONNECT_TIMEOUT_MS / 1000}s)`);
+      // Providers differ in which optional parameters they accept. Each rejected parameter
+      // is adjusted at most once and remembered for the following steps.
+      let retriedGeneric = false;
+      for (let attempt = 0; !stream; attempt++) {
+        try {
+          stream = await withConnectTimeout(makeRequest(supportsEffort), signal, () => requestController?.abort());
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!retriedGeneric && isGenericRejection(err)) {
+            // Refused before any output, so repeating it costs nothing and runs no tool.
+            retriedGeneric = true;
+            void log("warn", `Provedor recusou o pedido sem explicar; repetindo uma vez: ${describeApiError(err)}`);
+            await new Promise((resolve) => setTimeout(resolve, GENERIC_RETRY_DELAY_MS));
+            throwIfAborted(signal);
+          } else if (outputLimit > FALLBACK_OUTPUT_TOKENS && isOutputLimitRejection(err)) {
+            // Before the checks below: they would blame the media or the parameter name.
+            outputLimit = FALLBACK_OUTPUT_TOKENS;
+            void log("warn", `Provedor recusou o limite de saída; repetindo com ${outputLimit}: ${describeApiError(err)}`);
+          } else if (isPayloadRejection(err) && hasMediaData(history)) {
+            // Otherwise the file stays in the history and blocks the rest of the conversation.
+            void log("warn", `Provedor recusou um pedido com mídia; repetindo sem ela: ${describeApiError(err)}`);
+            rejectMedia(history);
+            working = buildRequest();
+          } else if (attempt < 3 && supportsEffort && effort && isExtendedReasoning(effort) && /reasoning/i.test(msg)) {
+            // Most providers stop at "high": keep thinking on instead of dropping the parameter.
+            void log("warn", `Provedor rejeitou reasoning_effort=${effort}; repetindo com ${DEFAULT_REASONING}`);
+            effort = DEFAULT_REASONING;
+          } else if (attempt < 3 && supportsEffort && effort && /reasoning/i.test(msg)) {
+            supportsEffort = false;
+            void log("warn", "Provedor rejeitou reasoning_effort; repetindo sem ele");
+          } else if (attempt < 3 && tokenParam === "max_tokens" && /max_tokens/.test(msg) && /max_completion_tokens/.test(msg)) {
+            tokenParam = "max_completion_tokens";
+            void log("warn", "Provedor exige max_completion_tokens; repetindo");
+          } else if (attempt < 3 && tokenParam === "max_completion_tokens" && /max_completion_tokens/.test(msg) && /unsupported|unknown|unrecognized|not supported|invalid/i.test(msg)) {
+            tokenParam = "max_tokens";
+            void log("warn", "Provedor não aceita max_completion_tokens; repetindo com max_tokens");
+          } else {
+            detachRequestAbort();
+            throw err;
+          }
+        }
+      }
+      void log("info", `LLM step ${step}: stream conectado`);
+
+      let stepHasText = false;
+      let stepHasThinking = false;
       try {
-        stream = await withConnectTimeout(makeRequest(supportsEffort), signal, () => requestController?.abort());
+        const chunks = withIdleTimeout(
+          stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>,
+          signal,
+          () => requestController?.abort()
+        );
+        for await (const chunk of chunks) {
+          if (chunk.usage) {
+            yield {
+              type: "usage",
+              totalTokens: chunk.usage.total_tokens,
+              promptTokens: chunk.usage.prompt_tokens,
+              completionTokens: chunk.usage.completion_tokens,
+            };
+          }
+          const choice = chunk.choices?.[0];
+          if (!choice) continue;
+          if (choice.finish_reason) finishReason = choice.finish_reason;
+          const delta = choice.delta as
+            | (OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta & {
+                reasoning_content?: string;
+                reasoning?: string;
+              })
+            | undefined;
+          if (!delta) continue;
+          const reasoningText = delta.reasoning_content || delta.reasoning;
+          if (reasoningText) {
+            if (!stepHasThinking && finalThinking && !finalThinking.endsWith("\n") && !reasoningText.startsWith("\n")) {
+              const sep = "\n\n";
+              finalThinking += sep;
+              yield { type: "thinking", text: sep };
+            }
+            stepHasThinking = true;
+            thinking += reasoningText;
+            yield { type: "thinking", text: reasoningText };
+          }
+          if (delta.content) {
+            if (!stepHasText && finalContent && !finalContent.endsWith("\n") && !delta.content.startsWith("\n")) {
+              const sep = "\n\n";
+              finalContent += sep;
+              yield { type: "text", text: sep };
+            }
+            stepHasText = true;
+            content += delta.content;
+            yield { type: "text", text: delta.content };
+          }
+          if (delta.tool_calls) {
+            toolCallChunkCount += delta.tool_calls.length;
+            for (const tc of delta.tool_calls) {
+              const idx = tc.index ?? 0;
+              const buf = argBuffers.get(idx) ?? { args: "" };
+              if (tc.id) buf.id = tc.id;
+              if (tc.function?.name) buf.name = tc.function.name;
+              if (tc.function?.arguments) buf.args += tc.function.arguments;
+              argBuffers.set(idx, buf);
+            }
+          }
+        }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (!retriedGeneric && isGenericRejection(err)) {
-          // Refused before any output, so repeating it costs nothing and runs no tool.
-          retriedGeneric = true;
-          void log("warn", `Provedor recusou o pedido sem explicar; repetindo uma vez: ${describeApiError(err)}`);
-          await new Promise((resolve) => setTimeout(resolve, GENERIC_RETRY_DELAY_MS));
-          throwIfAborted(signal);
-        } else if (outputLimit > FALLBACK_OUTPUT_TOKENS && isOutputLimitRejection(err)) {
-          // Before the checks below: they would blame the media or the parameter name.
-          outputLimit = FALLBACK_OUTPUT_TOKENS;
-          void log("warn", `Provedor recusou o limite de saída; repetindo com ${outputLimit}: ${describeApiError(err)}`);
-        } else if (isPayloadRejection(err) && hasMediaData(history)) {
-          // Otherwise the file stays in the history and blocks the rest of the conversation.
-          void log("warn", `Provedor recusou um pedido com mídia; repetindo sem ela: ${describeApiError(err)}`);
-          rejectMedia(history);
-          working = buildRequest();
-        } else if (attempt < 3 && supportsEffort && effort && isExtendedReasoning(effort) && /reasoning/i.test(msg)) {
-          // Most providers stop at "high": keep thinking on instead of dropping the parameter.
-          void log("warn", `Provedor rejeitou reasoning_effort=${effort}; repetindo com ${DEFAULT_REASONING}`);
-          effort = DEFAULT_REASONING;
-        } else if (attempt < 3 && supportsEffort && effort && /reasoning/i.test(msg)) {
-          supportsEffort = false;
-          void log("warn", "Provedor rejeitou reasoning_effort; repetindo sem ele");
-        } else if (attempt < 3 && tokenParam === "max_tokens" && /max_tokens/.test(msg) && /max_completion_tokens/.test(msg)) {
-          tokenParam = "max_completion_tokens";
-          void log("warn", "Provedor exige max_completion_tokens; repetindo");
-        } else if (attempt < 3 && tokenParam === "max_completion_tokens" && /max_completion_tokens/.test(msg) && /unsupported|unknown|unrecognized|not supported|invalid/i.test(msg)) {
-          tokenParam = "max_tokens";
-          void log("warn", "Provedor não aceita max_completion_tokens; repetindo com max_tokens");
-        } else {
-          detachRequestAbort();
-          throw err;
-        }
+        if (signal?.aborted || drops >= STREAM_DROP_RETRIES || !isConnectionDrop(err)) throw err;
+        drops++;
+        void log("warn", `LLM step ${step}: conexão caiu no meio da resposta; repetindo o passo (${drops}/${STREAM_DROP_RETRIES}): ${describeApiError(err)}`);
+        yield { type: "retry", message: `⚠️ a conexão caiu; repetindo (${drops}/${STREAM_DROP_RETRIES})...` };
+        await wait(STREAM_DROP_RETRY_DELAY_MS * drops, signal);
+        throwIfAborted(signal);
+        continue;
+      } finally {
+        detachRequestAbort();
       }
-    }
-    void log("info", `LLM step ${step}: stream conectado`);
+      // The SDK ends the iteration silently on abort: without this, a cancelled response would
+      // count as finished and the tool calls received so far would still run.
+      throwIfAborted(signal);
 
-    let finishReason: string | null = null;
-    let stepHasText = false;
-    let stepHasThinking = false;
-    let toolCallChunkCount = 0;
-
-    try {
-      const chunks = withIdleTimeout(
-        stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>,
-        signal,
-        () => requestController?.abort()
-      );
-      for await (const chunk of chunks) {
-      if (chunk.usage) {
-        yield {
-          type: "usage",
-          totalTokens: chunk.usage.total_tokens,
-          promptTokens: chunk.usage.prompt_tokens,
-          completionTokens: chunk.usage.completion_tokens,
-        };
+      // Only thinking, cut at the output limit: there is no answer to continue, and "continue"
+      // would think the same again.
+      if (finishReason === "length" && !content && argBuffers.size === 0 && thinking && !lowered && canLowerReasoning()) {
+        lowered = true;
+        void log("warn", `LLM step ${step}: limite de saída gasto só com raciocínio (${thinking.length} chars); repetindo com menos raciocínio`);
+        yield { type: "retry", message: "🧠 o modelo gastou o limite de saída pensando; repetindo com menos pensamento..." };
+        continue;
       }
-      const choice = chunk.choices?.[0];
-      if (!choice) continue;
-      if (choice.finish_reason) finishReason = choice.finish_reason;
-      const delta = choice.delta as
-        | (OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta & {
-            reasoning_content?: string;
-            reasoning?: string;
-          })
-        | undefined;
-      if (!delta) continue;
-      if (delta.reasoning_content) {
-        if (!stepHasThinking && finalThinking && !finalThinking.endsWith("\n") && !delta.reasoning_content.startsWith("\n")) {
-          const sep = "\n\n";
-          finalThinking += sep;
-          yield { type: "thinking", text: sep };
-        }
-        stepHasThinking = true;
-        thinking += delta.reasoning_content;
-        yield { type: "thinking", text: delta.reasoning_content };
-      } else if ((delta as { reasoning?: string }).reasoning) {
-        const r = (delta as { reasoning?: string }).reasoning!;
-        if (!stepHasThinking && finalThinking && !finalThinking.endsWith("\n") && !r.startsWith("\n")) {
-          const sep = "\n\n";
-          finalThinking += sep;
-          yield { type: "thinking", text: sep };
-        }
-        stepHasThinking = true;
-        thinking += r;
-        yield { type: "thinking", text: r };
-      }
-      if (delta.content) {
-        if (!stepHasText && finalContent && !finalContent.endsWith("\n") && !delta.content.startsWith("\n")) {
-          const sep = "\n\n";
-          finalContent += sep;
-          yield { type: "text", text: sep };
-        }
-        stepHasText = true;
-        content += delta.content;
-        yield { type: "text", text: delta.content };
-      }
-      if (delta.tool_calls) {
-        toolCallChunkCount += delta.tool_calls.length;
-        for (const tc of delta.tool_calls) {
-          const idx = tc.index ?? 0;
-          const buf = argBuffers.get(idx) ?? { args: "" };
-          if (tc.id) buf.id = tc.id;
-          if (tc.function?.name) buf.name = tc.function.name;
-          if (tc.function?.arguments) buf.args += tc.function.arguments;
-          argBuffers.set(idx, buf);
-        }
-      }
-      }
-    } finally {
-      detachRequestAbort();
+      break;
     }
-    // The SDK ends the iteration silently on abort: without this, a cancelled response would
-    // count as finished and the tool calls received so far would still run.
-    throwIfAborted(signal);
 
     void log("info", `LLM step ${step}: finish_reason=${finishReason}, argBuffers=${argBuffers.size}, toolCallChunks=${toolCallChunkCount}`);
 
@@ -456,6 +577,15 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       if (finishReason === "tool_calls") {
         // O modelo sinalizou tool_calls mas nenhum foi parseado — log para diagnóstico
         void log("warn", `LLM step ${step}: finish_reason=tool_calls mas 0 calls parseados. argBuffers raw: ${JSON.stringify(Object.fromEntries(argBuffers))}`);
+      }
+      if (finishReason === "length" && !content && thinking) {
+        // The thinking stays out of the history: it led to nothing.
+        const notice = `[O modelo gastou todo o limite de ${outputLimit} tokens de saída pensando e não escreveu nada${lowered ? ", mesmo com menos pensamento" : ""}. Reduza o nível de pensamento ou divida o pedido em partes menores.]`;
+        finalContent += (finalContent ? "\n\n" : "") + notice;
+        yield { type: "text", text: notice };
+        turn.push({ role: "assistant", content: notice });
+        yield { type: "done", content: finalContent, reasoning: finalThinking, messages: turn };
+        return;
       }
       if (content || thinking) {
         turn.push({ role: "assistant", content, ...(thinking ? { reasoning: thinking } : {}) });
@@ -526,6 +656,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
           result = String(err);
           isError = true;
         }
+        result += repeatedCallWarning(repeats, call.name, parsed, result);
       }
       void log(isError ? "warn" : "info", `LLM step ${step}: <- ${call.name} isError=${isError} result=${result.slice(0, 200)}`);
       yield { type: "tool_result", id: call.id, name: call.name, result, isError };

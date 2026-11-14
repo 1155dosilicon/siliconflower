@@ -5,17 +5,18 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runShell, decodeClixml } from "../src/shell.js";
 import { htmlToMarkdown, isPrivateAddress, webFetch } from "../src/services/web.js";
-import { buildOpenAIMessages, isOfficialOpenAIEndpoint, NOT_RUN_AFTER_CANCEL, streamChat } from "../src/llm.js";
+import { buildOpenAIMessages, isConnectionDrop, isOfficialOpenAIEndpoint, NOT_RUN_AFTER_CANCEL, streamChat } from "../src/llm.js";
+import { McpManager, qualifyMcpToolName, resolveMcpToolName, toolNotFoundMessage } from "../src/mcp.js";
 import { AgentSession } from "../src/session.js";
 import { ConversationStore, newRevision } from "../src/services/conversations.js";
-import { normalize } from "../src/config.js";
+import { askAfterSteps, DEFAULT_ASK_AFTER_STEPS, normalize } from "../src/config.js";
 import { createArtifact, readArtifact, listArtifacts, deleteArtifact, getArtifactsDir } from "../src/services/artifact.js";
 import { smartEditFile } from "../src/services/smart-edit.js";
 import { runBuiltin } from "../src/tools.js";
 import { extractSymbols, generateRepoMap } from "../src/services/repomap.js";
 import { GREP_MAX_MATCHES, searchContent } from "../src/grep.js";
 import { getBackgroundTask, killAllBackgroundTasks, startBackgroundCommand } from "../src/services/background-tasks.js";
-import type { AppConfig, ChatMessage } from "../src/types.js";
+import type { AppConfig, ChatMessage, McpTool, StreamEvent } from "../src/types.js";
 
 const tmp = join(tmpdir(), `sf_regressions_${Date.now()}`);
 
@@ -1163,5 +1164,359 @@ describe("two windows saving in the same millisecond", () => {
     await store.save({ id: "c", title: "t", updatedAt: "2026-01-01T00:00:00.000Z", messageCount: 0 }, body);
     expect(await store.stamp("c")).toBe("2026-01-01T00:00:00.000Z");
     expect(await store.save({ id: "c", title: "t", updatedAt: "x", messageCount: 0, rev: "r" }, body, "2026-01-01T00:00:00.000Z")).toBe("c");
+  });
+});
+
+describe("compaction keeps what the model has not seen yet", () => {
+  // Six big read_file results of one step were cut to 120 characters each before the model saw
+  // them: it read the same files again and again until the time ran out.
+  const fileLines = (name: string, lines: number) =>
+    Array.from({ length: lines }, (_, i) => `${i + 1}: ${name} ${"x".repeat(90)}`).join("\n");
+  const readStep = (prefix: string, files: string[], content = (f: string) => fileLines(f, 300)): ChatMessage[] => [
+    {
+      role: "assistant",
+      content: "",
+      toolCalls: files.map((f, i) => ({ id: `${prefix}${i}`, type: "function" as const, function: { name: "read_file", arguments: JSON.stringify({ path: f }) } })),
+    },
+    ...files.map((f, i) => ({ role: "tool" as const, toolCallId: `${prefix}${i}`, toolName: "read_file", content: content(f) })),
+  ];
+
+  test("the results of the step that just ran share the budget and say where to go on", async () => {
+    const { compressHistory, estimateMessagesTokens } = await import("../src/context.js");
+    const request = "Leia as seis partes e diga qual é o fato escondido.";
+    const files = [1, 2, 3, 4, 5, 6].map((n) => `parte${n}.md`);
+    const out = compressHistory([{ role: "user", content: request }, ...readStep("old", ["antigo.md"]), ...readStep("c", files)], 20_000);
+    expect(estimateMessagesTokens(out)).toBeLessThanOrEqual(20_000);
+    expect(out[0]!.content).toBe(request);
+    // The earlier step was already seen: it goes first.
+    expect(out[2]!.content).toContain("já visto");
+    for (const message of out.slice(-6)) {
+      expect(message.content.length).toBeGreaterThan(5_000);
+      expect(message.content).toMatch(/só couberam as linhas 1–\d+ das 1–300 lidas/);
+      // Whole lines, and the offset is the line right after the last one shown.
+      const lines = message.content.split("\n");
+      const lastShown = Number(lines.at(-2)!.split(":")[0]);
+      expect(lines.at(-2)).toMatch(/^\d+: parte\d\.md x{90}$/);
+      expect(message.content).toContain(`offset=${lastShown + 1}`);
+    }
+  });
+
+  test("a step with more calls than the recent window keeps every result", async () => {
+    const { compressHistory } = await import("../src/context.js");
+    const files = Array.from({ length: 25 }, (_, i) => `f${i}.md`);
+    const out = compressHistory(
+      [{ role: "user", content: "leia tudo" }, ...readStep("old", ["grande.md"], () => "y".repeat(200_000)), ...readStep("c", files, () => "z".repeat(1_000))],
+      30_000
+    );
+    expect(out[2]!.content.length).toBeLessThan(1_000);
+    expect(out.slice(-25).every((m) => m.content === "z".repeat(1_000))).toBe(true);
+  });
+});
+
+describe("an MCP tool called without its hash suffix", () => {
+  // Far from the tool list, models drop the suffix: "mcp_brave_brave_web_search" got "tool not found".
+  const tool = (server: string, name: string): McpTool => ({ server, name: qualifyMcpToolName(server, name), originalName: name, inputSchema: {} });
+
+  test("resolves when only one tool has that name", () => {
+    const search = tool("brave", "brave_web_search");
+    const tools = [search, tool("brave", "brave_local_search")];
+    expect(resolveMcpToolName(search.name, tools)).toBe(search);
+    expect(resolveMcpToolName("mcp_brave_brave_web_search", tools)).toBe(search);
+    expect(resolveMcpToolName("mcp_brave_brave_web", tools)).toBeUndefined();
+  });
+
+  test("an ambiguous name is not guessed: the answer lists the right names", () => {
+    // Both servers become "meu_servidor" in the qualified name; only the hash differs.
+    const a = tool("meu servidor", "buscar");
+    const b = tool("meu_servidor", "buscar");
+    expect(resolveMcpToolName("mcp_meu_servidor_buscar", [a, b])).toBeUndefined();
+    const message = toolNotFoundMessage("mcp_meu_servidor_buscar", [a.name, b.name]);
+    expect(message).toContain(a.name);
+    expect(message).toContain(b.name);
+  });
+
+  test("an unknown name gets the closest ones", () => {
+    const search = tool("brave", "brave_web_search");
+    const names = ["read_file", "write_file", search.name];
+    expect(toolNotFoundMessage("brave_web_search", names)).toContain(search.name);
+    expect(toolNotFoundMessage("read_files", names)).toContain("read_file");
+    expect(toolNotFoundMessage("algo_sem_relacao", names)).not.toContain("parecidos");
+  });
+
+  test("the session runs the tool the model named without the suffix", async () => {
+    const search = tool("brave", "brave_web_search");
+    const called: string[] = [];
+    const manager = new McpManager();
+    (manager as unknown as { servers: Map<string, unknown> }).servers.set("brave", {
+      name: "brave",
+      config: {},
+      closed: false,
+      tools: [search],
+      transport: { close: async () => {} },
+      client: {
+        callTool: async (params: { name: string }) => {
+          called.push(params.name);
+          return { content: [{ type: "text", text: "resultado da busca" }] };
+        },
+      },
+    });
+    let n = 0;
+    const provider = fakeProvider(() => (++n === 1 ? { tools: [{ name: "mcp_brave_brave_web_search", args: { query: "x" } }] } : { text: "ok" }));
+    try {
+      const session = new AgentSession(provider.config);
+      Object.assign(session, { mcp: manager });
+      await session.send("busque");
+      expect(called).toEqual(["brave_web_search"]);
+      expect(toolResults(provider.requests[1])[0]!.content).toBe("resultado da busca");
+    } finally {
+      provider.stop();
+    }
+  });
+});
+
+describe("a turn that goes in circles", () => {
+  // Nothing stopped a model repeating itself: 140 steps and 5.6 million tokens until the user
+  // pressed "Parar".
+  async function runTurn(provider: ReturnType<typeof fakeProvider>, executeTool: () => Promise<{ result: string; isError: boolean }>, config: Partial<AppConfig> = {}) {
+    const events: StreamEvent[] = [];
+    for await (const ev of streamChat({
+      config: { ...provider.config, ...config },
+      messages: [{ role: "user", content: "tarefa" }],
+      tools: [],
+      reasoning: "none",
+      executeTool,
+    })) {
+      events.push(ev);
+    }
+    return events;
+  }
+  const results = (events: StreamEvent[]) => events.flatMap((e) => (e.type === "tool_result" ? [e.result] : []));
+
+  test("the third identical call with the same result carries a warning", async () => {
+    let n = 0;
+    // The same arguments in another order are the same call.
+    const args = [{ path: "a.md", offset: 1 }, { offset: 1, path: "a.md" }];
+    const provider = fakeProvider(() => (++n <= 4 ? { tools: [{ name: "ler", args: args[n % 2]! }] } : { text: "fim" }));
+    try {
+      const got = results(await runTurn(provider, async () => ({ result: "mesmo conteúdo", isError: false })));
+      expect(got.slice(0, 2)).toEqual(["mesmo conteúdo", "mesmo conteúdo"]);
+      expect(got[2]).toContain("3ª vez");
+      expect(got[3]).toContain("4ª vez");
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("a call whose result changes is not a loop", async () => {
+    let n = 0;
+    let run = 0;
+    const provider = fakeProvider(() => (++n <= 4 ? { tools: [{ name: "testes", args: {} }] } : { text: "fim" }));
+    try {
+      const got = results(await runTurn(provider, async () => ({ result: `falhas: ${4 - ++run}`, isError: false })));
+      expect(got).toHaveLength(4);
+      expect(got.some((r) => r.includes("Aviso"))).toBe(false);
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("every askAfterSteps steps the user decides whether the turn goes on", async () => {
+    let n = 0;
+    const provider = fakeProvider((body) =>
+      body.messages.at(-1)?.content === "e agora?" ? { text: "ok" } : { tools: [{ name: "passo", args: { n: ++n } }] }
+    );
+    try {
+      const session = new AgentSession({ ...provider.config, askAfterSteps: 2 });
+      const turn = session.send("tarefa longa");
+      await until(() => session.getState().question !== null);
+      expect(session.getState().question!.question).toContain("2 passos");
+      expect(session.getState().question!.options).toEqual(["Continuar", "Parar"]);
+      expect(session.answer("1")).toBe(true);
+      await until(() => session.getState().question !== null);
+      expect(session.getState().question!.question).toContain("4 passos");
+      session.answer("Parar");
+      await turn;
+      expect(provider.requests).toHaveLength(4);
+      expect(session.getState().messages.at(-1)?.content).toContain("pausado");
+      // The history stays valid: the next turn starts after an assistant message.
+      await session.send("e agora?");
+      expect(conversation(provider.requests[4]).slice(-2).map((m) => m.role)).toEqual(["assistant", "user"]);
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("without anyone to ask (subagents), the turn stops at the limit", async () => {
+    const provider = fakeProvider(() => ({ tools: [{ name: "passo", args: {} }] }));
+    try {
+      const events = await runTurn(provider, async () => ({ result: `${Math.random()}`, isError: false }), { askAfterSteps: 3 });
+      expect(provider.requests).toHaveLength(3);
+      const done = events.find((e) => e.type === "done") as Extract<StreamEvent, { type: "done" }>;
+      expect(done.content).toContain("Parado depois de 3 passos");
+      expect(done.messages!.at(-1)).toEqual({ role: "assistant", content: expect.stringContaining("Parado") });
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("askAfterSteps of config.json is bounded, optional and 0 turns it off", () => {
+    expect(askAfterSteps(undefined)).toBe(DEFAULT_ASK_AFTER_STEPS);
+    expect(askAfterSteps("abc")).toBe(DEFAULT_ASK_AFTER_STEPS);
+    expect(askAfterSteps(-5)).toBe(0);
+    expect(askAfterSteps(40.7)).toBe(40);
+    expect(normalize({ askAfterSteps: 0 } as Partial<AppConfig>).askAfterSteps).toBe(0);
+    expect("askAfterSteps" in normalize({})).toBe(false);
+  });
+});
+
+/** An OpenAI-compatible provider that answers each request with the next of `responses`. */
+function scriptedProvider(responses: (() => Response)[]) {
+  const bodies: { reasoning_effort?: string }[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      bodies.push((await req.json()) as (typeof bodies)[number]);
+      return (responses[bodies.length - 1] ?? responses.at(-1)!)();
+    },
+  });
+  return { bodies, url: `http://127.0.0.1:${server.port}/v1`, stop: () => server.stop(true) };
+}
+
+const sseChunk = (delta: unknown, finish_reason: string | null = null) =>
+  `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", model: "m", choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+const sseResponse = (chunks: string[]) => () =>
+  new Response(chunks.join("") + "data: [DONE]\n\n", { headers: { "Content-Type": "text/event-stream" } });
+
+async function collect(url: string, reasoning: AppConfig["reasoning"]): Promise<StreamEvent[]> {
+  const events: StreamEvent[] = [];
+  for await (const ev of streamChat({
+    config: { baseURL: url, apiKey: "k", model: "m", reasoning, mcpServers: {} },
+    messages: [{ role: "user", content: "gere o CSV" }],
+    tools: [],
+    reasoning,
+    executeTool: async () => ({ result: "", isError: false }),
+  })) {
+    events.push(ev);
+  }
+  return events;
+}
+const doneOf = (events: StreamEvent[]) => events.find((e) => e.type === "done") as Extract<StreamEvent, { type: "done" }>;
+
+describe("a response that spent the output limit only thinking", () => {
+  // DeepSeek thought for the whole 32k tokens and wrote nothing; the turn said "Resposta
+  // cortada... envie continue", which only made it think the same again.
+  const onlyThinking = sseResponse([sseChunk({ reasoning_content: "pensando ".repeat(50) }), sseChunk({}, "length")]);
+
+  test("is requested again once with less thinking, and nothing is called cut", async () => {
+    const provider = scriptedProvider([onlyThinking, sseResponse([sseChunk({ content: "ok" }, "stop")])]);
+    try {
+      const events = await collect(provider.url, "high");
+      expect(provider.bodies.map((b) => b.reasoning_effort)).toEqual(["high", "low"]);
+      expect(events.some((e) => e.type === "retry")).toBe(true);
+      const done = doneOf(events);
+      expect(done.content).toBe("ok");
+      expect(done.messages).toEqual([{ role: "assistant", content: "ok" }]);
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("if it happens again, says so plainly and keeps the thinking out of the history", async () => {
+    const provider = scriptedProvider([onlyThinking]);
+    try {
+      const done = doneOf(await collect(provider.url, "high"));
+      expect(provider.bodies).toHaveLength(2);
+      expect(done.content).toContain("pensando e não escreveu nada");
+      expect(done.content).not.toContain("Resposta cortada");
+      expect(done.messages).toEqual([{ role: "assistant", content: done.content }]);
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("with thinking already at low or off, there is nothing to lower", async () => {
+    for (const level of ["low", "none"] as const) {
+      const provider = scriptedProvider([onlyThinking]);
+      try {
+        const done = doneOf(await collect(provider.url, level));
+        expect(provider.bodies).toHaveLength(1);
+        expect(done.content).toContain("pensando e não escreveu nada");
+      } finally {
+        provider.stop();
+      }
+    }
+  });
+});
+
+describe("a connection that drops in the middle of the response", () => {
+  // Qwen lost the connection (ECONNRESET) during long answers and the whole turn ended in an error.
+  /** Sends part of the answer and closes the socket on the first `drops` requests. */
+  function flakyProvider(drops: number) {
+    let requests = 0;
+    const answered = new WeakSet<object>();
+    const listener = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        data(socket) {
+          if (answered.has(socket)) return;
+          answered.add(socket);
+          if (++requests <= drops) {
+            const part = sseChunk({ content: "parcial" });
+            socket.write(`HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n${part.length.toString(16)}\r\n${part}\r\n`);
+            setTimeout(() => socket.terminate(), 20);
+          } else {
+            const body = sseChunk({ content: "resposta inteira" }) + sseChunk({}, "stop") + "data: [DONE]\n\n";
+            socket.write(`HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`);
+            socket.end();
+          }
+        },
+      },
+    });
+    return { url: `http://127.0.0.1:${listener.port}/v1`, requests: () => requests, stop: () => listener.stop(true) };
+  }
+
+  test("the step is requested again and the turn ends with a single answer", async () => {
+    const provider = flakyProvider(1);
+    try {
+      const events = await collect(provider.url, "none");
+      expect(provider.requests()).toBe(2);
+      expect(events.some((e) => e.type === "error")).toBe(false);
+      expect(events.filter((e) => e.type === "retry")).toHaveLength(1);
+      expect(doneOf(events).content).toBe("resposta inteira");
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("the session drops the text of the attempt that failed", async () => {
+    const provider = flakyProvider(1);
+    try {
+      const session = new AgentSession({ baseURL: provider.url, apiKey: "k", model: "m", reasoning: "none", mcpServers: {} });
+      await session.send("oi");
+      expect(session.getState().error).toBeNull();
+      expect(session.getState().messages.at(-1)?.content).toBe("resposta inteira");
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("gives up after two retries and shows the error", async () => {
+    const provider = flakyProvider(10);
+    try {
+      const events = await collect(provider.url, "none");
+      expect(provider.requests()).toBe(3);
+      expect(events.find((e) => e.type === "error")).toMatchObject({ message: expect.stringContaining("ECONNRESET") });
+    } finally {
+      provider.stop();
+    }
+  }, 15_000);
+
+  test("only a lost connection counts, never an HTTP error", () => {
+    expect(isConnectionDrop(Object.assign(new TypeError("ECONNRESET: The socket connection was closed unexpectedly."), { code: "ECONNRESET" }))).toBe(true);
+    expect(isConnectionDrop(Object.assign(new TypeError("terminated"), { cause: { code: "UND_ERR_SOCKET" } }))).toBe(true);
+    expect(isConnectionDrop({ status: 500, message: "ECONNRESET upstream" })).toBe(false);
+    expect(isConnectionDrop(new Error("A API parou de enviar dados por 300s"))).toBe(false);
   });
 });

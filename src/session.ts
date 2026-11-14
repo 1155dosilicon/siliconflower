@@ -1,5 +1,5 @@
 import { buildOpenAITools, streamChat } from "./llm.js";
-import { McpManager, type McpServerStatus } from "./mcp.js";
+import { McpManager, toolNotFoundMessage, type McpServerStatus } from "./mcp.js";
 import { builtinToolsAsMcp, isBuiltin, runBuiltin } from "./tools.js";
 import { loadSkills, readSkillContent, SKILL_TOOL, type Skill } from "./skills.js";
 import { buildSystemPrompt, nextMode, type Mode } from "./modes.js";
@@ -561,6 +561,7 @@ export class AgentSession {
     let accThinking = "";
     // Text since the last finished step: what came before is already in `steps`.
     let stepText = "";
+    let stepThinking = "";
     let hadError = false;
     let assistantMsgAdded = false;
     // Finished tool steps, kept even if the turn fails or is cancelled later: otherwise the
@@ -589,6 +590,14 @@ export class AgentSession {
         reasoning: this.state.reasoning,
         signal: controller.signal,
         executeTool: (name, args) => this.executeTool(name, args),
+        confirmContinue: async (count) => {
+          const answer = await this.askUser(
+            `O agente já deu ${count} passos nesta resposta sem terminar. Continuar?`,
+            ["Continuar", "Parar"],
+            controller.signal
+          );
+          return !/^(parar?|pare|n[aã]o|stop)\b/i.test(answer.trim());
+        },
       });
 
       for await (const ev of gen as AsyncIterable<StreamEvent>) {
@@ -598,6 +607,7 @@ export class AgentSession {
         switch (ev.type) {
           case "thinking":
             accThinking += ev.text;
+            stepThinking += ev.text;
             this.patch({ status: "🧠 pensando..." });
             break;
           case "text":
@@ -605,9 +615,18 @@ export class AgentSession {
             stepText += ev.text;
             this.patch({ liveText: accText });
             break;
+          case "retry":
+            // The step is requested again: what it wrote so far goes away.
+            accText = accText.slice(0, accText.length - stepText.length);
+            accThinking = accThinking.slice(0, accThinking.length - stepThinking.length);
+            stepText = "";
+            stepThinking = "";
+            this.patch({ liveText: accText, status: ev.message });
+            break;
           case "step":
             steps.push(...ev.messages);
             stepText = "";
+            stepThinking = "";
             break;
           case "tool_call":
             this.patch({ status: `🔨 ${ev.name}...` });
@@ -714,24 +733,26 @@ export class AgentSession {
         askUser: (q, options, signal) => this.askUser(q, options, signal),
       });
     }
-    if (this.mcp) {
+    // Also a name without the hash suffix, when only one MCP tool has it.
+    const mcpTool = this.mcp?.resolveTool(name);
+    if (this.mcp && mcpTool) {
       // The same preTool/postTool hooks as the native tools (runBuiltin runs those).
       const signal = this.abort?.signal;
       const hooks = await resolveHooks(this.config.hooks);
-      const hookCtx = { toolName: name, toolArgs: args, cwd: process.cwd() };
+      const hookCtx = { toolName: mcpTool.name, toolArgs: args, cwd: process.cwd() };
       if (hooks) {
         await runHook("preTool", hooks, hookCtx, signal);
-        if (signal?.aborted) return { result: `Execução de ${name} cancelada pelo usuário.`, isError: true };
+        if (signal?.aborted) return { result: `Execução de ${mcpTool.name} cancelada pelo usuário.`, isError: true };
       }
       try {
-        return await this.mcp.callTool(name, args, signal);
+        return await this.mcp.callTool(mcpTool.name, args, signal);
       } catch (e) {
         return { result: String(e), isError: true };
       } finally {
         if (hooks) await runHook("postTool", hooks, hookCtx, signal);
       }
     }
-    return { result: `tool not found: ${name}`, isError: true };
+    return { result: toolNotFoundMessage(name, this.allTools().map((t) => t.name)), isError: true };
   }
 
   private askUser(question: string, options: string[] | undefined, signal?: AbortSignal): Promise<string> {
