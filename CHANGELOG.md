@@ -6,6 +6,8 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-14
+
 ### Added
 - `askAfterSteps` no `config.json` (padrão 150, `0` desliga): a cada tantos passos de ferramentas numa mesma resposta, a interface pergunta se continua, em vez de deixar um loop rodar até alguém apertar **Parar**; subagentes param nesse ponto (`src/llm.ts`, `src/session.ts`, `src/config.ts`).
 - A 3ª chamada idêntica no turno (mesma ferramenta, mesmos argumentos e mesmo resultado) chega ao modelo com um aviso para mudar de abordagem (`src/llm.ts`).
