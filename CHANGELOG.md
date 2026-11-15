@@ -6,6 +6,11 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Security
+- As ferramentas de arquivo do modelo não abrem mais o `config.json` da pasta de dados, que guarda a chave de API; um `config.json` de qualquer outra pasta continua acessível (`src/fs-util.ts`).
+- `SILICONFLOWER_API_KEY` não chega mais aos comandos de shell, hooks e servidores MCP, para o modelo não ler a chave com `echo $SILICONFLOWER_API_KEY`; um MCP que precise dela a recebe pelo próprio `env` (`src/shell.ts`, `src/mcp.ts`).
+- O resultado de toda ferramenta chega ao modelo e à interface com a chave de API e as chaves e headers dos servidores MCP trocados por `***`: um `cat ~/.siliconflower/config.json` no shell não entrega mais a chave (`src/config.ts`, `src/llm.ts`).
+
 ## [0.14.0] - 2026-11-14
 
 ### Added

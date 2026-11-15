@@ -156,6 +156,7 @@ Tudo fica em `~/.siliconflower/` (ou em `SILICONFLOWER_DATA_DIR`, se definida):
 ```
 
 - **Variáveis de ambiente:** `SILICONFLOWER_API_KEY`, `SILICONFLOWER_BASE_URL` e `SILICONFLOWER_MODEL` substituem os campos do `config.json` sem serem gravadas nele.
+- **Chaves longe do modelo:** a chave de API e as chaves de MCP aparecem como `***` em tudo que as ferramentas devolvem ao modelo, até num `cat` do `config.json`. O que isso cobre e o que não cobre está no [SECURITY.md](SECURITY.md).
 - **Contexto:** `contextTokens` é quanto cada pedido pode usar (prompt, ferramentas e histórico); acima disso o histórico antigo é compactado. O padrão é 90 mil; aumente em modelos com janela maior (de 8 mil a 2 milhões). Os resultados que o modelo ainda não viu são os últimos a encolher: se não couberem inteiros, cada um mostra o começo e diz como ler o resto.
 - **Passos por resposta:** não há limite, mas a cada `askAfterSteps` passos de ferramentas numa mesma resposta (padrão 150) a interface pergunta se deve continuar. `0` desliga a pergunta. Subagentes, que não têm a quem perguntar, param nesse ponto.
 - **MCP:** um servidor sobe por stdio (`command`) ou é acessado por HTTP (`url`, com `headers` opcionais). As ferramentas aparecem para o modelo como `mcp_<servidor>_<ferramenta>_<hash>`; se ele esquecer o `_<hash>` e só uma ferramenta tiver aquele nome, ela é usada mesmo assim. Um servidor que caiu é reconectado na chamada seguinte.

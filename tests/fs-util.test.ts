@@ -69,4 +69,13 @@ describe("fs-util", () => {
       expect(isPathBlocked(path)).toBe(false);
     }
   });
+
+  test("isPathBlocked covers only the global config.json, not other config.json files", () => {
+    const dir = getGlobalDataDir();
+    expect(isPathBlocked(join(dir, "config.json"))).toBe(true);
+    expect(isPathBlocked(join(dir, "config.json.4321.tmp"))).toBe(true);
+    expect(isPathBlocked(join(dir, "config.jsonx"))).toBe(false);
+    expect(isPathBlocked(join(dir, "workspaces", "config.json"))).toBe(false);
+    expect(isPathBlocked(join(tmpdir(), "projeto", "config.json"))).toBe(false);
+  });
 });

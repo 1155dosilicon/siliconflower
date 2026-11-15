@@ -17,7 +17,7 @@ Depois de configurado, o modelo pode usar ferramentas que:
 ## Proteções embutidas
 
 - **`delete_path`** exige `confirm: true` em qualquer exclusão. Raízes de disco, a pasta do usuário, o diretório atual e as pastas acima deles não podem ser removidos por essa ferramenta.
-- **Caminhos sensíveis** (`C:\Windows\System32`, `SysWOW64`, `/etc`, `/root`, `/boot`, `.ssh`, `.aws`, inclusive via junction ou link simbólico) são bloqueados no caminho passado às ferramentas de arquivo, busca e grep, e as buscas recursivas (`grep_content`, `search_files`, `repo_map`, `find_symbol`) não entram neles a partir de uma pasta acima.
+- **Caminhos sensíveis** (`C:\Windows\System32`, `SysWOW64`, `/etc`, `/root`, `/boot`, `.ssh`, `.aws` e o `config.json` da pasta de dados, com a chave de API, inclusive via junction ou link simbólico) são bloqueados no caminho passado às ferramentas de arquivo, busca e grep, e as buscas recursivas (`grep_content`, `search_files`, `repo_map`, `find_symbol`) não entram neles a partir de uma pasta acima.
   - Nas buscas recursivas, `grep_content` sempre pula pastas ocultas.
   - `search_files` pula pastas ocultas, a menos que receba `includeHidden: true`; nesse caso pode **listar nomes** dentro delas (menos em `.ssh` e `.aws`), mas a leitura continua bloqueada.
 - **`web_fetch`** bloqueia:
@@ -34,9 +34,14 @@ Depois de configurado, o modelo pode usar ferramentas que:
 - **Modos `programação` e `sistema`** só mudam o foco do prompt. Nenhum dos dois limita privilégios.
 - **Regras do prompt de sistema** pedem ao modelo que trate conteúdo de arquivos, web e ferramentas como dado, não como instrução, e que confirme ações destrutivas. São orientações ao modelo, não barreiras: uma injeção de prompt ainda pode ter sucesso.
 - **Subagentes `research` e `plan`** seguem a allowlist do modo `plano`, imposta no código. Os demais papéis têm as mesmas ferramentas nativas do agente principal, exceto `run_task`, `send_subagent_message` e `todowrite`, e nenhum subagente executa uma ferramenta que não lhe foi oferecida.
-- **`config.json`**, que guarda a chave de API, é gravado com permissão `0600` em Linux/Unix, e um arquivo antigo mais aberto é corrigido ao ser lido. Um arquivo somente leitura (ex.: na store do Nix) continua como está, e com ele a permissão que tiver.
+- **`config.json`**, que guarda a chave de API, é gravado com permissão `0600` em Linux/Unix, e um arquivo antigo mais aberto é corrigido ao ser lido. Um arquivo somente leitura (ex.: na store do Nix) continua como está, e com ele a permissão que tiver. Além disso, a chave fica longe do modelo de três jeitos:
+  - as ferramentas de arquivo não abrem esse arquivo (só ele: um `config.json` de outra pasta continua acessível);
+  - `SILICONFLOWER_API_KEY` é tirada do ambiente dos comandos de shell, hooks e servidores MCP (`withoutSecrets` em `src/shell.ts`), para um `echo` não mostrar a chave;
+  - como um comando de shell (`cat`) ainda abre o arquivo, o resultado de toda ferramenta, inclusive MCP e subagentes, passa por `redactKnownSecrets` antes de chegar ao modelo, à interface e às conversas salvas. Viram `***` a chave de API (a do `config.json` e a de `SILICONFLOWER_API_KEY`), os valores de `env` de MCP com nome de segredo (`KEY`, `TOKEN`, `SECRET`, `PASS`, `AUTH`...) e os `headers` de MCP, desde que tenham 8 caracteres ou mais.
+
+  **Limitação:** só a chave inteira é trocada. Um comando feito para mostrar um pedaço dela (começo e fim) ou disfarçá-la (invertida, em base64) passa, porque o agente roda com a sua conta. É uma barreira contra vazamento por acidente, não contra um modelo decidido a ler a chave.
 - **`read_media`** envia o conteúdo do arquivo ao provedor configurado.
-- **`execute_command`** é, por design, um shell arbitrário. As proteções das ferramentas de arquivo **não** se aplicam a comandos de shell.
+- **`execute_command`** é, por design, um shell arbitrário. Os bloqueios de caminho das ferramentas de arquivo **não** se aplicam a comandos de shell; só a troca das chaves por `***` vale para eles também.
 
 ## Interface gráfica (`siliconflower gui`)
 

@@ -101,6 +101,23 @@ export function killProcessTree(child: ChildProcess): Promise<void> {
   });
 }
 
+/** Environment variables that hold secrets of siliconflower itself: never passed to child processes. */
+export const SECRET_ENV_NAMES = ["SILICONFLOWER_API_KEY"] as const;
+
+/**
+ * Copy of `env` without siliconflower's own secrets, so a command run by the model (or a hook,
+ * or an MCP server) cannot print the API key with `echo $SILICONFLOWER_API_KEY`. Case-insensitive
+ * because Windows environment names are.
+ */
+export function withoutSecrets(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const secret = new Set<string>(SECRET_ENV_NAMES.map((n) => n.toUpperCase()));
+  const out: NodeJS.ProcessEnv = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (!secret.has(k.toUpperCase())) out[k] = v;
+  }
+  return out;
+}
+
 export interface ShellOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -141,13 +158,13 @@ export function startShell(
   const child = win
     ? spawn("powershell.exe", powershellArgs(command), {
         cwd: opts.cwd,
-        env: opts.env ?? process.env,
+        env: withoutSecrets(opts.env ?? process.env),
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       })
     : spawn(getDefaultShell(), unixShellArgs(command), {
         cwd: opts.cwd,
-        env: opts.env ?? process.env,
+        env: withoutSecrets(opts.env ?? process.env),
         // New process group so killProcessTree can signal every descendant.
         detached: true,
         stdio: ["ignore", "pipe", "pipe"],

@@ -1,10 +1,12 @@
 import { mkdir } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
 import { join, basename, resolve } from "node:path";
 import { homedir } from "node:os";
 import { resolveWorkspaceRoot } from "./project.js";
+import { isWindows } from "./platform.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -44,7 +46,40 @@ export function isPathBlocked(p: string): boolean {
   }
   if (normalized.includes("/.ssh/") || normalized.endsWith("/.ssh")) return true;
   if (normalized.includes("/.aws/") || normalized.endsWith("/.aws")) return true;
+  return isGlobalConfigFile(p);
+}
+
+/**
+ * The global config.json (it holds the API key) and the temporary copies written while saving
+ * it (`config.json.<pid>.tmp`). Only this exact file: other config.json files stay accessible.
+ * The program itself (config.ts, doctor.ts) reads it directly, without this check.
+ */
+function isGlobalConfigFile(p: string): boolean {
+  const fold = (x: string) => (isWindows() ? x.toLowerCase() : x).replace(/\\/g, "/");
+  const target = fold(resolve(p));
+  for (const dir of globalDataDirForms()) {
+    const config = `${fold(dir).replace(/\/$/, "")}/config.json`;
+    if (target === config || target.startsWith(`${config}.`)) return true;
+  }
   return false;
+}
+
+let dirFormsCache: { dir: string; forms: string[] } | undefined;
+
+/** The global data dir as configured and with links resolved (e.g. /tmp -> /private/tmp). */
+function globalDataDirForms(): string[] {
+  const dir = getGlobalDataDir();
+  if (dirFormsCache?.dir !== dir) {
+    const forms = [dir];
+    try {
+      const real = realpathSync(dir);
+      if (real !== dir) forms.push(real);
+    } catch {
+      /* the folder may not exist yet */
+    }
+    dirFormsCache = { dir, forms };
+  }
+  return dirFormsCache.forms;
 }
 
 /**

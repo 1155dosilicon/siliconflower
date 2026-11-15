@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import type { McpServerConfig, McpTool } from "./types.js";
 import { APP_VERSION } from "./version.js";
 import { log } from "./logger.js";
+import { withoutSecrets } from "./shell.js";
 
 interface ConnectedServer {
   name: string;
@@ -96,7 +97,8 @@ export class McpManager {
     if (typeof cfg.command !== "string" || !cfg.command.trim()) {
       throw new Error(`o servidor MCP "${name}" precisa de "command" (stdio) ou "url" (HTTP)`);
     }
-    const rawEnv = { ...process.env, ...(cfg.env ?? {}) };
+    // The API key stays out of the server unless its own "env" sets it explicitly.
+    const rawEnv = { ...withoutSecrets(process.env), ...(cfg.env ?? {}) };
     const cleanEnv: Record<string, string> = {};
     for (const [k, v] of Object.entries(rawEnv)) {
       if (v !== undefined && v !== null) {

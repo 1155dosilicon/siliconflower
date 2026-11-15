@@ -31,6 +31,8 @@ Esta lista é tudo o que **deve** ser diferente entre os sistemas. Fora daqui, o
 | Pasta de dados no diagnóstico (botão 🩺, `siliconflower doctor`) | só confere se dá para gravar nela | também avisa quando outros usuários podem ler a pasta (as conversas ficam nela em texto puro); a correção automática aplica `chmod 700` | `src/doctor.ts` (`checkDataDir`) |
 | Memória chamada `memory` | arquivo `memory_.md`, porque `memory.md` seria o próprio índice `MEMORY.md` (sistema de arquivos sem distinção de maiúsculas) | arquivo `memory.md` | `src/services/memory.ts` (`fileNameFor`) |
 | ID do workspace | caminho em minúsculas (sistema de arquivos sem distinção de maiúsculas) | caminho como está, para duas pastas que diferem só em maiúsculas não colidirem | `src/fs-util.ts` |
+| `config.json` global bloqueado para as ferramentas do modelo | comparação sem distinção de maiúsculas | comparação com maiúsculas, como o caminho está | `src/fs-util.ts` (`isGlobalConfigFile`) |
+| Tirar `SILICONFLOWER_API_KEY` do ambiente dos comandos | nome comparado sem distinção de maiúsculas (variáveis do Windows não distinguem) | nome exato | `src/shell.ts` (`withoutSecrets`) |
 | Projetos recentes do app | `folderKey` em minúsculas | `folderKey` mantém maiúsculas | `desktop/src/projects.ts` |
 
 ## GUI e app de desktop
