@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { createHash } from "node:crypto";
 import { log } from "./logger.js";
-import { askAfterSteps } from "./config.js";
+import { askAfterSteps, knownSecrets, redactKnownSecrets } from "./config.js";
 import { compressHistory, contextBudget, estimateTokens, processToolOutput } from "./context.js";
 import type { AppConfig, ChatMessage, MediaAttachment, McpTool, ReasoningLevel, StreamEvent, ToolResult } from "./types.js";
 import { DEFAULT_REASONING, isExtendedReasoning, isXiaomiMimoEndpoint } from "./reasoning.js";
@@ -326,6 +326,7 @@ function repeatedCallWarning(
 async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   const { config, messages, tools, reasoning, executeTool, signal, confirmContinue } = opts;
   const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey });
+  const secrets = await knownSecrets(config);
   const apiTools = buildOpenAITools(tools);
   const isXiaomiMimo = isXiaomiMimoEndpoint(config.baseURL);
   let effort = !isXiaomiMimo && reasoning !== "none" ? reasoning : undefined;
@@ -649,11 +650,12 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
         try {
           const r = await executeTool(call.name, parsed);
           // Here and not in each tool: MCP servers and subagents can return megabytes too.
-          result = await processToolOutput(String(r.result ?? ""));
+          // Secrets go first, before truncation could cut one in half.
+          result = await processToolOutput(redactKnownSecrets(String(r.result ?? ""), secrets));
           isError = r.isError;
           if (r.media) stepMedia.push(...r.media);
         } catch (err) {
-          result = String(err);
+          result = redactKnownSecrets(String(err), secrets);
           isError = true;
         }
         result += repeatedCallWarning(repeats, call.name, parsed, result);

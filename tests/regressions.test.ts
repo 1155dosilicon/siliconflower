@@ -3,13 +3,14 @@ import { writeFile, readFile, rm, readdir, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runShell, decodeClixml } from "../src/shell.js";
+import { runShell, decodeClixml, withoutSecrets } from "../src/shell.js";
 import { htmlToMarkdown, isPrivateAddress, webFetch } from "../src/services/web.js";
 import { buildOpenAIMessages, isConnectionDrop, isOfficialOpenAIEndpoint, NOT_RUN_AFTER_CANCEL, streamChat } from "../src/llm.js";
 import { McpManager, qualifyMcpToolName, resolveMcpToolName, toolNotFoundMessage } from "../src/mcp.js";
 import { AgentSession } from "../src/session.js";
 import { ConversationStore, newRevision } from "../src/services/conversations.js";
-import { askAfterSteps, DEFAULT_ASK_AFTER_STEPS, normalize } from "../src/config.js";
+import { askAfterSteps, DEFAULT_ASK_AFTER_STEPS, knownSecrets, normalize, redactKnownSecrets } from "../src/config.js";
+import { getGlobalDataDir } from "../src/fs-util.js";
 import { createArtifact, readArtifact, listArtifacts, deleteArtifact, getArtifactsDir } from "../src/services/artifact.js";
 import { smartEditFile } from "../src/services/smart-edit.js";
 import { runBuiltin } from "../src/tools.js";
@@ -1518,5 +1519,123 @@ describe("a connection that drops in the middle of the response", () => {
     expect(isConnectionDrop(Object.assign(new TypeError("terminated"), { cause: { code: "UND_ERR_SOCKET" } }))).toBe(true);
     expect(isConnectionDrop({ status: 500, message: "ECONNRESET upstream" })).toBe(false);
     expect(isConnectionDrop(new Error("A API parou de enviar dados por 300s"))).toBe(false);
+  });
+});
+
+// The model could read the API key with read_file on ~/.siliconflower/config.json or with
+// `echo $SILICONFLOWER_API_KEY` in the shell.
+describe("API key out of the model's reach", () => {
+  test("file tools refuse the global config.json and its temporary copies", async () => {
+    const dir = getGlobalDataDir();
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "config.json"), '{"apiKey":"sk-segredo-de-teste"}');
+    for (const path of [join(dir, "config.json"), join(dir, "config.json.123.tmp")]) {
+      const res = await runBuiltin("read_file", { path });
+      expect(res.isError).toBe(true);
+      expect(res.result).not.toContain("sk-segredo-de-teste");
+    }
+    expect((await runBuiltin("write_file", { path: join(dir, "config.json"), content: "{}" })).isError).toBe(true);
+    expect(await readFile(join(dir, "config.json"), "utf8")).toContain("sk-segredo-de-teste");
+  });
+
+  test("a config.json in any other folder stays readable and writable", async () => {
+    const dir = join(tmp, `outro-projeto-${Date.now()}`);
+    await mkdir(dir, { recursive: true });
+    const path = join(dir, "config.json");
+    expect((await runBuiltin("write_file", { path, content: '{"porta":3000}' })).isError).toBeFalsy();
+    const res = await runBuiltin("read_file", { path });
+    expect(res.isError).toBeFalsy();
+    expect(res.result).toContain("3000");
+    // Same name inside a subfolder of the data dir is not the config file either.
+    const nested = join(getGlobalDataDir(), "skills", "minha-skill", "config.json");
+    await mkdir(join(nested, ".."), { recursive: true });
+    expect((await runBuiltin("write_file", { path: nested, content: "{}" })).isError).toBeFalsy();
+  });
+
+  test("shell commands do not see SILICONFLOWER_API_KEY, but see the other variables", async () => {
+    const env = { ...process.env, SILICONFLOWER_API_KEY: "sk-segredo-de-teste", SF_TESTE_VISIVEL: "visivel" };
+    const cmd = isWin
+      ? 'Write-Output "[$env:SILICONFLOWER_API_KEY][$env:SF_TESTE_VISIVEL]"'
+      : 'echo "[$SILICONFLOWER_API_KEY][$SF_TESTE_VISIVEL]"';
+    const res = await runShell(cmd, { env, timeout: 30_000 });
+    expect(res.stdout.trim()).toBe("[][visivel]");
+  });
+
+  test("withoutSecrets ignores the case of the name (Windows)", () => {
+    const out = withoutSecrets({ siliconflower_api_key: "x", Path: "p", SILICONFLOWER_MODEL: "m" });
+    expect(out).toEqual({ Path: "p", SILICONFLOWER_MODEL: "m" });
+  });
+});
+
+// The model ran `cat ~/.siliconflower/config.json` in the shell and got the key: the file block
+// only covers the file tools. Every tool result now leaves with the known secrets as ***.
+describe("known secrets in tool results", () => {
+  const KEY = "sk-chave-secreta-1234567890";
+
+  test("the API key never reaches the model nor the interface, whatever tool printed it", async () => {
+    const encoder = new TextEncoder();
+    const bodies: string[] = [];
+    const sse = (deltas: unknown[]) => {
+      const lines = deltas.map((delta, i) => {
+        const finish = i === deltas.length - 1 ? (("tool_calls" in (delta as object)) ? "tool_calls" : "stop") : null;
+        return `data: ${JSON.stringify({ id: "x", object: "chat.completion.chunk", choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+      });
+      return new Response(encoder.encode(lines.join("") + "data: [DONE]\n\n"), { headers: { "Content-Type": "text/event-stream" } });
+    };
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        bodies.push(await req.text());
+        if (bodies.length === 1) {
+          return sse([{ tool_calls: [{ index: 0, id: "c1", type: "function", function: { name: "execute_command", arguments: '{"command":"cat config.json"}' } }] }]);
+        }
+        return sse([{ content: "pronto" }]);
+      },
+    });
+    const results: string[] = [];
+    try {
+      for await (const ev of streamChat({
+        config: { baseURL: `http://127.0.0.1:${server.port}/v1`, apiKey: KEY, model: "m", reasoning: "none", mcpServers: {} },
+        messages: [{ role: "user", content: "leia a config" }],
+        tools: [],
+        reasoning: "none",
+        executeTool: async () => ({ result: `{\n  "apiKey": "${KEY}",\n  "outro": "${KEY}"\n}`, isError: false }),
+      })) {
+        if (ev.type === "tool_result") results.push(ev.result);
+      }
+    } finally {
+      server.stop(true);
+    }
+    expect(bodies.length).toBe(2);
+    expect(results.join("")).not.toContain(KEY);
+    expect(results.join("")).toContain('"apiKey": "***"');
+    // The request after the tool carries its result: there, the key must be gone too
+    // (the first request has it only in the Authorization header, never in the body).
+    expect(bodies[1]).not.toContain(KEY);
+  });
+
+  test("knownSecrets takes the MCP keys and headers, and skips short values and plain env entries", async () => {
+    const secrets = await knownSecrets({
+      baseURL: "http://x/v1",
+      apiKey: KEY,
+      model: "m",
+      reasoning: "none",
+      mcpServers: {
+        brave: { command: "npx", env: { BRAVE_API_KEY: "BSA-chave-do-brave-987", HOME_DIR: "/home/usuario/pasta" } },
+        web: { url: "https://exemplo.com/mcp", headers: { Authorization: "Bearer token-do-header-555" } },
+        curta: { command: "x", env: { TOKEN: "abc" } },
+      },
+    });
+    expect(secrets).toContain(KEY);
+    expect(secrets).toContain("BSA-chave-do-brave-987");
+    expect(secrets).toContain("Bearer token-do-header-555");
+    expect(secrets).not.toContain("/home/usuario/pasta");
+    expect(secrets).not.toContain("abc");
+  });
+
+  test("redactKnownSecrets replaces the longest secret whole", () => {
+    expect(redactKnownSecrets("a sk-1234567890-extra b sk-1234567890", ["sk-1234567890-extra", "sk-1234567890"])).toBe("a *** b ***");
+    expect(redactKnownSecrets("nada aqui", [KEY])).toBe("nada aqui");
   });
 });

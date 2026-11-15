@@ -105,6 +105,47 @@ export function applyEnvOverrides(config: AppConfig): AppConfig {
   };
 }
 
+/** Shorter values are not treated as secrets: replacing them would garble ordinary output. */
+const MIN_SECRET_LENGTH = 8;
+/** MCP `env` entries whose value is a secret (the others are paths, flags, ...). */
+const SECRET_ENV_NAME = /key|token|secret|pass|auth|cookie|credential/i;
+
+/** The API key and the MCP keys and headers of a config, as written. */
+export function configSecrets(config: AppConfig): string[] {
+  const out = [config.apiKey];
+  for (const server of Object.values(config.mcpServers ?? {})) {
+    for (const [name, value] of Object.entries(server.env ?? {})) if (SECRET_ENV_NAME.test(name)) out.push(value);
+    for (const value of Object.values(server.headers ?? {})) out.push(value);
+  }
+  return out;
+}
+
+/**
+ * Every secret siliconflower knows: those of the running config, SILICONFLOWER_API_KEY and those
+ * stored in config.json (they differ when the environment overrides the file). Tool results pass
+ * through redactKnownSecrets with them, so `cat ~/.siliconflower/config.json` reaches the model
+ * without the key.
+ */
+export async function knownSecrets(config: AppConfig): Promise<string[]> {
+  const found = [...configSecrets(config), process.env.SILICONFLOWER_API_KEY ?? ""];
+  try {
+    const stored = await loadStoredConfig();
+    if (stored) found.push(...configSecrets(stored));
+  } catch {
+    // A damaged config.json: the running config was already counted.
+  }
+  const unique = new Set(found.map((s) => (typeof s === "string" ? s.trim() : "")).filter((s) => s.length >= MIN_SECRET_LENGTH));
+  // Longest first, so a secret that contains another is replaced whole.
+  return [...unique].sort((a, b) => b.length - a.length);
+}
+
+/** Replaces each occurrence of the given secrets with `***`. */
+export function redactKnownSecrets(text: string, secrets: readonly string[]): string {
+  let out = text;
+  for (const secret of secrets) if (out.includes(secret)) out = out.split(secret).join("***");
+  return out;
+}
+
 export async function saveConfig(config: AppConfig): Promise<void> {
   await ensureDir(CONFIG_DIR);
   // Atomic: a crash in the middle of a save must not cost the user the API key.
