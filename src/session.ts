@@ -91,6 +91,11 @@ export interface SessionDeps {
   stream?: typeof streamChat;
   /** Where conversations are kept. Without it, they end with the session (e.g. tests). */
   store?: ConversationStore;
+  /**
+   * False when nobody can answer (`siliconflower run` in a script): ask_question tells the model
+   * to put the question in its final answer, and the turn stops at `askAfterSteps`, as in subagents.
+   */
+  interactive?: boolean;
 }
 
 const STATUS_FLASH_MS = 1200;
@@ -113,6 +118,7 @@ export class AgentSession {
   private readonly streamListeners = new Set<(event: StreamEvent) => void>();
   private readonly activityListeners = new Set<(activity: ToolActivity) => void>();
   private readonly store: ConversationStore | undefined;
+  private readonly interactive: boolean;
   private activities: ToolActivity[] = [];
   private nextActivityKey = 1;
   /** The running turn, so close() can wait for it to be saved. */
@@ -141,6 +147,7 @@ export class AgentSession {
     this.config = config;
     this.stream = deps.stream ?? streamChat;
     this.store = deps.store;
+    this.interactive = deps.interactive ?? true;
     const mode = overrides.mode ?? config.mode ?? "programação";
     this.state = {
       model: overrides.model ?? config.model,
@@ -590,7 +597,7 @@ export class AgentSession {
         reasoning: this.state.reasoning,
         signal: controller.signal,
         executeTool: (name, args) => this.executeTool(name, args),
-        confirmContinue: async (count) => {
+        confirmContinue: !this.interactive ? undefined : async (count) => {
           const answer = await this.askUser(
             `O agente já deu ${count} passos nesta resposta sem terminar. Continuar?`,
             ["Continuar", "Parar"],
@@ -730,7 +737,7 @@ export class AgentSession {
         config: { ...this.config, model },
         mode,
         signal: this.abort?.signal,
-        askUser: (q, options, signal) => this.askUser(q, options, signal),
+        ...(this.interactive ? { askUser: (q: string, options: string[] | undefined, signal?: AbortSignal) => this.askUser(q, options, signal) } : {}),
       });
     }
     // Also a name without the hash suffix, when only one MCP tool has it.

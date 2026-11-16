@@ -12,6 +12,8 @@ Agente de IA para desenvolvimento de software em **Windows e Linux** (x86_64), c
 
 ## ✨ Recursos
 
+- 🤝 **Conversa com o seu Claude Code**: `siliconflower mcp` vira um servidor MCP, e o Claude Code (ou Claude Desktop, Cursor...) passa a delegar tarefas ao siliconflower, pedir uma segunda opinião de outro modelo ou trabalhar em paralelo com ele. Uma linha liga tudo: `claude mcp add --scope user siliconflower -- siliconflower mcp`. [Como funciona](#para-o-claude-code-e-outros-clientes-mcp-siliconflower-mcp).
+- ⌨️ **Direto no terminal**: `siliconflower run "corrija o teste"` roda o agente sem abrir janela, com saída em JSON para scripts e conversas que continuam no app.
 - 🪟 **App de desktop** (Electron): uma janela por projeto, configuração sem terminal e conversas salvas que você retoma depois. `siliconflower gui` abre a mesma interface no navegador.
 - 🤖 **Subagentes e tarefas em background**: papéis `general`, `research`, `verification`, `plan`, `coder` ou `custom`; `research` e `plan` só leem.
 - 🧠 **Projetos e memória**: uma pasta com `SILICONFLOWER.md` ou `AGENTS.md` vira projeto; o arquivo traz suas instruções e liga a memória do projeto, guardada fora do repositório.
@@ -169,6 +171,8 @@ Tudo fica em `~/.siliconflower/` (ou em `SILICONFLOWER_DATA_DIR`, se definida):
 
 ```bash
 siliconflower gui            # interface no navegador (--port <n>, --no-open, --resume-latest)
+siliconflower run "pedido"   # manda uma mensagem e imprime a resposta, sem janela (veja abaixo)
+siliconflower mcp            # servidor MCP: o Claude Code e outros clientes conversam com o agente (veja abaixo)
 siliconflower config         # assistente de configuração
 siliconflower show           # configuração (chave mascarada), projeto ativo e pasta de dados
 siliconflower doctor         # o diagnóstico do botão 🩺, para quando a interface não abre (--fix, --offline)
@@ -179,6 +183,61 @@ siliconflower logs -n 100 --level error --search timeout   # --clear apaga o log
 ```
 
 Opções globais, só para aquela execução: `-m/--model`, `-r/--reasoning`, `--mode`, `--base-url`, `--api-key`. A partir do código-fonte, use `bun run start -- <comando>`.
+
+### No terminal, sem janela (`siliconflower run`)
+
+Roda uma resposta completa do agente, com as mesmas ferramentas, skills, MCP e memória do app, e sai. A conversa é salva no projeto, então aparece no app e pode ser continuada.
+
+```bash
+siliconflower run "corrija o teste que está falhando"
+siliconflower run -c "agora rode os testes de novo"        # continua a conversa mais recente
+siliconflower run --resume <id> "e o outro arquivo?"        # continua uma conversa específica
+siliconflower run -a tela.png "o que está errado nesta tela?"   # anexos (até 4)
+cat erro.log | siliconflower run --stdin "explique este erro"   # junta o que veio pelo pipe
+echo "resuma o README" | siliconflower run                      # sem texto, lê a mensagem do pipe
+siliconflower run --json -q "quantos testes existem?"           # uma linha de JSON, para scripts
+```
+
+- A resposta vai para a saída padrão (aparecendo aos poucos num terminal, inteira no fim quando redirecionada); as ferramentas usadas e os erros vão para a saída de erro, que `-q` silencia.
+- `--json` imprime no fim `{ok, cancelled, text, error, conversationId, tools, tokens}`.
+- Num terminal, as perguntas do agente (`ask_question` e o "continuar?" de `askAfterSteps`) aparecem para você responder; um número escolhe a opção. Sem terminal (script, pipe), o agente põe a pergunta na resposta final e a resposta para em `askAfterSteps` passos, como nos subagentes.
+- Ctrl+C cancela a resposta; um segundo Ctrl+C sai na hora. Código de saída: `0` ok, `1` erro, `130` cancelado.
+- O agente tem o mesmo poder que no app: roda comandos e altera arquivos na pasta atual sem pedir confirmação. Use `--mode plano` para só analisar.
+
+### Para o Claude Code e outros clientes MCP (`siliconflower mcp`)
+
+`siliconflower mcp` transforma o agente num servidor MCP (stdio). Com ele, o Claude Code (ou o Claude Desktop, o Cursor e qualquer cliente MCP) pode delegar tarefas ao siliconflower, pedir uma segunda opinião com outro modelo ou pôr os dois para trabalhar em paralelo.
+
+No Claude Code, uma vez só, para todos os projetos:
+
+```bash
+claude mcp add --scope user siliconflower -- siliconflower mcp
+```
+
+Em clientes configurados por JSON (Claude Desktop, Cursor...):
+
+```json
+{
+  "mcpServers": {
+    "siliconflower": { "command": "siliconflower", "args": ["mcp"] }
+  }
+}
+```
+
+Ferramentas oferecidas ao cliente:
+
+| Ferramenta | O que faz |
+| :--- | :--- |
+| `ask` | Manda uma tarefa ou pergunta e espera a resposta final. Argumentos: `message`; opcionais `cwd` (pasta do projeto, padrão: a pasta onde o cliente iniciou o servidor), `conversation_id` ou `continue` (continuar uma conversa), `attachments` (até 4 imagens ou PDFs), `mode`, `model` e `reasoning`. A resposta termina com o `conversation_id`, para continuar depois. |
+| `list_conversations` | Lista as conversas salvas de um projeto, com o id de cada uma. |
+| `read_conversation` | Mostra as últimas mensagens de uma conversa salva. |
+
+- Cada `ask` roda um `siliconflower run` próprio dentro de `cwd`, com a configuração, as skills, os servidores MCP e a memória daquele projeto. As conversas são as mesmas do app: o que o Claude pediu aparece lá, e você pode continuar dali.
+- Enquanto trabalha, cada ferramenta que o agente usa chega ao cliente como notificação de progresso.
+- Cancelar a chamada no cliente (Esc no Claude Code) encerra o agente e tudo o que ele iniciou, inclusive comandos em segundo plano. O mesmo vale quando o cliente fecha.
+- Não há ninguém para responder perguntas: o agente as põe na resposta final, e o cliente responde com um novo `ask` no mesmo `conversation_id`.
+- As opções globais valem como padrão para todos os pedidos: `siliconflower mcp --mode plano` deixa o agente só analisar, a menos que o pedido escolha outro modo. A chave de `--api-key` chega a cada pedido pelo ambiente, não pela linha de comando.
+- **Cuidado:** o cliente ganha o mesmo poder do agente na pasta que escolher, sem confirmação a cada comando. Veja [SECURITY.md](SECURITY.md#servidor-mcp-siliconflower-mcp).
 
 ---
 

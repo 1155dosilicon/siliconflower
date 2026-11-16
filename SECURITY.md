@@ -57,6 +57,15 @@ A página controla um agente que executa comandos, e qualquer site aberto no nav
 
 **Limitações:** a conexão local não é criptografada, e outro programa rodando na sua conta consegue ler o token (na linha de comando do navegador, nos dados do navegador ou na saída do terminal). A interface não é uma barreira contra software local: ela tem os mesmos privilégios do resto do agente. Não exponha a porta com proxy ou túnel e não compartilhe a URL.
 
+## Servidor MCP (`siliconflower mcp`)
+
+`siliconflower mcp` entrega o agente inteiro ao cliente MCP que o iniciou (Claude Code, Claude Desktop, Cursor...): cada `ask` roda o agente, com todas as ferramentas e sem confirmação por comando, na pasta que o cliente escolher em `cwd`. O cliente tem, na prática, os mesmos privilégios do agente. Só registre o servidor em clientes em que você confia, e use `siliconflower mcp --mode plano` para limitar o padrão a análise (um pedido ainda pode pedir outro modo).
+
+- O servidor fala só por stdio com o processo que o iniciou: não abre porta de rede.
+- Os argumentos do cliente não são confiáveis: `cwd` precisa ser uma pasta existente, `conversation_id` só aceita letras, números, `-` e `_` (nada de `../`), `mode` e `reasoning` só aceitam os valores conhecidos, `model` não pode começar com `-`, e os anexos viram caminhos absolutos, para nenhum valor ser lido como opção do `run`.
+- A chave de `--api-key` chega a cada `run` por `SILICONFLOWER_API_KEY`, não pela linha de comando, onde ficaria visível na lista de processos. O agente continua tirando essa variável do ambiente dos comandos que executa.
+- As respostas devolvidas ao cliente passam pelo mesmo `redactKnownSecrets` das ferramentas.
+
 ## Conversas salvas
 
 A GUI e o app guardam as conversas em `~/.siliconflower/workspaces/<projeto>/sessions/`, **em texto puro**. Isso inclui suas mensagens e a saída das ferramentas: um arquivo `.env` que o agente tenha lido, por exemplo, fica nelas. A chave de API do provedor não é gravada, mas um segredo que passe pela conversa é. Os arquivos ficam com as permissões da sua conta: em Linux/Unix, confira que `~/.siliconflower` não é legível por outros usuários (o `config.json` é gravado com `0600`, mas as conversas seguem a `umask`): o diagnóstico (**🩺** na tela inicial do app ou no topo da página no navegador, ou `siliconflower doctor`) avisa quando é, e **Corrigir o que der** (ou `--fix`) aplica `chmod 700` à pasta. Apague pelo **×** na lateral o que não deve ficar guardado. De imagens, áudios e vídeos lidos com `read_media`, só o caminho é gravado; o conteúdo vai ao provedor, mas não para o disco.

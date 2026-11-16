@@ -14,6 +14,8 @@ import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { APP_VERSION } from "./version.js";
 import { emitManagedEvent } from "./gui/managed.js";
+import { isWindows } from "./platform.js";
+import type { SessionQuestion } from "./session.js";
 
 const program = new Command();
 
@@ -70,6 +72,144 @@ program
       managed,
       resumeLatest: Boolean(opts.resumeLatest),
     });
+  });
+
+program
+  .command("run")
+  .description("Send one message to the agent and print the answer, without opening a window (accepts the global options above)")
+  .argument("[message...]", "the message; without it, it is read from stdin")
+  .option("-c, --continue", "continue the project's most recent conversation")
+  .option("--resume <id>", "continue the saved conversation with this id (see --json)")
+  .option("-a, --attach <files...>", "attach images or PDFs (up to 4)")
+  .option("--stdin", "also read stdin and append it to the message (e.g. a log piped in)")
+  .option("--json", "print one line of JSON at the end (answer, error, tools used, conversation id)")
+  .option("-q, --quiet", "do not list the tools on stderr")
+  .action(async (words: string[], _opts, cmd: Command) => {
+    const opts = cmd.optsWithGlobals();
+    const { buildPrompt, readStdin, readUploads, runTurn } = await import("./run.js");
+    if (opts.continue && opts.resume) throw new Error("use --continue ou --resume, não os dois.");
+    const stdinIsTTY = Boolean(process.stdin.isTTY);
+    let piped: string | undefined;
+    if (opts.stdin || !words.length) {
+      if (stdinIsTTY) {
+        if (!words.length) throw new Error('escreva a mensagem: siliconflower run "o que fazer"');
+      } else {
+        piped = await readStdin();
+      }
+    }
+    const prompt = buildPrompt(words, piped);
+    const uploads = await readUploads(opts.attach ?? []);
+    if (!prompt && !uploads.length) throw new Error("a mensagem está vazia.");
+
+    // Someone can answer only when stdin is still a terminal (not used up by a pipe).
+    const interactive = stdinIsTTY && piped === undefined && Boolean(process.stderr.isTTY);
+    const resolved = await resolveRun(opts, { interactive });
+    await log("info", "=== siliconflower iniciado por run ===");
+    const { AgentSession } = await import("./session.js");
+    const { ConversationStore } = await import("./services/conversations.js");
+    const { killAllBackgroundTasks } = await import("./services/background-tasks.js");
+    const store = new ConversationStore(join(getWorkspaceDataDir(process.cwd()), "sessions"));
+    const session = new AgentSession(resolved.config, resolved.overrides, { store, interactive });
+    const err = (text: string) => void process.stderr.write(text);
+
+    let exitCode = 1;
+    let interrupted = false;
+    const onSigint = () => {
+      if (interrupted || !session.cancel()) process.exit(130);
+      interrupted = true;
+    };
+    process.on("SIGINT", onSigint);
+    // Killed from outside (the MCP server cancelling a call, a closed terminal). Background
+    // commands run in their own process groups, so a kill of this one does not reach them:
+    // end them before going, or they are orphaned.
+    const terminationSignals: NodeJS.Signals[] = isWindows() ? ["SIGTERM", "SIGBREAK"] : ["SIGTERM", "SIGHUP"];
+    const onTerminate = () => {
+      session.cancel();
+      void Promise.race([
+        Promise.allSettled([killAllBackgroundTasks(), session.close()]),
+        new Promise((done) => setTimeout(done, TERMINATE_TIMEOUT_MS)),
+      ]).then(() => process.exit(143));
+    };
+    for (const signal of terminationSignals) process.once(signal, onTerminate);
+    try {
+      if (opts.resume) {
+        await session.loadConversations();
+        if (!(await session.resumeConversation(String(opts.resume)))) {
+          throw new Error(`não achei a conversa ${opts.resume} neste projeto.`);
+        }
+      } else {
+        await session.loadConversations({ resumeLatest: Boolean(opts.continue) });
+      }
+      await session.start();
+      const startError = session.getState().error;
+      if (startError && !opts.quiet) err(`Aviso: ${startError}\n`);
+      const result = await runTurn(
+        session,
+        { prompt, uploads, stream: Boolean(process.stdout.isTTY), json: Boolean(opts.json), quiet: Boolean(opts.quiet) },
+        { out: (text) => void process.stdout.write(text), err, ask: interactive ? askAtTerminal : undefined }
+      );
+      exitCode = result.ok ? 0 : result.cancelled ? 130 : 1;
+    } finally {
+      process.off("SIGINT", onSigint);
+      for (const signal of terminationSignals) process.off(signal, onTerminate);
+      await Promise.race([
+        Promise.allSettled([session.close(), killAllBackgroundTasks()]),
+        new Promise((done) => setTimeout(done, 5_000)),
+      ]);
+    }
+    // Flushed before process.exit, which is needed: an MCP handle could keep the process running.
+    await new Promise<void>((done) => process.stdout.write("", () => done()));
+    process.exit(exitCode);
+  });
+
+/** Under the 2 s killProcessTree waits before SIGKILL, so the cleanup gets to run. */
+const TERMINATE_TIMEOUT_MS = 1_500;
+
+/** Asks a question of the agent at the terminal: a number picks an option. Ctrl+C cancels. */
+async function askAtTerminal(question: SessionQuestion): Promise<string> {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  const abort = new AbortController();
+  rl.on("SIGINT", () => abort.abort());
+  try {
+    process.stderr.write(`\n❓ ${question.question}\n`);
+    question.options?.forEach((option, i) => process.stderr.write(`   ${i + 1}. ${option}\n`));
+    for (;;) {
+      const answer = (await rl.question("> ", { signal: abort.signal })).trim();
+      if (answer) return answer;
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+program
+  .command("mcp")
+  .description("Serve the agent over MCP (stdio) to Claude Code and other clients: tools ask, list_conversations and read_conversation (accepts the global options above)")
+  .action(async (_opts, cmd: Command) => {
+    const opts = cmd.optsWithGlobals();
+    // Each `ask` runs `siliconflower run`, which reads the config itself and, with nobody to
+    // answer the wizard, needs config.json to exist; checked here so a missing one shows up
+    // when the client starts the server, not on every call.
+    const config = (await configExists()) ? await loadConfig() : null;
+    if (!config) throw new ConfigRequiredError();
+    if (!isValid({ ...config, ...(opts.baseUrl ? { baseURL: opts.baseUrl } : {}), ...(opts.apiKey ? { apiKey: opts.apiKey } : {}) })) {
+      throw new ConfigRequiredError();
+    }
+    // The global options reach each run as the variables loadConfig already reads (the key
+    // stays out of the process list).
+    const env = { ...process.env };
+    if (opts.baseUrl) env.SILICONFLOWER_BASE_URL = opts.baseUrl;
+    if (opts.apiKey) env.SILICONFLOWER_API_KEY = opts.apiKey;
+    if (opts.model) env.SILICONFLOWER_MODEL = opts.model;
+    const reasoning = opts.reasoning ? normalizeReasoning(opts.reasoning) : undefined;
+    if (opts.reasoning && !reasoning) throw new Error(`--reasoning inválido: "${opts.reasoning}". Use: ${REASONING_LEVELS.join(", ")}`);
+    const mode = opts.mode ? normalizeMode(opts.mode) : undefined;
+    if (opts.mode && !mode) throw new Error(`--mode inválido: "${opts.mode}". Use: ${MODES.join(", ")}`);
+    const { startMcpServer } = await import("./mcp-server.js");
+    // Defaults for every ask; a call can still choose its own.
+    await startMcpServer({ env, defaults: { mode, reasoning } });
+    process.exit(0);
   });
 
 program
