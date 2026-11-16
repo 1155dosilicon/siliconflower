@@ -6,6 +6,8 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-16
+
 ### Added
 - `siliconflower run "mensagem"`: roda uma resposta do agente no terminal, sem janela, e sai; `-c`/`--resume <id>` continuam conversas salvas (as mesmas do app), `-a` anexa arquivos, `--stdin` junta o que veio pelo pipe, `--json` imprime o resultado para scripts e `-q` esconde as ferramentas; sem terminal, `ask_question` volta na resposta e o turno para em `askAfterSteps` (`src/run.ts`, `src/index.tsx`, `src/session.ts`).
 - `siliconflower mcp`: o agente como servidor MCP (stdio) para o Claude Code e outros clientes, com as ferramentas `ask` (roda uma resposta em `siliconflower run` próprio na pasta pedida, com progresso por ferramenta, cancelamento e conversas continuáveis), `list_conversations` e `read_conversation` (`src/mcp-server.ts`, `src/index.tsx`).
