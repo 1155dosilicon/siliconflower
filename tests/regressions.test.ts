@@ -1639,3 +1639,72 @@ describe("known secrets in tool results", () => {
     expect(redactKnownSecrets("nada aqui", [KEY])).toBe("nada aqui");
   });
 });
+
+describe("siliconflower run killed from outside", () => {
+  const sse = (chunks: unknown[]) =>
+    new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n", {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  const toolCall = (id: string, args: Record<string, unknown>) => ({
+    id: "x",
+    object: "chat.completion.chunk",
+    model: "m",
+    choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id, type: "function", function: { name: "execute_command", arguments: JSON.stringify(args) } }] }, finish_reason: "tool_calls" }],
+  });
+  const alive = (pid: number) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // The MCP server cancels a call by killing the process group of `run`; background commands
+  // live in groups of their own and outlived it, running forever with no one to stop them.
+  test.skipIf(isWin)("ends the background commands before going", async () => {
+    const dir = join(tmp, "run-sigterm");
+    const dataDir = join(dir, "data");
+    await mkdir(dataDir, { recursive: true });
+    const pidFile = join(dir, "bg.pid");
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: async (req) => {
+        await req.text();
+        requests++;
+        if (requests === 1) return sse([toolCall("c1", { command: `echo $$ > '${pidFile}'; sleep 60`, runInBackground: true })]);
+        return sse([toolCall("c2", { command: "sleep 60" })]);
+      },
+    });
+    await writeFile(
+      join(dataDir, "config.json"),
+      JSON.stringify({ baseURL: `http://127.0.0.1:${server.port}/v1`, apiKey: "k", model: "m", reasoning: "none", mcpServers: {} })
+    );
+    const child = Bun.spawn([process.execPath, join(import.meta.dir, "..", "src", "index.tsx"), "run", "--json", "inicie os comandos"], {
+      cwd: dir,
+      env: { ...process.env, SILICONFLOWER_DATA_DIR: dataDir },
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      detached: true,
+    } as Parameters<typeof Bun.spawn>[1]);
+    try {
+      const deadline = Date.now() + 15_000;
+      while ((requests < 2 || !existsSync(pidFile)) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+      expect(requests).toBeGreaterThanOrEqual(2);
+      const bgPid = Number((await readFile(pidFile, "utf8")).trim());
+      expect(alive(bgPid)).toBe(true);
+      await new Promise((r) => setTimeout(r, 300)); // the foreground command is running
+      process.kill(-child.pid, "SIGTERM"); // what killProcessTree does first
+      await child.exited;
+      const gone = Date.now() + 3_000;
+      while (alive(bgPid) && Date.now() < gone) await new Promise((r) => setTimeout(r, 50));
+      expect(alive(bgPid)).toBe(false);
+    } finally {
+      try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
+      server.stop(true);
+    }
+  }, 30_000);
+});
