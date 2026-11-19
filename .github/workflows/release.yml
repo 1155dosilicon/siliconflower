@@ -38,6 +38,7 @@ jobs:
           bun-version: latest
 
       - name: Tag matches the version
+        id: version
         shell: bash
         run: |
           version="$(node -p "require('./package.json').version")"
@@ -45,6 +46,7 @@ jobs:
             echo "Tag ${GITHUB_REF_NAME} does not match package.json version ${version}" >&2
             exit 1
           fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Release notes from CHANGELOG
         shell: bash
@@ -77,6 +79,8 @@ jobs:
 
       - uses: softprops/action-gh-release@v3
         with:
+          # Without a name the release is titled with the tag ("v0.16.0").
+          name: Siliconflower ${{ steps.version.outputs.version }}
           draft: true
           body_path: release-notes.md
           files: upload/*
