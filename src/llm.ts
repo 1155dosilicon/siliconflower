@@ -1,8 +1,8 @@
 import OpenAI from "openai";
-import { createHash } from "node:crypto";
 import { log } from "./logger.js";
-import { askAfterSteps, knownSecrets, redactKnownSecrets } from "./config.js";
+import { askAfterMinutes, askAfterSteps, askAfterTokens, knownSecrets, redactKnownSecrets } from "./config.js";
 import { compressHistory, contextBudget, estimateTokens, processToolOutput } from "./context.js";
+import { LoopGuard, TurnBudget, describeLimit, limitHeader, wrapUpPrompt, type LimitHit } from "./turn-limits.js";
 import type { AppConfig, ChatMessage, MediaAttachment, McpTool, ReasoningLevel, StreamEvent, ToolResult } from "./types.js";
 import { DEFAULT_REASONING, isExtendedReasoning, isXiaomiMimoEndpoint } from "./reasoning.js";
 import { hasMediaData, mediaNote, pruneMedia, rejectMedia, userContent } from "./services/media.js";
@@ -15,10 +15,11 @@ export interface ChatOptions {
   executeTool: (name: string, args: Record<string, unknown>) => Promise<ToolResult>;
   signal?: AbortSignal;
   /**
-   * Asked every `askAfterSteps` steps of one turn: true goes on. Without it (subagents), the
-   * turn stops there, since nobody could answer.
+   * Asked when the turn reaches a limit (`askAfterSteps`, `askAfterTokens`, `askAfterMinutes`)
+   * or looks stuck in a loop: true goes on. Without it (subagents, `run` without a terminal),
+   * nobody could answer: the turn ends there with a summary written without tools.
    */
-  confirmContinue?: (steps: number) => Promise<boolean>;
+  confirmContinue?: (hit: LimitHit) => Promise<boolean>;
 }
 
 export async function* streamChat(opts: ChatOptions): AsyncGenerator<StreamEvent> {
@@ -290,39 +291,6 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-/** The same call with the same result this many times in one turn gets a warning in the result. */
-export const REPEATED_CALL_WARNING_AT = 3;
-
-/** JSON with sorted keys: the same arguments in another order are the same call. */
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(record[k])}`).join(",")}}`;
-  }
-  return JSON.stringify(value) ?? "null";
-}
-
-/**
- * Counts identical calls of a turn and returns the warning to append to the result, if any. A
- * different result starts the count again: running the tests after each edit, or checking a
- * background task, is not a loop.
- */
-function repeatedCallWarning(
-  repeats: Map<string, { digest: string; count: number }>,
-  name: string,
-  args: Record<string, unknown>,
-  result: string
-): string {
-  const key = `${name}\0${canonicalJson(args)}`;
-  const digest = createHash("sha256").update(result).digest("hex");
-  const seen = repeats.get(key);
-  const count = seen?.digest === digest ? seen.count + 1 : 1;
-  repeats.set(key, { digest, count });
-  if (count < REPEATED_CALL_WARNING_AT) return "";
-  return `\n\n[Aviso: é a ${count}ª vez neste turno que você chama ${name} com os mesmos argumentos e recebe o mesmo resultado. Repetir não muda nada: mude de abordagem ou responda ao usuário com o que já tem.]`;
-}
-
 async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   const { config, messages, tools, reasoning, executeTool, signal, confirmContinue } = opts;
   const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey });
@@ -349,27 +317,132 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   const turn: ChatMessage[] = [];
   let finalContent = "";
   let finalThinking = "";
-  const checkpoint = askAfterSteps(config.askAfterSteps);
-  const repeats = new Map<string, { digest: string; count: number }>();
+  const budget = new TurnBudget({
+    steps: askAfterSteps(config.askAfterSteps),
+    tokens: askAfterTokens(config.askAfterTokens),
+    minutes: askAfterMinutes(config.askAfterMinutes),
+  });
+  const loops = new LoopGuard();
+  /** Set by the loop guard during a step: the turn stops (or asks) before the next one. */
+  let loopStop: string | undefined;
 
   void log("info", `LLM request: model=${config.model}, tools=${apiTools.length}, reasoning=${reasoning}`);
 
-  // No step cap: a long task ends when the model answers without tools, on an error or when
-  // the turn is cancelled. The history is re-compacted on every step, so it stays in budget.
-  // Every `askAfterSteps` steps the user is asked whether to go on: a loop stops there.
+  /** Text written before what comes next, separated from it by a blank line. */
+  function* appendText(text: string): Generator<StreamEvent> {
+    const sep = finalContent && !finalContent.endsWith("\n") ? "\n\n" : "";
+    finalContent += sep + text;
+    yield { type: "text", text: sep + text };
+  }
+
+  /**
+   * The last request of a turn stopped at a limit, with nobody to ask: no tools, only a report
+   * of what was done and what is left, so whoever called gets something to work with. If it
+   * fails, the turn still ends with the note saying where it stopped.
+   */
+  async function* wrapUp(hit: LimitHit): AsyncGenerator<StreamEvent> {
+    const header = limitHeader(hit);
+    yield* appendText(`${header}\n\n`);
+    const request = buildOpenAIMessages(config, [
+      ...compressHistory(pruneMedia(history), historyBudget, { keepToolCallReasoning: isXiaomiMimo }),
+      { role: "user", content: wrapUpPrompt(hit) },
+    ]);
+    let summary = "";
+    let failure = "";
+    // tool_choice "none" keeps the request equal to the earlier ones (prompt cache); a provider
+    // that refuses it gets the request again without tools.
+    for (let withTools = apiTools.length > 0; ; withTools = false) {
+      const controller = new AbortController();
+      const onAbort = () => controller.abort();
+      if (signal?.aborted) controller.abort();
+      signal?.addEventListener("abort", onAbort, { once: true });
+      try {
+        const stream = await withConnectTimeout(
+          client.chat.completions.create(
+            {
+              model: config.model,
+              messages: request,
+              stream: true,
+              [tokenParam]: outputLimit,
+              stream_options: { include_usage: true },
+              ...(supportsEffort && effort ? { reasoning_effort: "low" } : {}),
+              ...(isXiaomiMimo ? { thinking: { type: "disabled" } } : {}),
+              ...(withTools ? { tools: apiTools, tool_choice: "none" } : {}),
+            } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+            { signal: controller.signal }
+          ),
+          signal,
+          () => controller.abort()
+        );
+        const chunks = withIdleTimeout(stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>, signal, () => controller.abort());
+        for await (const chunk of chunks) {
+          if (chunk.usage) {
+            budget.tokens += chunk.usage.total_tokens ?? 0;
+            yield { type: "usage", totalTokens: chunk.usage.total_tokens, promptTokens: chunk.usage.prompt_tokens, completionTokens: chunk.usage.completion_tokens };
+          }
+          const delta = chunk.choices?.[0]?.delta as { content?: string | null; reasoning_content?: string; reasoning?: string } | undefined;
+          const reasoningText = delta?.reasoning_content || delta?.reasoning;
+          if (reasoningText) {
+            finalThinking += reasoningText;
+            yield { type: "thinking", text: reasoningText };
+          }
+          if (delta?.content) {
+            summary += delta.content;
+            finalContent += delta.content;
+            yield { type: "text", text: delta.content };
+          }
+        }
+        throwIfAborted(signal);
+        break;
+      } catch (err) {
+        throwIfAborted(signal);
+        void log("warn", `Resumo do turno parado falhou${withTools ? "; repetindo sem ferramentas" : ""}: ${describeApiError(err)}`);
+        // Only before any text: otherwise the summary would be written twice.
+        if (withTools && !summary) continue;
+        failure = err instanceof Error ? err.message : String(err);
+        break;
+      } finally {
+        signal?.removeEventListener("abort", onAbort);
+      }
+    }
+    if (!summary.trim()) {
+      const note = failure ? `[Não consegui escrever o resumo: ${failure}]` : "[O modelo não escreveu o resumo.]";
+      summary += note;
+      finalContent += note;
+      yield { type: "text", text: note };
+    }
+    turn.push({ role: "assistant", content: `${header}\n\n${summary.trim()}` });
+    const { reason, steps, tokens, elapsedMs, detail } = { ...hit, tokens: budget.tokens };
+    yield { type: "limit", reason, steps, tokens, elapsedMs, ...(detail ? { detail } : {}) };
+    yield { type: "done", content: finalContent, reasoning: finalThinking, messages: turn };
+  }
+
+  // No hard step cap: a long task ends when the model answers without tools, on an error or
+  // when the turn is cancelled. The history is re-compacted on every step, so it stays in
+  // budget. When a budget runs out or the loop guard fires, the user is asked whether to go
+  // on; with nobody to ask, the turn ends with a summary (wrapUp).
   for (let step = 0; ; step++) {
     throwIfAborted(signal);
-    if (checkpoint && step > 0 && step % checkpoint === 0) {
-      const goOn = confirmContinue ? await confirmContinue(step) : false;
+    const hit: LimitHit | null = loopStop
+      ? { reason: "loop", limit: 0, detail: loopStop, ...budget.usage() }
+      : budget.exceeded();
+    if (hit) {
+      const goOn = confirmContinue ? await confirmContinue(hit) : false;
       throwIfAborted(signal);
-      if (!goOn) {
-        void log("warn", `LLM step ${step}: turno parado no limite de ${checkpoint} passos (askAfterSteps)`);
-        const notice = confirmContinue
-          ? `[Turno pausado a pedido do usuário depois de ${step} passos. Envie uma mensagem para continuar ou mudar o rumo.]`
-          : `[Parado depois de ${step} passos sem uma resposta final.]`;
-        finalContent += (finalContent ? "\n\n" : "") + notice;
-        yield { type: "text", text: notice };
+      if (goOn) {
+        if (hit.reason === "loop") loops.reset();
+        loopStop = undefined;
+        budget.extend();
+      } else {
+        void log("warn", `LLM step ${step}: turno parado (${hit.reason}): ${describeLimit(hit)}`);
+        if (!confirmContinue) {
+          yield* wrapUp(hit);
+          return;
+        }
+        const notice = `[Turno pausado a pedido do usuário depois de ${step} passos. Envie uma mensagem para continuar ou mudar o rumo.]`;
+        yield* appendText(notice);
         turn.push({ role: "assistant", content: notice });
+        yield { type: "limit", reason: hit.reason, steps: hit.steps, tokens: hit.tokens, elapsedMs: hit.elapsedMs, ...(hit.detail ? { detail: hit.detail } : {}) };
         yield { type: "done", content: finalContent, reasoning: finalThinking, messages: turn };
         return;
       }
@@ -479,6 +552,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
 
       let stepHasText = false;
       let stepHasThinking = false;
+      let gotUsage = false;
       try {
         const chunks = withIdleTimeout(
           stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>,
@@ -487,6 +561,8 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
         );
         for await (const chunk of chunks) {
           if (chunk.usage) {
+            gotUsage = true;
+            budget.tokens += chunk.usage.total_tokens ?? (chunk.usage.prompt_tokens ?? 0) + (chunk.usage.completion_tokens ?? 0);
             yield {
               type: "usage",
               totalTokens: chunk.usage.total_tokens,
@@ -551,6 +627,11 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       // The SDK ends the iteration silently on abort: without this, a cancelled response would
       // count as finished and the tool calls received so far would still run.
       throwIfAborted(signal);
+      // A provider without usage in the stream still spends tokens: estimate them.
+      if (!gotUsage) {
+        const written = content.length + thinking.length + [...argBuffers.values()].reduce((n, b) => n + b.args.length, 0);
+        budget.tokens += estimateTokens(JSON.stringify(working)) + Math.ceil(written / 3.5);
+      }
 
       // Only thinking, cut at the output limit: there is no answer to continue, and "continue"
       // would think the same again.
@@ -627,6 +708,9 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
     record(assistantMsg);
 
     void log("info", `LLM step ${step}: executando ${pendingCalls.length} tool(s): ${pendingCalls.map(c => c.name).join(", ")}`);
+    budget.steps++;
+    // Nobody to ask at the limit: the model is told beforehand, so it can finish by itself.
+    const landing = confirmContinue ? "" : budget.landingNotice();
 
     const stepMedia: MediaAttachment[] = [];
     for (const [index, call] of pendingCalls.entries()) {
@@ -658,8 +742,11 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
           result = redactKnownSecrets(String(err), secrets);
           isError = true;
         }
-        result += repeatedCallWarning(repeats, call.name, parsed, result);
+        const verdict = loops.observe(call.name, parsed, result, isError);
+        result += verdict.notice;
+        if (verdict.stop) loopStop ??= verdict.stop;
       }
+      if (landing && index === pendingCalls.length - 1) result += landing;
       void log(isError ? "warn" : "info", `LLM step ${step}: <- ${call.name} isError=${isError} result=${result.slice(0, 200)}`);
       yield { type: "tool_result", id: call.id, name: call.name, result, isError };
       record({ role: "tool", toolCallId: call.id, toolName: call.name, content: result });

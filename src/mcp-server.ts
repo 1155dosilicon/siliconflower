@@ -12,7 +12,7 @@ import { log } from "./logger.js";
 import { APP_VERSION } from "./version.js";
 import { MODES } from "./modes.js";
 import { REASONING_LEVELS } from "./types.js";
-import type { RunResult } from "./run.js";
+import type { RunResult, RunStop } from "./run.js";
 
 /**
  * `siliconflower mcp`: the agent as an MCP server (stdio), for Claude Code and other clients.
@@ -42,7 +42,9 @@ export const TOOLS = [
       "Ele trabalha sozinho na pasta `cwd`: lê e edita arquivos, roda comandos, pesquisa na web e usa as próprias skills e servidores MCP, sem pedir confirmação. " +
       "Use para delegar tarefas, pedir uma segunda opinião ou revisão, ou rodar trabalho em paralelo. Dê contexto completo: ele não vê esta conversa. " +
       "A resposta traz `conversation_id`; passe-o de volta para continuar a mesma conversa (por exemplo, para responder a uma pergunta que ele fez). " +
-      "Use `mode: \"plano\"` quando ele só deve analisar, sem alterar nada.",
+      "Use `mode: \"plano\"` quando ele só deve analisar, sem alterar nada. " +
+      "Se ele atingir um limite (passos, tokens, tempo) ou entrar em loop, para e responde com um resumo do que fez e do que falta; a resposta diz o motivo, e o mesmo `conversation_id` continua de onde parou. " +
+      "`max_steps`, `max_tokens` e `max_minutes` ajustam esses limites só para este pedido.",
     inputSchema: {
       type: "object",
       properties: {
@@ -59,6 +61,9 @@ export const TOOLS = [
         mode: { type: "string", enum: [...MODES], description: "programação (padrão do config), sistema, ou plano (só analisa, não altera nada)." },
         model: { type: "string", description: "Outro modelo só para este pedido (id do provedor configurado)." },
         reasoning: { type: "string", enum: [...REASONING_LEVELS], description: "Nível de raciocínio só para este pedido." },
+        max_steps: { type: "integer", minimum: 0, description: "Passos de ferramentas antes de parar com um resumo (padrão: askAfterSteps do config, 150; 0 = sem limite)." },
+        max_tokens: { type: "integer", minimum: 0, description: "Tokens do pedido, somando todas as chamadas ao modelo, antes de parar (padrão: askAfterTokens, 8M; 0 = sem limite)." },
+        max_minutes: { type: "integer", minimum: 0, description: "Minutos antes de parar, conferidos entre os passos (padrão: askAfterMinutes, 60; 0 = sem limite)." },
       },
       required: ["message"],
     },
@@ -101,6 +106,9 @@ export interface AskRequest {
   mode?: string;
   model?: string;
   reasoning?: string;
+  maxSteps?: number;
+  maxTokens?: number;
+  maxMinutes?: number;
 }
 
 /** Arguments of `siliconflower run` for a request; the message goes through stdin. */
@@ -111,6 +119,9 @@ export function buildRunArgs(req: AskRequest): string[] {
   if (req.mode) args.push("--mode", req.mode);
   if (req.model) args.push("--model", req.model);
   if (req.reasoning) args.push("--reasoning", req.reasoning);
+  if (req.maxSteps !== undefined) args.push("--max-steps", String(req.maxSteps));
+  if (req.maxTokens !== undefined) args.push("--max-tokens", String(req.maxTokens));
+  if (req.maxMinutes !== undefined) args.push("--max-minutes", String(req.maxMinutes));
   // Last: the option takes every value after it.
   if (req.attachments?.length) args.push("--attach", ...req.attachments);
   return args;
@@ -124,6 +135,14 @@ export function selfCommand(execPath = process.execPath, script = process.argv[1
 }
 
 export class ToolInputError extends Error {}
+
+/** A limit of `ask`: a whole number from 0 up, or absent. */
+function limit(value: unknown, name: string): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || n < 0) throw new ToolInputError(`${name} deve ser um número inteiro a partir de 0.`);
+  return Math.floor(n);
+}
 
 function str(value: unknown, name: string): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;
@@ -182,6 +201,9 @@ export function parseAsk(args: Record<string, unknown>, base: string): AskReques
     mode,
     model,
     reasoning,
+    maxSteps: limit(args.max_steps, "max_steps"),
+    maxTokens: limit(args.max_tokens, "max_tokens"),
+    maxMinutes: limit(args.max_minutes, "max_minutes"),
   };
 }
 
@@ -255,6 +277,23 @@ export function runAsk(req: AskRequest, deps: AskDeps): Promise<AskOutcome> {
   });
 }
 
+const STOP_REASONS: Record<RunStop["reason"], string> = {
+  steps: "limite de passos",
+  tokens: "limite de tokens",
+  time: "limite de tempo",
+  loop: "loop sem progresso",
+};
+
+/** A turn that ended at a limit: the answer is a partial summary, and how to go on. */
+export function describeStop(stop: RunStop, conversationId: string | null): string {
+  const used = `${stop.steps} passos, ${stop.tokens} tokens, ${Math.round(stop.elapsedSeconds / 60)} min`;
+  const detail = stop.detail ? `: ${stop.detail}` : "";
+  const next = conversationId
+    ? `para continuar, chame ask de novo com conversation_id ${conversationId} (e max_steps/max_tokens/max_minutes maiores, se o limite foi curto)`
+    : "a conversa não foi salva";
+  return `[siliconflower] parou antes de terminar (stopped=${stop.reason}, ${STOP_REASONS[stop.reason]}${detail}; ${used}). A resposta acima é um resumo parcial; ${next}.`;
+}
+
 /** What the client sees: the answer first, then how to continue. */
 export function formatAsk(outcome: AskOutcome): CallToolResult {
   if (outcome.cancelled) return { content: [{ type: "text", text: "Cancelado: o siliconflower foi interrompido." }], isError: true };
@@ -268,8 +307,10 @@ export function formatAsk(outcome: AskOutcome): CallToolResult {
     const failed = r.tools.filter((t) => t.isError).length;
     meta.push(`ferramentas: ${r.tools.length} chamada(s) (${names.join(", ")})${failed ? `, ${failed} com erro` : ""}`);
   }
-  if (r.tokens) meta.push(`tokens: ${r.tokens}`);
+  const tokens = r.turnTokens || r.tokens;
+  if (tokens) meta.push(`tokens: ${tokens}`);
   const content: CallToolResult["content"] = [{ type: "text", text: answer }];
+  if (r.stopped) content.push({ type: "text", text: describeStop(r.stopped, r.conversationId) });
   if (meta.length) content.push({ type: "text", text: `[siliconflower] ${meta.join(" · ")}` });
   return { content, isError: !r.ok };
 }

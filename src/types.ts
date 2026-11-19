@@ -22,6 +22,10 @@ export interface AppConfig {
   contextTokens?: number;
   /** Tool steps of one turn before asking the user whether to go on; 0 never asks. Default: 150. */
   askAfterSteps?: number;
+  /** Tokens of one turn (all requests summed) before asking; 0 never asks. Default: 8M. */
+  askAfterTokens?: number;
+  /** Minutes of one turn before asking; 0 never asks. Default: 60. */
+  askAfterMinutes?: number;
   mcpServers?: Record<string, McpServerConfig>;
   hooks?: {
     preTool?: string;
@@ -72,6 +76,9 @@ export interface TodoItem {
   priority: "high" | "medium" | "low";
 }
 
+/** Why a turn stopped before its final answer. ASCII: it goes into `run --json`. */
+export type LimitReason = "steps" | "tokens" | "time" | "loop";
+
 export type StreamEvent =
   | { type: "thinking"; text: string }
   | { type: "text"; text: string }
@@ -89,6 +96,11 @@ export type StreamEvent =
    * media attachment, if any. Always complete, so it can be kept even if the turn fails later.
    */
   | { type: "step"; messages: ChatMessage[] }
+  /**
+   * The turn stopped at a limit (`askAfter*` or a loop) before a final answer. Comes right
+   * before `done`; `done.content` then holds the summary written without tools.
+   */
+  | { type: "limit"; reason: LimitReason; steps: number; tokens: number; elapsedMs: number; detail?: string }
   /** `messages` holds the messages produced in this turn (tool calls, tool results, final answer). */
   | { type: "done"; content: string; reasoning: string; messages?: ChatMessage[] };
 

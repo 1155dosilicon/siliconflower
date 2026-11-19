@@ -479,8 +479,13 @@ export const BUILTIN_TOOLS: BuiltinTool[] = [
         const task = getBackgroundTask(taskId);
         if (!task) return { result: `Tarefa em background '${taskId}' não encontrada.`, isError: true };
         // While it runs, `result` is what the command has printed so far (its newest part).
-        const shown = task.status === "running" && task.result !== undefined
-          ? { ...task, result: undefined, partialOutput: task.result }
+        // The elapsed time makes each check differ: waiting on a silent build is not a loop.
+        const shown = task.status === "running"
+          ? {
+              ...task,
+              runningForSeconds: Math.max(0, Math.round((Date.now() - Date.parse(task.startedAt)) / 1000)),
+              ...(task.result !== undefined ? { result: undefined, partialOutput: task.result } : {}),
+            }
           : task;
         return { result: JSON.stringify(shown, null, 2), isError: false };
       }

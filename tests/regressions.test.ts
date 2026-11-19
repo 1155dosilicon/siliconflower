@@ -18,6 +18,7 @@ import { extractSymbols, generateRepoMap } from "../src/services/repomap.js";
 import { GREP_MAX_MATCHES, searchContent } from "../src/grep.js";
 import { getBackgroundTask, killAllBackgroundTasks, startBackgroundCommand } from "../src/services/background-tasks.js";
 import type { AppConfig, ChatMessage, McpTool, StreamEvent } from "../src/types.js";
+import { REPEAT_STOP_AT } from "../src/turn-limits.js";
 
 const tmp = join(tmpdir(), `sf_regressions_${Date.now()}`);
 
@@ -635,9 +636,9 @@ describe.skipIf(!isWin)("closing the app (Windows)", () => {
 });
 
 /** Scripted OpenAI-compatible provider: `reply` decides each response from the request body. */
-type Reply = { text: string } | { tools: { name: string; args: Record<string, unknown> }[] } | { status: number; message: string };
+type Reply = ({ text: string } | { tools: { name: string; args: Record<string, unknown> }[] } | { status: number; message: string }) & { usage?: number };
 type SentMessage = { role: string; content?: string; tool_calls?: { function: { name: string } }[] };
-type SentBody = { messages: SentMessage[] };
+type SentBody = { messages: SentMessage[]; tools?: unknown[]; tool_choice?: string };
 
 function fakeProvider(reply: (body: SentBody) => Reply) {
   const requests: SentBody[] = [];
@@ -656,12 +657,13 @@ function fakeProvider(reply: (body: SentBody) => Reply) {
       requests.push(body);
       const r = reply(body);
       if ("status" in r) return Response.json({ error: { message: r.message } }, { status: r.status });
-      const chunks = "text" in r
+      const chunks: unknown[] = "text" in r
         ? [chunk({ content: r.text }), chunk({}, "stop")]
         : [
             chunk({ tool_calls: r.tools.map((t, index) => ({ index, id: `c${++ids}`, type: "function", function: { name: t.name, arguments: JSON.stringify(t.args) } })) }),
             chunk({}, "tool_calls"),
           ];
+      if (r.usage) chunks.push({ id: "x", object: "chat.completion.chunk", model: "m", choices: [], usage: { total_tokens: r.usage, prompt_tokens: r.usage, completion_tokens: 0 } });
       return new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n", {
         headers: { "Content-Type": "text/event-stream" },
       });
@@ -901,6 +903,21 @@ describe("background task list", () => {
     expect(list.result.length).toBeLessThan(20_000);
     const status = await runBuiltin("manage_background_task", { action: "status", taskId: id });
     expect(status.result.length).toBeGreaterThan(50_000);
+  }, 30_000);
+});
+
+describe("waiting on a background task is not a loop", () => {
+  // The status of a silent running task was the same JSON every time: the loop guard would
+  // stop a turn that was only waiting for a build.
+  test("the status of a running task says how long it has been running", async () => {
+    const id = startBackgroundCommand(isWin ? "Start-Sleep 30" : "sleep 30", process.cwd(), 60_000);
+    try {
+      const status = JSON.parse((await runBuiltin("manage_background_task", { action: "status", taskId: id })).result);
+      expect(status.status).toBe("running");
+      expect(typeof status.runningForSeconds).toBe("number");
+    } finally {
+      await runBuiltin("manage_background_task", { action: "kill", taskId: id });
+    }
   }, 30_000);
 });
 
@@ -1283,7 +1300,7 @@ describe("a turn that goes in circles", () => {
     for await (const ev of streamChat({
       config: { ...provider.config, ...config },
       messages: [{ role: "user", content: "tarefa" }],
-      tools: [],
+      tools: [{ server: "teste", name: "passo", inputSchema: { type: "object" } }],
       reasoning: "none",
       executeTool,
     })) {
@@ -1347,15 +1364,132 @@ describe("a turn that goes in circles", () => {
     }
   });
 
-  test("without anyone to ask (subagents), the turn stops at the limit", async () => {
-    const provider = fakeProvider(() => ({ tools: [{ name: "passo", args: {} }] }));
+  /** The last request of a stopped turn: the summary, asked without tools. */
+  const isWrapUp = (body: SentBody) => String(body.messages.at(-1)?.content ?? "").startsWith("[Mensagem automática do siliconflower");
+
+  // A turn stopped at the limit used to end with only "[Parado depois de 150 passos...]": whoever
+  // called it (Claude Code over MCP, a script, a subagent's parent) got nothing to work with.
+  test("without anyone to ask, the turn stops at the limit with a summary written without tools", async () => {
+    const provider = fakeProvider((body) => (isWrapUp(body) ? { text: "Feito: 3 passos. Falta: o resto." } : { tools: [{ name: "passo", args: {} }] }));
     try {
-      const events = await runTurn(provider, async () => ({ result: `${Math.random()}`, isError: false }), { askAfterSteps: 3 });
-      expect(provider.requests).toHaveLength(3);
+      let ran = 0;
+      const events = await runTurn(provider, async () => ({ result: `${++ran}`, isError: false }), { askAfterSteps: 3 });
+      expect(ran).toBe(3);
+      expect(provider.requests).toHaveLength(4);
+      const last = provider.requests[3]!;
+      expect(last.tool_choice).toBe("none");
+      expect(last.messages.at(-1)!.content).toContain("3 passos de ferramentas");
       const done = events.find((e) => e.type === "done") as Extract<StreamEvent, { type: "done" }>;
-      expect(done.content).toContain("Parado depois de 3 passos");
-      expect(done.messages!.at(-1)).toEqual({ role: "assistant", content: expect.stringContaining("Parado") });
+      expect(done.content).toContain("[Parei antes de terminar: 3 passos de ferramentas (limite de 3)");
+      expect(done.content).toContain("Feito: 3 passos. Falta: o resto.");
+      // The history stays valid: tool results, then the summary; the instruction is not kept.
+      expect(done.messages!.at(-2)!.role).toBe("tool");
+      expect(done.messages!.at(-1)).toEqual({ role: "assistant", content: expect.stringContaining("Falta: o resto.") });
+      expect(events.find((e) => e.type === "limit")).toMatchObject({ type: "limit", reason: "steps", steps: 3 });
     } finally {
+      provider.stop();
+    }
+  });
+
+  test("a provider that refuses tool_choice none gets the summary request again without tools", async () => {
+    const provider = fakeProvider((body) => {
+      if (!isWrapUp(body)) return { tools: [{ name: "passo", args: {} }] };
+      return body.tool_choice === "none" ? { status: 400, message: "tool_choice none not supported" } : { text: "resumo" };
+    });
+    try {
+      const events = await runTurn(provider, async () => ({ result: `${Math.random()}`, isError: false }), { askAfterSteps: 2 });
+      expect(provider.requests).toHaveLength(4);
+      expect(provider.requests[3]!.tools).toBeUndefined();
+      const done = events.find((e) => e.type === "done") as Extract<StreamEvent, { type: "done" }>;
+      expect(done.content).toContain("resumo");
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("when the summary fails, the turn still ends saying where it stopped", async () => {
+    const provider = fakeProvider((body) => (isWrapUp(body) ? { status: 500, message: "fora do ar" } : { tools: [{ name: "passo", args: {} }] }));
+    try {
+      const events = await runTurn(provider, async () => ({ result: `${Math.random()}`, isError: false }), { askAfterSteps: 2 });
+      expect(events.some((e) => e.type === "error")).toBe(false);
+      const done = events.find((e) => e.type === "done") as Extract<StreamEvent, { type: "done" }>;
+      expect(done.content).toContain("[Parei antes de terminar");
+      expect(done.content).toContain("Não consegui escrever o resumo");
+      expect(done.messages!.at(-1)!.role).toBe("assistant");
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("before the limit, the model is told to wrap up, so it can finish by itself", async () => {
+    const provider = fakeProvider((body) =>
+      toolResults(body).some((m) => String(m.content).includes("perto do limite")) ? { text: "terminei a tempo" } : { tools: [{ name: "passo", args: {} }] }
+    );
+    try {
+      const events = await runTurn(provider, async () => ({ result: `${Math.random()}`, isError: false }), { askAfterSteps: 10 });
+      // The 9th step carries the notice; the 10th request already answers.
+      expect(provider.requests).toHaveLength(10);
+      expect(String(toolResults(provider.requests[9]).at(-1)!.content)).toContain("restam 1 de 10 passos");
+      expect(events.some((e) => e.type === "limit")).toBe(false);
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("the tokens of every request are summed and stop the turn at askAfterTokens", async () => {
+    const provider = fakeProvider((body) => (isWrapUp(body) ? { text: "resumo" } : { tools: [{ name: "passo", args: {} }], usage: 400 }));
+    try {
+      const events = await runTurn(provider, async () => ({ result: `${Math.random()}`, isError: false }), { askAfterTokens: 1000 });
+      // 400 + 400 + 400 reach 1000 after the third step.
+      expect(provider.requests).toHaveLength(4);
+      expect(events.find((e) => e.type === "limit")).toMatchObject({ reason: "tokens", steps: 3, tokens: 1200 });
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("a model stuck repeating the same call is stopped, even far from the step limit", async () => {
+    const provider = fakeProvider((body) => (isWrapUp(body) ? { text: "resumo do loop" } : { tools: [{ name: "ler", args: { path: "a.md" } }] }));
+    try {
+      const events = await runTurn(provider, async () => ({ result: "o mesmo conteúdo", isError: false }));
+      expect(provider.requests).toHaveLength(REPEAT_STOP_AT + 1);
+      expect(events.find((e) => e.type === "limit")).toMatchObject({ reason: "loop", steps: REPEAT_STOP_AT });
+      const done = events.find((e) => e.type === "done") as Extract<StreamEvent, { type: "done" }>;
+      expect(done.content).toContain("loop sem progresso: ler chamada 8 vezes");
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("in the interface, a loop asks the user, and going on starts the counting again", async () => {
+    let n = 0;
+    const provider = fakeProvider(() => (++n <= REPEAT_STOP_AT + 3 ? { tools: [{ name: "passo", args: {} }] } : { text: "fim" }));
+    try {
+      const session = new AgentSession({ ...provider.config });
+      const turn = session.send("tarefa");
+      await until(() => session.getState().question !== null);
+      expect(session.getState().question!.question).toContain("parece preso num loop");
+      session.answer("Continuar");
+      await turn;
+      expect(session.getState().messages.at(-1)?.content).toBe("fim");
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("a turn past askAfterMinutes stops with the summary too", async () => {
+    const realNow = Date.now;
+    let calls = 0;
+    const provider = fakeProvider((body) => (isWrapUp(body) ? { text: "resumo" } : { tools: [{ name: "passo", args: {} }] }));
+    try {
+      const events = await runTurn(provider, async () => {
+        // The first step "takes" a minute: the clock jumps ahead while it runs.
+        if (++calls === 1) Date.now = () => realNow() + 61_000;
+        return { result: `${calls}`, isError: false };
+      }, { askAfterMinutes: 1 });
+      expect(events.find((e) => e.type === "limit")).toMatchObject({ reason: "time", steps: 1 });
+    } finally {
+      Date.now = realNow;
       provider.stop();
     }
   });

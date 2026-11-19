@@ -66,6 +66,28 @@ describe("siliconflower run", () => {
     expect(io.err).toBe("");
   });
 
+  test("a turn stopped at a limit reports why in --json, with the tokens of the whole turn", async () => {
+    const { session } = makeSession(async function* () {
+      yield { type: "usage", totalTokens: 300 };
+      yield { type: "tool_call", id: "c1", name: "passo", args: "{}" };
+      yield { type: "tool_result", id: "c1", name: "passo", result: "1", isError: false };
+      yield { type: "usage", totalTokens: 500 };
+      yield { type: "text", text: "[Parei antes de terminar]\n\nresumo" };
+      yield { type: "limit", reason: "steps", steps: 1, tokens: 800, elapsedMs: 4_400 };
+      yield { type: "done", content: "[Parei antes de terminar]\n\nresumo", reasoning: "", messages: [{ role: "assistant", content: "[Parei antes de terminar]\n\nresumo" }] };
+    });
+    const { io, runIO } = capture();
+    const result = await runTurn(session, { prompt: "oi", json: true }, runIO);
+    expect(result).toMatchObject({ ok: true, turnTokens: 800, stopped: { reason: "steps", steps: 1, tokens: 800, elapsedSeconds: 4 } });
+    expect(JSON.parse(io.out).stopped.reason).toBe("steps");
+  });
+
+  test("a turn that ends normally has no stop", async () => {
+    const { session } = makeSession(toolTurn);
+    const result = await runTurn(session, { prompt: "oi" }, capture().runIO);
+    expect(result.stopped).toBeNull();
+  });
+
   test("a provider error fails the run with the message on stderr", async () => {
     const { session } = makeSession(async function* () {
       yield { type: "error", message: "HTTP 401" };

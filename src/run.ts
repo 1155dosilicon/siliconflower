@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import { MAX_UPLOADS, type AgentSession, type SessionQuestion, type SessionUpload } from "./session.js";
 import { MAX_MEDIA_BYTES } from "./services/media.js";
 import { knownSecrets, redactKnownSecrets } from "./config.js";
+import type { LimitReason } from "./types.js";
 
 /** How `siliconflower run` talks to the terminal. Replaceable in tests. */
 export interface RunIO {
@@ -31,6 +32,15 @@ export interface RunTool {
   isError?: boolean;
 }
 
+/** The turn ended at a limit, before a final answer: `text` is then the summary. */
+export interface RunStop {
+  reason: LimitReason;
+  steps: number;
+  tokens: number;
+  elapsedSeconds: number;
+  detail?: string;
+}
+
 export interface RunResult {
   ok: boolean;
   cancelled: boolean;
@@ -38,7 +48,11 @@ export interface RunResult {
   error: string | null;
   conversationId: string | null;
   tools: RunTool[];
+  /** Size of the last request (how full the context is). */
   tokens: number;
+  /** Every request of the turn summed: what it cost. */
+  turnTokens: number;
+  stopped: RunStop | null;
 }
 
 const TOOL_LINE_CHARS = 160;
@@ -62,6 +76,8 @@ export async function runTurn(session: AgentSession, options: RunOptions, io: Ru
   const redact = (text: string) => redactKnownSecrets(text, secrets);
   let wroteText = false;
   let endsWithNewline = true;
+  let turnTokens = 0;
+  let stopped: RunStop | null = null;
 
   const stopStream = session.onStreamEvent((ev) => {
     switch (ev.type) {
@@ -91,6 +107,18 @@ export async function runTurn(session: AgentSession, options: RunOptions, io: Ru
       case "retry":
         // What was already written cannot be taken back: say that it is being redone.
         if (!options.quiet) io.err(`\n[${ev.message}]\n`);
+        break;
+      case "usage":
+        turnTokens += ev.totalTokens ?? (ev.promptTokens ?? 0) + (ev.completionTokens ?? 0);
+        break;
+      case "limit":
+        stopped = {
+          reason: ev.reason,
+          steps: ev.steps,
+          tokens: ev.tokens,
+          elapsedSeconds: Math.round(ev.elapsedMs / 1000),
+          ...(ev.detail ? { detail: redact(ev.detail) } : {}),
+        };
         break;
     }
   });
@@ -136,6 +164,8 @@ export async function runTurn(session: AgentSession, options: RunOptions, io: Ru
     conversationId: state.conversationId,
     tools,
     tokens: state.apiTokens,
+    turnTokens,
+    stopped,
   };
 
   if (options.json) {

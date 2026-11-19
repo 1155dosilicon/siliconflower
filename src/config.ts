@@ -172,13 +172,37 @@ function stringValues(value: unknown): Record<string, string> | undefined {
 /** Tool steps of one turn before asking whether to go on (`askAfterSteps`): a loop stops there. */
 export const DEFAULT_ASK_AFTER_STEPS = 150;
 const MAX_ASK_AFTER_STEPS = 100_000;
+/**
+ * Tokens of one turn (every request summed: each step sends the history again) before asking
+ * (`askAfterTokens`). A loop of 140 steps once spent 5.6M.
+ */
+export const DEFAULT_ASK_AFTER_TOKENS = 8_000_000;
+const MAX_ASK_AFTER_TOKENS = 1_000_000_000;
+/** Minutes of one turn before asking (`askAfterMinutes`); checked between steps. */
+export const DEFAULT_ASK_AFTER_MINUTES = 60;
+const MAX_ASK_AFTER_MINUTES = 24 * 60;
+
+/** A whole number from 0 to `max`; the default when absent or not a number. */
+function boundedCount(value: unknown, fallback: number, max: number): number {
+  const n = Number(value);
+  return value !== undefined && value !== null && value !== "" && Number.isFinite(n)
+    ? Math.min(max, Math.max(0, Math.floor(n)))
+    : fallback;
+}
 
 /** `askAfterSteps` of config.json, bounded; 0 never asks; the default when absent or not a number. */
 export function askAfterSteps(value: unknown): number {
-  const n = Number(value);
-  return value !== undefined && value !== null && Number.isFinite(n)
-    ? Math.min(MAX_ASK_AFTER_STEPS, Math.max(0, Math.floor(n)))
-    : DEFAULT_ASK_AFTER_STEPS;
+  return boundedCount(value, DEFAULT_ASK_AFTER_STEPS, MAX_ASK_AFTER_STEPS);
+}
+
+/** `askAfterTokens` of config.json, bounded; 0 never asks. */
+export function askAfterTokens(value: unknown): number {
+  return boundedCount(value, DEFAULT_ASK_AFTER_TOKENS, MAX_ASK_AFTER_TOKENS);
+}
+
+/** `askAfterMinutes` of config.json, bounded; 0 never asks. */
+export function askAfterMinutes(value: unknown): number {
+  return boundedCount(value, DEFAULT_ASK_AFTER_MINUTES, MAX_ASK_AFTER_MINUTES);
 }
 
 export function normalize(data: Partial<AppConfig>, opts: { applyEnv?: boolean } = {}): AppConfig {
@@ -214,6 +238,12 @@ export function normalize(data: Partial<AppConfig>, opts: { applyEnv?: boolean }
       : {}),
     ...(data.askAfterSteps !== undefined && Number.isFinite(Number(data.askAfterSteps))
       ? { askAfterSteps: askAfterSteps(data.askAfterSteps) }
+      : {}),
+    ...(data.askAfterTokens !== undefined && Number.isFinite(Number(data.askAfterTokens))
+      ? { askAfterTokens: askAfterTokens(data.askAfterTokens) }
+      : {}),
+    ...(data.askAfterMinutes !== undefined && Number.isFinite(Number(data.askAfterMinutes))
+      ? { askAfterMinutes: askAfterMinutes(data.askAfterMinutes) }
       : {}),
     mcpServers: (data.mcpServers && typeof data.mcpServers === "object" && !Array.isArray(data.mcpServers)
       ? data.mcpServers
