@@ -56,4 +56,4 @@ O mapa do código, os comandos e as regras que já evitaram bugs estão em [AGEN
 bun run release 0.11.0   # versão nos 3 arquivos, badge do README e [Unreleased] -> [0.11.0]
 ```
 
-O script recusa versão menor que a atual, `[Unreleased]` vazio e mudanças sem commit. Ele não faz commit: mostra o que mudou no código e nas docs desde a última tag, para conferir se README, `docs/` e `SECURITY.md` acompanham, e depois os comandos de commit, tag e push. A tag `vX.Y.Z` dispara `.github/workflows/release.yml`, que gera os pacotes e cria a release em rascunho com a seção do CHANGELOG como descrição; revise e publique à mão.
+O script recusa versão menor que a atual, `[Unreleased]` vazio e mudanças sem commit. Ele não faz commit: mostra o que mudou no código e nas docs desde a última tag, para conferir se README, `docs/` e `SECURITY.md` acompanham, e depois os comandos de commit, tag e push. A tag `vX.Y.Z` dispara `.github/workflows/release.yml`, que gera os pacotes e cria a release em rascunho, com o título `Siliconflower X.Y.Z` e a seção do CHANGELOG como descrição; revise e publique à mão.
