@@ -139,6 +139,8 @@ Tudo fica em `~/.siliconflower/` (ou em `SILICONFLOWER_DATA_DIR`, se definida):
   "system": "prompt personalizado (opcional)",
   "contextTokens": 90000,
   "askAfterSteps": 150,
+  "askAfterTokens": 8000000,
+  "askAfterMinutes": 60,
   "mcpServers": {
     "filesystem": {
       "command": "npx",
@@ -160,7 +162,7 @@ Tudo fica em `~/.siliconflower/` (ou em `SILICONFLOWER_DATA_DIR`, se definida):
 - **Variáveis de ambiente:** `SILICONFLOWER_API_KEY`, `SILICONFLOWER_BASE_URL` e `SILICONFLOWER_MODEL` substituem os campos do `config.json` sem serem gravadas nele.
 - **Chaves longe do modelo:** a chave de API e as chaves de MCP aparecem como `***` em tudo que as ferramentas devolvem ao modelo, até num `cat` do `config.json`. O que isso cobre e o que não cobre está no [SECURITY.md](SECURITY.md).
 - **Contexto:** `contextTokens` é quanto cada pedido pode usar (prompt, ferramentas e histórico); acima disso o histórico antigo é compactado. O padrão é 90 mil; aumente em modelos com janela maior (de 8 mil a 2 milhões). Os resultados que o modelo ainda não viu são os últimos a encolher: se não couberem inteiros, cada um mostra o começo e diz como ler o resto.
-- **Passos por resposta:** não há limite, mas a cada `askAfterSteps` passos de ferramentas numa mesma resposta (padrão 150) a interface pergunta se deve continuar. `0` desliga a pergunta. Subagentes, que não têm a quem perguntar, param nesse ponto.
+- **Limites por resposta:** não há um teto fixo, mas três orçamentos por resposta: `askAfterSteps` (passos de ferramentas, padrão 150), `askAfterTokens` (tokens de todos os pedidos ao modelo somados, padrão 8 milhões) e `askAfterMinutes` (padrão 60, conferido entre os passos). Quando um acaba, a interface pergunta se deve continuar, e o orçamento recomeça dali; `0` desliga cada um. Sem ninguém para perguntar (subagentes, `run` sem terminal, MCP), o modelo é avisado quando faltam 10% e, se chegar ao fim, a resposta termina com um resumo escrito sem ferramentas: o que foi feito, o que descobriu, o que falta e o próximo passo.
 - **MCP:** um servidor sobe por stdio (`command`) ou é acessado por HTTP (`url`, com `headers` opcionais). As ferramentas aparecem para o modelo como `mcp_<servidor>_<ferramenta>_<hash>`; se ele esquecer o `_<hash>` e só uma ferramenta tiver aquele nome, ela é usada mesmo assim. Um servidor que caiu é reconectado na chamada seguinte.
 - **Hooks:** `preTool`, `postTool`, `onEdit`, `onCommand`, `onSessionStart` e `onSessionEnd`, no `config.json` ou num `hooks.json` em `workspaces/<workspace-id>/` ou na raiz de `~/.siliconflower/`. Cada evento vem do `config.json` quando está lá e, se não, do `hooks.json`; um `hooks.json` dentro do repositório não roda. Quando cada um roda e as variáveis que recebe: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#hooks-corehooksts).
 - **Skills:** arquivos Markdown em `~/.siliconflower/skills/`, lidos pelo agente com `read_skill` quando relevantes.
@@ -199,8 +201,9 @@ siliconflower run --json -q "quantos testes existem?"           # uma linha de J
 ```
 
 - A resposta vai para a saída padrão (aparecendo aos poucos num terminal, inteira no fim quando redirecionada); as ferramentas usadas e os erros vão para a saída de erro, que `-q` silencia.
-- `--json` imprime no fim `{ok, cancelled, text, error, conversationId, tools, tokens}`.
-- Num terminal, as perguntas do agente (`ask_question` e o "continuar?" de `askAfterSteps`) aparecem para você responder; um número escolhe a opção. Sem terminal (script, pipe), o agente põe a pergunta na resposta final e a resposta para em `askAfterSteps` passos, como nos subagentes.
+- `--json` imprime no fim `{ok, cancelled, text, error, conversationId, tools, tokens, turnTokens, stopped}`: `tokens` é o tamanho do último pedido, `turnTokens` o total da resposta, e `stopped` (`reason`: `steps`, `tokens`, `time` ou `loop`) aparece quando ela parou num limite, com `text` sendo o resumo.
+- `--max-steps`, `--max-tokens` e `--max-minutes` trocam os limites só nesta execução (`0` = sem limite).
+- Num terminal, as perguntas do agente (`ask_question` e o "continuar?" dos limites) aparecem para você responder; um número escolhe a opção. Sem terminal (script, pipe), o agente põe a pergunta na resposta final e, num limite, a resposta termina com o resumo, como nos subagentes.
 - Ctrl+C cancela a resposta; um segundo Ctrl+C sai na hora. Código de saída: `0` ok, `1` erro, `130` cancelado.
 - O agente tem o mesmo poder que no app: roda comandos e altera arquivos na pasta atual sem pedir confirmação. Use `--mode plano` para só analisar.
 
@@ -228,7 +231,7 @@ Ferramentas oferecidas ao cliente:
 
 | Ferramenta | O que faz |
 | :--- | :--- |
-| `ask` | Manda uma tarefa ou pergunta e espera a resposta final. Argumentos: `message`; opcionais `cwd` (pasta do projeto, padrão: a pasta onde o cliente iniciou o servidor), `conversation_id` ou `continue` (continuar uma conversa), `attachments` (até 4 imagens ou PDFs), `mode`, `model` e `reasoning`. A resposta termina com o `conversation_id`, para continuar depois. |
+| `ask` | Manda uma tarefa ou pergunta e espera a resposta final. Argumentos: `message`; opcionais `cwd` (pasta do projeto, padrão: a pasta onde o cliente iniciou o servidor), `conversation_id` ou `continue` (continuar uma conversa), `attachments` (até 4 imagens ou PDFs), `mode`, `model`, `reasoning` e os limites `max_steps`, `max_tokens` e `max_minutes`. A resposta termina com o `conversation_id`, para continuar depois; se parou num limite ou num loop, diz o motivo (`stopped=...`) e que a resposta é um resumo parcial. |
 | `list_conversations` | Lista as conversas salvas de um projeto, com o id de cada uma. |
 | `read_conversation` | Mostra as últimas mensagens de uma conversa salva. |
 
@@ -276,7 +279,7 @@ O log fica em `~/.siliconflower/logs/siliconflower.log` (`siliconflower logs --l
 - **Comando em background parou ao fechar:** fechar a janela ou a GUI encerra esses comandos. O que deve continuar precisa ser iniciado fora do agente (`systemd`, `tmux`, `nohup`).
 - **Resposta ou arquivo cortado:** cada resposta tem até 32768 tokens de saída (16384 se o provedor recusar). O modelo é avisado e pode escrever em partes; num texto cortado, envie `continue`. Se o modelo gastar o limite inteiro pensando, sem escrever nada, o passo é repetido uma vez com o pensamento em `low`; se acontecer de novo, baixe o **Pensamento** ou divida o pedido.
 - **A conexão caiu no meio da resposta (`ECONNRESET`):** o passo é repetido até duas vezes, e a interface mostra "a conexão caiu; repetindo". Nenhuma ferramenta roda em dobro, porque elas só executam depois que a resposta termina.
-- **O agente não para de chamar ferramentas:** não há limite de passos por mensagem, para tarefas longas irem até o fim. Na 3ª chamada idêntica com o mesmo resultado, o modelo recebe um aviso para mudar de abordagem, e a cada 150 passos (`askAfterSteps`) a interface pergunta se deve continuar. A qualquer momento, `Esc` ou **Parar** encerram a resposta: o que as ferramentas já fizeram fica no histórico.
+- **O agente não para de chamar ferramentas:** não há limite fixo de passos por mensagem, para tarefas longas irem até o fim. A mesma chamada com o mesmo resultado, ou o mesmo erro de uma ferramenta com argumentos diferentes, leva um aviso ao modelo na 3ª vez, uma instrução para mudar de abordagem na 5ª e para a resposta na 8ª (no app, pergunta antes); buscas seguidas sem resultado também são avisadas. Além disso, a cada 150 passos, 8 milhões de tokens ou 60 minutos (`askAfterSteps`, `askAfterTokens`, `askAfterMinutes`) a interface pergunta se deve continuar. A qualquer momento, `Esc` ou **Parar** encerram a resposta: o que as ferramentas já fizeram fica no histórico.
 - **AppImage pede FUSE / `libfuse.so.2`:** use o `.deb` ou o `install-appimage.sh`. **Nunca** `apt install fuse` (veja o aviso acima).
 - **`siliconflower: command not found`:** abra um novo terminal e confira se `~/.local/bin` está no `PATH`. O app de desktop não instala esse comando.
 

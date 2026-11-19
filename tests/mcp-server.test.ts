@@ -170,6 +170,30 @@ describe("siliconflower mcp", () => {
     expect(bad({ message: "x", attachments: ["a", "b", "c", "d", "e"] })).toThrow("no máximo 4");
     expect(bad({ message: "x", attachments: "a.png" })).toThrow("lista de caminhos");
     expect(bad({ message: 42 })).toThrow("message deve ser texto");
+    expect(bad({ message: "x", max_steps: -1 })).toThrow("max_steps deve ser");
+    expect(bad({ message: "x", max_tokens: "muitos" })).toThrow("max_tokens deve ser");
+    expect(bad({ message: "x", max_minutes: Number.POSITIVE_INFINITY })).toThrow("max_minutes deve ser");
+  });
+
+  test("the limits of one ask go to run as options", () => {
+    const req = parseAsk({ message: "x", max_steps: 40.5, max_tokens: 0, max_minutes: "15" }, work);
+    expect(req).toMatchObject({ maxSteps: 40, maxTokens: 0, maxMinutes: 15 });
+    expect(buildRunArgs(req)).toEqual(["run", "--json", "--max-steps", "40", "--max-tokens", "0", "--max-minutes", "15"]);
+    expect(buildRunArgs(parseAsk({ message: "x" }, work))).toEqual(["run", "--json"]);
+  });
+
+  test("a run stopped at a limit says so, and how to go on", () => {
+    const base = { ok: true, cancelled: false, text: "Feito: x. Falta: y.", error: null, conversationId: "c-9", tools: [], tokens: 50, turnTokens: 4000 };
+    const stopped = formatAsk({ result: { ...base, stopped: { reason: "loop", steps: 8, tokens: 4000, elapsedSeconds: 130, detail: "ler chamada 8 vezes" } } });
+    expect(stopped.isError).toBe(false);
+    const texts = stopped.content.map((c) => (c as { text: string }).text);
+    expect(texts[0]).toBe("Feito: x. Falta: y.");
+    expect(texts[1]).toContain("stopped=loop");
+    expect(texts[1]).toContain("ler chamada 8 vezes");
+    expect(texts[1]).toContain("conversation_id c-9");
+    expect(texts.at(-1)).toContain("tokens: 4000");
+    const normal = formatAsk({ result: { ...base, stopped: null } });
+    expect(normal.content).toHaveLength(2);
   });
 
   test("attachments become absolute paths, so none is read as an option", () => {

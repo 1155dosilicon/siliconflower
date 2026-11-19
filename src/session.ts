@@ -19,7 +19,8 @@ import {
 import { isToolMediaMessage, loadMedia, pruneMedia, stripMediaData, MAX_MEDIA_BYTES } from "./services/media.js";
 import { killBackgroundTask, listBackgroundTasks, onBackgroundTasksChange } from "./services/background-tasks.js";
 import { ensureDir, getWorkspaceDataDir } from "./fs-util.js";
-import { estimateTokens, estimateMessagesTokens } from "./context.js";
+import { estimateTokens, estimateMessagesTokens, formatTokenCount } from "./context.js";
+import type { LimitHit } from "./turn-limits.js";
 import { log } from "./logger.js";
 import type { AppConfig, ChatMessage, McpTool, MediaAttachment, ReasoningLevel, StreamEvent, TodoItem, ToolResult } from "./types.js";
 import { isToolAllowedInMode } from "./tool-policy.js";
@@ -96,6 +97,20 @@ export interface SessionDeps {
    * to put the question in its final answer, and the turn stops at `askAfterSteps`, as in subagents.
    */
   interactive?: boolean;
+}
+
+/** The question at a turn limit: what ran out, in the user's terms. */
+export function continueQuestion(hit: LimitHit): string {
+  switch (hit.reason) {
+    case "steps":
+      return `O agente já deu ${hit.steps} passos nesta resposta sem terminar. Continuar?`;
+    case "tokens":
+      return `O agente já usou ${formatTokenCount(hit.tokens)} tokens nesta resposta sem terminar (${hit.steps} passos). Continuar?`;
+    case "time":
+      return `O agente já trabalha há ${Math.round(hit.elapsedMs / 60_000)} min nesta resposta sem terminar (${hit.steps} passos). Continuar?`;
+    case "loop":
+      return `O agente parece preso num loop (${hit.detail ?? "a mesma ação repetida"}). Continuar?`;
+  }
 }
 
 const STATUS_FLASH_MS = 1200;
@@ -597,9 +612,9 @@ export class AgentSession {
         reasoning: this.state.reasoning,
         signal: controller.signal,
         executeTool: (name, args) => this.executeTool(name, args),
-        confirmContinue: !this.interactive ? undefined : async (count) => {
+        confirmContinue: !this.interactive ? undefined : async (hit) => {
           const answer = await this.askUser(
-            `O agente já deu ${count} passos nesta resposta sem terminar. Continuar?`,
+            continueQuestion(hit),
             ["Continuar", "Parar"],
             controller.signal
           );

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
-import { configExists, loadConfig, loadStoredConfig, applyEnvOverrides, isValid, configFile, configDir } from "./config.js";
+import { configExists, loadConfig, loadStoredConfig, applyEnvOverrides, isValid, configFile, configDir, askAfterMinutes, askAfterSteps, askAfterTokens } from "./config.js";
 import { ensureConfig, runSetup } from "./wizard.js";
 import type { AppConfig, Mode, ReasoningLevel } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
@@ -84,10 +84,18 @@ program
   .option("--stdin", "also read stdin and append it to the message (e.g. a log piped in)")
   .option("--json", "print one line of JSON at the end (answer, error, tools used, conversation id)")
   .option("-q, --quiet", "do not list the tools on stderr")
+  .option("--max-steps <n>", "tool steps before the turn stops (or asks, at a terminal); 0 = no limit (default: askAfterSteps)")
+  .option("--max-tokens <n>", "tokens of the turn, all requests summed, before it stops; 0 = no limit (default: askAfterTokens)")
+  .option("--max-minutes <n>", "minutes of the turn before it stops; 0 = no limit (default: askAfterMinutes)")
   .action(async (words: string[], _opts, cmd: Command) => {
     const opts = cmd.optsWithGlobals();
     const { buildPrompt, readStdin, readUploads, runTurn } = await import("./run.js");
     if (opts.continue && opts.resume) throw new Error("use --continue ou --resume, não os dois.");
+    const limits = {
+      askAfterSteps: limitOption(opts.maxSteps, "--max-steps"),
+      askAfterTokens: limitOption(opts.maxTokens, "--max-tokens"),
+      askAfterMinutes: limitOption(opts.maxMinutes, "--max-minutes"),
+    };
     const stdinIsTTY = Boolean(process.stdin.isTTY);
     let piped: string | undefined;
     if (opts.stdin || !words.length) {
@@ -104,6 +112,9 @@ program
     // Someone can answer only when stdin is still a terminal (not used up by a pipe).
     const interactive = stdinIsTTY && piped === undefined && Boolean(process.stderr.isTTY);
     const resolved = await resolveRun(opts, { interactive });
+    if (limits.askAfterSteps !== undefined) resolved.config.askAfterSteps = askAfterSteps(limits.askAfterSteps);
+    if (limits.askAfterTokens !== undefined) resolved.config.askAfterTokens = askAfterTokens(limits.askAfterTokens);
+    if (limits.askAfterMinutes !== undefined) resolved.config.askAfterMinutes = askAfterMinutes(limits.askAfterMinutes);
     await log("info", "=== siliconflower iniciado por run ===");
     const { AgentSession } = await import("./session.js");
     const { ConversationStore } = await import("./services/conversations.js");
@@ -161,6 +172,14 @@ program
     await new Promise<void>((done) => process.stdout.write("", () => done()));
     process.exit(exitCode);
   });
+
+/** A limit given on the command line: a whole number from 0 up, or absent. */
+function limitOption(value: unknown, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  const text = String(value).trim();
+  if (!/^\d+$/.test(text)) throw new Error(`${name} inválido: "${text}". Use um número inteiro (0 = sem limite).`);
+  return Number(text);
+}
 
 /** Under the 2 s killProcessTree waits before SIGKILL, so the cleanup gets to run. */
 const TERMINATE_TIMEOUT_MS = 1_500;

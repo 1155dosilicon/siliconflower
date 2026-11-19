@@ -6,6 +6,17 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Added
+- Orçamentos por resposta além dos passos: `askAfterTokens` (padrão 8M, somando todos os pedidos ao modelo) e `askAfterMinutes` (padrão 60) no `config.json`, `0` desliga; no app, ao chegar no limite, a interface pergunta se continua, como em `askAfterSteps` (`src/turn-limits.ts`, `src/llm.ts`, `src/config.ts`).
+- Sem ninguém para perguntar (`run` sem terminal, MCP, subagentes), o turno que chega num limite termina com um último pedido sem ferramentas, que resume o que foi feito, o que foi descoberto, o que falta e o próximo passo, em vez de parar só com "[Parado depois de N passos]"; se esse pedido falhar, fica a nota de onde parou (`src/llm.ts`).
+- Perto do limite (10% restante), sem ninguém para perguntar, o modelo recebe um aviso para encaminhar o fim, e muitas vezes termina sozinho antes da parada (`src/turn-limits.ts`).
+- Detector de loop em três níveis: a mesma chamada com o mesmo resultado (inclusive alternando A, B, A, B) e o mesmo erro de uma ferramenta com argumentos variados recebem aviso na 3ª vez, uma instrução de correção na 5ª e param o turno (ou perguntam, no app) na 8ª; buscas seguidas sem resultado são avisadas na 5ª e na 8ª, sem parar (`src/turn-limits.ts`).
+- `siliconflower run --max-steps/--max-tokens/--max-minutes` e, no `ask` do servidor MCP, `max_steps`/`max_tokens`/`max_minutes`: limites só para aquele pedido (`src/index.tsx`, `src/mcp-server.ts`).
+- `run --json` traz `stopped` (`reason`: `steps`, `tokens`, `time` ou `loop`, com passos, tokens e segundos) e `turnTokens`, o total do turno; o `ask` diz que a resposta é um resumo parcial e como continuar (`src/run.ts`, `src/mcp-server.ts`).
+
+### Fixed
+- O `status` de uma tarefa em background ainda rodando traz `runningForSeconds`: antes, checar um build silencioso devolvia sempre o mesmo texto e parecia um loop (`src/tools.ts`).
+
 ## [0.15.0] - 2026-11-16
 
 ### Added
