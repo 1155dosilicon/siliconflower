@@ -92,6 +92,7 @@ describe("turn budget", () => {
     expect(prompt).toContain("150 passos");
     expect(prompt).toContain("Não chame mais ferramentas");
     for (const part of ["Feito", "Descobertas", "Falta", "Próximo passo"]) expect(prompt).toContain(part);
+    expect(describeLimit({ reason: "steps", limit: 1, steps: 1, tokens: 0, elapsedMs: 0 })).toBe("1 passo de ferramentas (limite de 1)");
     expect(describeLimit({ reason: "loop", limit: 0, steps: 9, tokens: 0, elapsedMs: 0, detail: "x repetida" })).toContain("x repetida");
   });
 

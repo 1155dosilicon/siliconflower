@@ -102,7 +102,7 @@ export class TurnBudget {
 export function describeLimit(hit: LimitHit): string {
   switch (hit.reason) {
     case "steps":
-      return `${hit.steps} passos de ferramentas (limite de ${hit.limit})`;
+      return `${hit.steps} ${hit.steps === 1 ? "passo" : "passos"} de ferramentas (limite de ${hit.limit})`;
     case "tokens":
       return `${formatTokenCount(hit.tokens)} tokens (limite de ${formatTokenCount(hit.limit)})`;
     case "time":
