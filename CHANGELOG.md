@@ -6,6 +6,8 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-19
+
 ### Added
 - Orçamentos por resposta além dos passos: `askAfterTokens` (padrão 8M, somando todos os pedidos ao modelo) e `askAfterMinutes` (padrão 60) no `config.json`, `0` desliga; no app, ao chegar no limite, a interface pergunta se continua, como em `askAfterSteps` (`src/turn-limits.ts`, `src/llm.ts`, `src/config.ts`).
 - Sem ninguém para perguntar (`run` sem terminal, MCP, subagentes), o turno que chega num limite termina com um último pedido sem ferramentas, que resume o que foi feito, o que foi descoberto, o que falta e o próximo passo, em vez de parar só com "[Parado depois de N passos]"; se esse pedido falhar, fica a nota de onde parou (`src/llm.ts`).
