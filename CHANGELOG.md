@@ -6,6 +6,8 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-25
+
 ### Corrigido
 - `estimateTokens` usava uma única razão de 3,5 caracteres por token: texto CJK, cirílico ou com emoji custa até um token por caractere, então o orçamento estimava menos do que o pedido usava e o provedor recusava a requisição. Agora o cálculo separa ASCII, latino acentuado e caracteres largos (`src/context.ts`).
 - Quando o começo da conversa era descartado para caber no contexto, o modelo não sabia: respondia como se aquilo nunca tivesse sido pedido, o que fazia turnos antigos serem refeitos passo a passo. Agora entra uma mensagem de compactação dizendo quantas mensagens saíram e para não refazer o que já está pronto.
