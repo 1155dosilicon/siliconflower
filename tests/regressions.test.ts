@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runShell, decodeClixml, withoutSecrets } from "../src/shell.js";
 import { htmlToMarkdown, isPrivateAddress, webFetch } from "../src/services/web.js";
-import { buildOpenAIMessages, isConnectionDrop, isContextOverflow as isContextOverflowTest, isOfficialOpenAIEndpoint, NOT_RUN_AFTER_CANCEL, streamChat } from "../src/llm.js";
+import { buildOpenAIMessages, isConnectionDrop, isContextOverflow as isContextOverflowTest, isOfficialOpenAIEndpoint, keepsToolCallReasoning, NOT_RUN_AFTER_CANCEL, streamChat } from "../src/llm.js";
 import { McpManager, qualifyMcpToolName, resolveMcpToolName, toolNotFoundMessage } from "../src/mcp.js";
 import { AgentSession } from "../src/session.js";
 import { ConversationStore, newRevision } from "../src/services/conversations.js";
@@ -1712,61 +1712,81 @@ describe("a provider that refuses before answering", () => {
 
   test("a too-long request is cut down and sent again instead of failing the turn", async () => {
     // The budget is an estimate; the provider knows the real window. The first request is refused
-    // for size, the second is the same turn with a smaller history.
+    // for size, the second is the same turn with a smaller history. Bun.serve is used instead of a
+    // raw socket: the body of this request arrives in several chunks, and answering before reading
+    // all of it closes the connection under the client (that made this test flaky).
     let requests = 0;
-    const bodies: string[] = [];
-    // The request body is large, so it arrives in several chunks: answering on the first one
-    // would close the socket before the client finished writing (and it would retry the write).
-    let buffer = "";
-    const listener = Bun.listen({
+    const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      socket: {
-        data(socket, chunk) {
-          buffer += Buffer.from(chunk).toString("utf8");
-          const headerEnd = buffer.indexOf("\r\n\r\n");
-          if (headerEnd < 0) return;
-          const length = Number(/content-length:\s*(\d+)/i.exec(buffer.slice(0, headerEnd))?.[1] ?? 0);
-          if (Buffer.byteLength(buffer.slice(headerEnd + 4)) < length) return;
-
-          const body = JSON.stringify({
-            error: { message: "This model's maximum context length is 8192 tokens", code: "context_length_exceeded" },
-          });
-          if (++requests === 1) {
-            socket.write(
-              `HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`
-            );
-          } else {
-            const ok = sseChunk({ content: "resposta depois da compactação" }) + sseChunk({}, "stop") + "data: [DONE]\n\n";
-            socket.write(
-              `HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: ${Buffer.byteLength(ok)}\r\nConnection: close\r\n\r\n${ok}`
-            );
-          }
-          socket.end();
-        },
+      async fetch(req) {
+        // The body has to be fully read before answering: it arrives in several chunks, and an
+        // early answer closes the connection under the client that is still writing it.
+        await req.text();
+        requests++;
+        if (requests === 1) {
+          return new Response(
+            JSON.stringify({ error: { message: "This model's maximum context length is 8192 tokens", code: "context_length_exceeded" } }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response(sseChunk({ content: "resposta depois da compactação" }) + sseChunk({}, "stop") + "data: [DONE]\n\n", {
+          headers: { "Content-Type": "text/event-stream" },
+        });
       },
     });
-    const url = `http://127.0.0.1:${listener.port}/v1`;
     const history: ChatMessage[] = [];
     for (let i = 0; i < 200; i++) history.push({ role: i % 2 === 0 ? "user" : "assistant", content: `passo ${i} `.repeat(60) });
     history.push({ role: "user", content: "responda" });
     try {
       const events: StreamEvent[] = [];
+      const retries: string[] = [];
       for await (const ev of streamChat({
-        config: { baseURL: url, apiKey: "k", model: "m", reasoning: "none", mcpServers: {} },
+        config: { baseURL: `http://127.0.0.1:${server.port}/v1`, apiKey: "k", model: "m", reasoning: "none", mcpServers: {} },
         messages: history,
         tools: [],
         reasoning: "none",
         executeTool: async () => ({ result: "", isError: false }),
       })) {
-        if (ev.type === "retry") bodies.push(ev.message);
+        if (ev.type === "retry") retries.push(ev.message);
         events.push(ev);
       }
       expect(requests).toBe(2);
-      expect(bodies.join()).toContain("contexto do modelo");
+      expect(retries.join()).toContain("contexto do modelo");
       expect(doneOf(events).content).toContain("resposta depois da compactação");
     } finally {
-      listener.stop(true);
+      server.stop(true);
+    }
+  }, 20_000);
+
+  test("the history is cut again when two cuts were not enough", async () => {
+    // The recovery used to stop after two cuts (800K -> 288K); a provider with a 128K window kept
+    // refusing and the turn ended in an error instead of fitting.
+    let requests = 0;
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        await req.json();
+        requests++;
+        if (requests <= 3) {
+          return new Response(
+            JSON.stringify({ error: { message: "This model's maximum context length is 8192 tokens", code: "context_length_exceeded" } }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response(sseChunk({ content: "coube" }) + sseChunk({}, "stop") + "data: [DONE]\n\n", {
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      },
+    });
+    try {
+      const events = await collect(`http://127.0.0.1:${server.port}/v1`, "none");
+      expect(requests).toBe(4);
+      expect(events.filter((e) => e.type === "retry")).toHaveLength(3);
+      expect(doneOf(events).content).toContain("coube");
+    } finally {
+      server.stop(true);
     }
   }, 20_000);
   test("a payload too large is not mistaken for a context overflow", () => {
@@ -2082,12 +2102,24 @@ describe("DeepSeek support", () => {
     ]);
     const assistant = messages.find((m) => m.role === "assistant") as { reasoning_content?: string };
     expect(assistant.reasoning_content).toBe("");
-    // Any other provider: no field at all, since some reject unknown ones.
-    const other = buildOpenAIMessages(config("https://api.siliconflow.com/v1"), [
+    // A gateway that hosts one of theirs is recognized by the model name, and gets the same field.
+    const gateway = buildOpenAIMessages(config("https://api.siliconflow.com/v1", "deepseek-ai/DeepSeek-V4-Pro"), [
+      { role: "user", content: "oi" },
+      { role: "assistant", content: "olá" },
+    ]);
+    expect((gateway.find((m) => m.role === "assistant") as { reasoning_content?: string }).reasoning_content).toBe("");
+    // Any other model: no field at all, since some reject unknown ones.
+    const other = buildOpenAIMessages(config("https://api.siliconflow.com/v1", "gpt-5.5"), [
       { role: "user", content: "oi" },
       { role: "assistant", content: "olá" },
     ]);
     expect("reasoning_content" in (other.find((m) => m.role === "assistant") as object)).toBe(false);
+    // A gateway that refused the field: the next request is built without it.
+    const refused = buildOpenAIMessages(config("https://api.deepseek.com/v1"), [
+      { role: "user", content: "oi" },
+      { role: "assistant", content: "olá" },
+    ], { echoReasoning: false });
+    expect("reasoning_content" in (refused.find((m) => m.role === "assistant") as object)).toBe(false);
   });
 
   test("thinking is said out loud: off is off, and a dropped step disables it", () => {
@@ -2099,10 +2131,20 @@ describe("DeepSeek support", () => {
   test("the window and the output limit follow a DeepSeek model", () => {
     expect(contextBudget(undefined, "deepseek-v4.1-flash")).toBe(800_000);
     expect(contextBudget(undefined, "gpt-5.5")).toBe(90_000);
+    // The 800K is for the 1M-window models (the V4 family and its `flash` name).
+    expect(contextBudget(undefined, "deepseek-flash")).toBe(800_000);
+    expect(contextBudget(undefined, "deepseek-ai/DeepSeek-V4-Pro")).toBe(800_000);
+    // An older DeepSeek hosted by a gateway has a much smaller window: it keeps the general default.
+    expect(contextBudget(undefined, "deepseek-chat")).toBe(90_000);
+    expect(contextBudget(undefined, "deepseek-ai/DeepSeek-V3")).toBe(90_000);
+    expect(contextBudget(undefined, "deepseek-r1")).toBe(90_000);
     // An explicit value in config.json always wins.
     expect(contextBudget(120_000, "deepseek-chat")).toBe(120_000);
-    expect(outputBudget("https://api.deepseek.com/v1")).toBe(262_144);
+    expect(outputBudget("https://api.deepseek.com/v1")).toBe(393_216);
+    // The gateway hosting their model gets the same ceiling; a model of another family does not.
     expect(outputBudget("https://api.siliconflow.com/v1")).toBe(32_768);
+    expect(outputBudget("https://api.siliconflow.com/v1", "deepseek-ai/DeepSeek-V4-Pro")).toBe(393_216);
+    expect(outputBudget("https://api.siliconflow.com/v1", "qwen3-max")).toBe(32_768);
   });
 
   test("reasoning levels: DeepSeek takes them all, MiMo only on/off", () => {
@@ -2147,5 +2189,123 @@ describe("DeepSeek support", () => {
     } finally {
       server.stop(true);
     }
+  });
+
+  test("the thinking adjustment is remembered by the following steps", async () => {
+    // Every step used to send `thinking` again, get a 400 and retry: one wasted request per step.
+    const bodies: { thinking?: unknown }[] = [];
+    let accepted = 0;
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        const body = (await req.json()) as { thinking?: unknown };
+        bodies.push(body);
+        if (body.thinking) {
+          return new Response(JSON.stringify({ error: { message: "Unsupported parameter: thinking" } }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        accepted++;
+        const chunks = accepted === 1
+          ? [sseChunk({ tool_calls: [{ index: 0, id: "c1", type: "function", function: { name: "passo", arguments: "{}" } }] }, "tool_calls")]
+          : [sseChunk({ content: "fim" }, "stop")];
+        return new Response(chunks.join("") + "data: [DONE]\n\n", {
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      },
+    });
+    try {
+      const events: StreamEvent[] = [];
+      for await (const ev of streamChat({
+        config: { baseURL: `http://127.0.0.1:${server.port}/v1`, apiKey: "k", model: "deepseek-v4.1-flash", reasoning: "high", mcpServers: {} },
+        messages: [{ role: "user", content: "faça" }],
+        tools: [{ server: "local", name: "passo", description: "passo", inputSchema: { type: "object", properties: {} } }],
+        reasoning: "high",
+        executeTool: async () => ({ result: "ok", isError: false }),
+      })) {
+        events.push(ev);
+      }
+      // 1 refused + 1 with the tool call + 1 final: step 2 did not try `thinking` again.
+      expect(bodies).toHaveLength(3);
+      expect(bodies.filter((b) => b.thinking !== undefined)).toHaveLength(1);
+      expect(doneOf(events).content).toBe("fim");
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("a gateway that rejects reasoning_content is retried without the field", async () => {
+    const bodies: { messages?: { role?: string }[] }[] = [];
+    let refused = false;
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        const body = (await req.json()) as (typeof bodies)[number];
+        bodies.push(body);
+        const hasReasoning = (body.messages ?? []).some((m) => m.role === "assistant" && "reasoning_content" in m);
+        if (hasReasoning && !refused) {
+          refused = true;
+          return new Response(JSON.stringify({ error: { message: "Unsupported parameter: reasoning_content" } }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(sseChunk({ content: "ok" }, "stop") + "data: [DONE]\n\n", {
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      },
+    });
+    try {
+      const events: StreamEvent[] = [];
+      for await (const ev of streamChat({
+        config: { baseURL: `http://127.0.0.1:${server.port}/v1`, apiKey: "k", model: "deepseek-v4.1-flash", reasoning: "high", mcpServers: {} },
+        messages: [{ role: "user", content: "oi" }, { role: "assistant", content: "olá" }],
+        tools: [],
+        reasoning: "high",
+        executeTool: async () => ({ result: "", isError: false }),
+      })) {
+        events.push(ev);
+      }
+      const assistantOf = (b: (typeof bodies)[number]) => (b.messages ?? [])[1] as { reasoning_content?: unknown };
+      expect(bodies).toHaveLength(2);
+      expect("reasoning_content" in assistantOf(bodies[0]!)).toBe(true);
+      expect("reasoning_content" in assistantOf(bodies[1]!)).toBe(false);
+      expect(doneOf(events).content).toBe("ok");
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  test("the finish reasons only DeepSeek documents end with a warning, not silence", async () => {
+    for (const finish of ["insufficient_system_resource", "aborted"]) {
+      const provider = scriptedProvider([sseResponse([sseChunk({ content: "meia resposta" }), sseChunk({}, finish)])]);
+      try {
+        const done = doneOf(await collect(provider.url, "none"));
+        expect(done.content).toContain("meia resposta");
+        expect(done.content).toContain("pode estar incompleta");
+      } finally {
+        provider.stop();
+      }
+    }
+  });
+});
+
+describe("the reasoning of a tool-call turn", () => {
+  // The DeepSeek support took the MiMo rule with it by accident: the assistant message of a
+  // tool-call step stopped storing its reasoning, which MiMo requires back on the next request.
+  test("MiMo and DeepSeek keep it; the other providers do not", () => {
+    const cfg = (baseURL: string, model: string): AppConfig => ({ baseURL, apiKey: "k", model, reasoning: "high", mcpServers: {} });
+    expect(keepsToolCallReasoning("https://api.xiaomimimo.com/v1", "mimo-v2.6-pro")).toBe(true);
+    expect(keepsToolCallReasoning("https://api.deepseek.com/v1", "deepseek-flash")).toBe(true);
+    // A gateway that hosts DeepSeek follows the same rule, by model name.
+    expect(keepsToolCallReasoning("https://api.siliconflow.com/v1", "deepseek-ai/DeepSeek-V4-Pro")).toBe(true);
+    expect(keepsToolCallReasoning("https://api.openai.com/v1", "gpt-5.5")).toBe(false);
+    // A message that already carries the reasoning is sent back to MiMo and the others are not.
+    const assistant: ChatMessage = { role: "assistant", content: "", reasoning: "pensei" };
+    expect("reasoning_content" in (buildOpenAIMessages(cfg("https://api.xiaomimimo.com/v1", "mimo-v2.6-pro"), [assistant])[0] as object)).toBe(true);
+    expect("reasoning_content" in (buildOpenAIMessages(cfg("https://api.openai.com/v1", "gpt-5.5"), [assistant])[0] as object)).toBe(false);
   });
 });

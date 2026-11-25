@@ -1,11 +1,13 @@
-﻿import { describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { buildOpenAIMessages, buildOpenAITools, enrichError } from "../src/llm.js";
 import type { AppConfig, ChatMessage, McpTool } from "../src/types.js";
 
 const testConfig: AppConfig = {
   baseURL: "https://api.siliconflow.com/v1",
   apiKey: "test-key",
-  model: "deepseek-ai/DeepSeek-V3",
+  // Not a DeepSeek model: this file checks the generic OpenAI message structure. The
+  // `reasoning_content` that a DeepSeek model adds has its own tests (regressions.test.ts).
+  model: "gpt-5.5",
   system: "You are a helpful coding assistant.",
   reasoning: "high",
   mode: "programação",
