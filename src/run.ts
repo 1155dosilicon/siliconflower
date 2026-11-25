@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import { MAX_UPLOADS, type AgentSession, type SessionQuestion, type SessionUpload } from "./session.js";
 import { MAX_MEDIA_BYTES } from "./services/media.js";
 import { knownSecrets, redactKnownSecrets } from "./config.js";
+import { weightedCost } from "./turn-limits.js";
 import type { LimitReason } from "./types.js";
 
 /** How `siliconflower run` talks to the terminal. Replaceable in tests. */
@@ -50,8 +51,12 @@ export interface RunResult {
   tools: RunTool[];
   /** Size of the last request (how full the context is). */
   tokens: number;
-  /** Every request of the turn summed: what it cost. */
+  /** Every request of the turn summed: what it cost, raw. */
   turnTokens: number;
+  /** The same turn, as it counts against `askAfterTokens` (input weighted). */
+  turnCost: number;
+  /** Share of the input the provider served from its prompt cache (it is what makes `turnCost` fall). */
+  cachedTokens: number;
   stopped: RunStop | null;
 }
 
@@ -77,6 +82,8 @@ export async function runTurn(session: AgentSession, options: RunOptions, io: Ru
   let wroteText = false;
   let endsWithNewline = true;
   let turnTokens = 0;
+  let turnCost = 0;
+  let cachedTokens = 0;
   let stopped: RunStop | null = null;
 
   const stopStream = session.onStreamEvent((ev) => {
@@ -108,9 +115,15 @@ export async function runTurn(session: AgentSession, options: RunOptions, io: Ru
         // What was already written cannot be taken back: say that it is being redone.
         if (!options.quiet) io.err(`\n[${ev.message}]\n`);
         break;
-      case "usage":
-        turnTokens += ev.totalTokens ?? (ev.promptTokens ?? 0) + (ev.completionTokens ?? 0);
+      case "usage": {
+        const input = ev.promptTokens ?? 0;
+        const output = ev.completionTokens ?? (ev.totalTokens ?? 0) - input;
+        const cached = ev.cachedTokens ?? 0;
+        turnTokens += ev.totalTokens ?? input + output;
+        turnCost += weightedCost(input, output, cached, session.config.tokenWeights);
+        cachedTokens += cached;
         break;
+      }
       case "limit":
         stopped = {
           reason: ev.reason,
@@ -165,6 +178,8 @@ export async function runTurn(session: AgentSession, options: RunOptions, io: Ru
     tools,
     tokens: state.apiTokens,
     turnTokens,
+    turnCost,
+    cachedTokens,
     stopped,
   };
 

@@ -6,6 +6,20 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Corrigido
+- `estimateTokens` usava uma única razão de 3,5 caracteres por token: texto CJK, cirílico ou com emoji custa até um token por caractere, então o orçamento estimava menos do que o pedido usava e o provedor recusava a requisição. Agora o cálculo separa ASCII, latino acentuado e caracteres largos (`src/context.ts`).
+- Quando o começo da conversa era descartado para caber no contexto, o modelo não sabia: respondia como se aquilo nunca tivesse sido pedido, o que fazia turnos antigos serem refeitos passo a passo. Agora entra uma mensagem de compactação dizendo quantas mensagens saíram e para não refazer o que já está pronto.
+- `askAfterTokens` contava cada reenvio do contexto inteiro: o limite parava a resposta em ~89 passos com o contexto cheio (e em ~400 com um contexto pequeno), sem medir custo nenhum. A entrada agora pesa 0,1 (`PREFILL_WEIGHT`), então 8M medem o custo do turno e não o tamanho do contexto.
+- O rodapé da página mostrava o tamanho do contexto (`68k`) e a pergunta falava em `8M` sem dizer que eram coisas diferentes: agora aparecem três números, contexto, custo no turno e passos, e a pergunta diz que o valor é o custo.
+
+### Adicionado
+- Um pedido recusado por tamanho (`context_length_exceeded` e afins) agora encolhe o histórico e é repetido até duas vezes, em vez de terminar o turno: o `contextTokens` é uma estimativa, e um modelo com janela menor do que a configurada só descobria isso na hora da falha (`src/llm.ts`).
+- `429` e `5xx` são repetidos com espera exponencial, respeitando o `Retry-After` do provedor, até três vezes antes de desistir; o retry interno do SDK da OpenAI fica desligado para não multiplicar as tentativas (`src/llm.ts`).
+- O plano aberto (`todowrite`) vai na nota de compactação, então o que falta fazer sobrevive a um histórico descartado; itens concluídos e cancelados ficam de fora (`src/context.ts`, `src/session.ts`).
+- `turnTokens` (soma bruta do turno), `turnCost` (o mesmo, ponderado) e `cachedTokens` no `run --json`, no estado da sessão e no `run`: dá para ver quanto cada resposta custou de fato.
+- `tokenWeights` no `config.json` (`prefill` e `cacheHit`): o peso da entrada e da entrada cacheada no `askAfterTokens`. `{ prefill: 1, cacheHit: 1 }` volta à soma bruta do provedor; os padrões (0,1 e 0,025) medem custo.
+- O custo do turno passou a considerar o cache de prompt (`prompt_tokens_details.cached_tokens` ou `prompt_cache_hit_tokens`), em vez de cobrar o prefixo reenviado como entrada nova; o rodapé mostra quanto veio do cache.
+
 ## [0.16.0] - 2026-11-19
 
 ### Added

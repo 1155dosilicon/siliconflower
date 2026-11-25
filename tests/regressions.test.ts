@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runShell, decodeClixml, withoutSecrets } from "../src/shell.js";
 import { htmlToMarkdown, isPrivateAddress, webFetch } from "../src/services/web.js";
-import { buildOpenAIMessages, isConnectionDrop, isOfficialOpenAIEndpoint, NOT_RUN_AFTER_CANCEL, streamChat } from "../src/llm.js";
+import { buildOpenAIMessages, isConnectionDrop, isContextOverflow as isContextOverflowTest, isOfficialOpenAIEndpoint, NOT_RUN_AFTER_CANCEL, streamChat } from "../src/llm.js";
 import { McpManager, qualifyMcpToolName, resolveMcpToolName, toolNotFoundMessage } from "../src/mcp.js";
 import { AgentSession } from "../src/session.js";
 import { ConversationStore, newRevision } from "../src/services/conversations.js";
@@ -636,7 +636,10 @@ describe.skipIf(!isWin)("closing the app (Windows)", () => {
 });
 
 /** Scripted OpenAI-compatible provider: `reply` decides each response from the request body. */
-type Reply = ({ text: string } | { tools: { name: string; args: Record<string, unknown> }[] } | { status: number; message: string }) & { usage?: number };
+type Reply = ({ text: string } | { tools: { name: string; args: Record<string, unknown> }[] } | { status: number; message: string }) & {
+  /** A number counts as input only (as before); the object says both sides, for the weight. */
+  usage?: number | { input: number; output: number; cached?: number };
+};
 type SentMessage = { role: string; content?: string; tool_calls?: { function: { name: string } }[] };
 type SentBody = { messages: SentMessage[]; tools?: unknown[]; tool_choice?: string };
 
@@ -663,7 +666,23 @@ function fakeProvider(reply: (body: SentBody) => Reply) {
             chunk({ tool_calls: r.tools.map((t, index) => ({ index, id: `c${++ids}`, type: "function", function: { name: t.name, arguments: JSON.stringify(t.args) } })) }),
             chunk({}, "tool_calls"),
           ];
-      if (r.usage) chunks.push({ id: "x", object: "chat.completion.chunk", model: "m", choices: [], usage: { total_tokens: r.usage, prompt_tokens: r.usage, completion_tokens: 0 } });
+      if (r.usage) {
+        const prompt = typeof r.usage === "number" ? r.usage : r.usage.input;
+        const completion = typeof r.usage === "number" ? 0 : r.usage.output;
+        const cached = typeof r.usage === "number" ? undefined : r.usage.cached;
+        chunks.push({
+          id: "x",
+          object: "chat.completion.chunk",
+          model: "m",
+          choices: [],
+          usage: {
+            total_tokens: prompt + completion,
+            prompt_tokens: prompt,
+            completion_tokens: completion,
+            ...(cached === undefined ? {} : { prompt_tokens_details: { cached_tokens: cached } }),
+          },
+        });
+      }
       return new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n", {
         headers: { "Content-Type": "text/event-stream" },
       });
@@ -1199,6 +1218,27 @@ describe("compaction keeps what the model has not seen yet", () => {
     ...files.map((f, i) => ({ role: "tool" as const, toolCallId: `${prefix}${i}`, toolName: "read_file", content: content(f) })),
   ];
 
+  test("a dropped start of the conversation says so, so the model looks again instead of guessing", async () => {
+    const { compressHistory } = await import("../src/context.js");
+    const big = Array.from({ length: 40 }, (_, n) => ({ role: "user" as const, content: `pedido ${n} ${"y".repeat(20_000)}` }));
+    // Even after the old messages are shrunk, 40 of them exceed 1000 tokens: the oldest go.
+    const out = compressHistory([...big, { role: "assistant", content: "ok" }, { role: "user", content: "e agora?" }], 1_000);
+    // The first message is the note, not the original request: the model is told what it lost.
+    expect(out[0]!.role).toBe("user");
+    expect(out[0]!.content).toContain("[compactação]");
+    expect(out[0]!.content).toMatch(/\(\d+ mensagens\)/);
+    expect(out[0]!.content).toContain("não refaça o que está pronto");
+    expect(out.at(-1)!.content).toBe("e agora?");
+  });
+
+  test("nothing is dropped when the history fits, so no note is invented", async () => {
+    const { compressHistory } = await import("../src/context.js");
+    const messages: ChatMessage[] = [{ role: "user", content: "oi" }, { role: "assistant", content: "olá" }];
+    const out = compressHistory(messages, 20_000);
+    expect(out[0]!.content).toBe("oi");
+    expect(out.some((m) => m.content.includes("[compactação]"))).toBe(false);
+  });
+
   test("the results of the step that just ran share the budget and say where to go on", async () => {
     const { compressHistory, estimateMessagesTokens } = await import("../src/context.js");
     const request = "Leia as seis partes e diga qual é o fato escondido.";
@@ -1436,13 +1476,47 @@ describe("a turn that goes in circles", () => {
     }
   });
 
-  test("the tokens of every request are summed and stop the turn at askAfterTokens", async () => {
-    const provider = fakeProvider((body) => (isWrapUp(body) ? { text: "resumo" } : { tools: [{ name: "passo", args: {} }], usage: 400 }));
+  test("the cost of every request is summed and stops the turn at askAfterTokens", async () => {
+    // Input counts at a tenth: 10k of context per step costs 1000, so the third step stops.
+    const provider = fakeProvider((body) => (isWrapUp(body) ? { text: "resumo" } : { tools: [{ name: "passo", args: {} }], usage: { input: 10_000, output: 0 } }));
     try {
-      const events = await runTurn(provider, async () => ({ result: `${Math.random()}`, isError: false }), { askAfterTokens: 1000 });
-      // 400 + 400 + 400 reach 1000 after the third step.
+      const events = await runTurn(provider, async () => ({ result: `${Math.random()}`, isError: false }), { askAfterTokens: 3000 });
+      // 1000 + 1000 + 1000 reach the limit after the third step.
       expect(provider.requests).toHaveLength(4);
-      expect(events.find((e) => e.type === "limit")).toMatchObject({ reason: "tokens", steps: 3, tokens: 1200 });
+      expect(events.find((e) => e.type === "limit")).toMatchObject({ reason: "tokens", steps: 3, tokens: 3000 });
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("what the provider served from its cache costs a quarter of the input", async () => {
+    // 20k of input, all cached, 1000 out: 20000 * 0.025 + 1000 = 1500 per step.
+    const provider = fakeProvider((body) =>
+      isWrapUp(body)
+        ? { text: "resumo" }
+        : { tools: [{ name: "passo", args: {} }], usage: { input: 20_000, output: 1_000, cached: 20_000 } }
+    );
+    try {
+      const events = await runTurn(provider, async () => ({ result: `${Math.random()}`, isError: false }), { askAfterTokens: 3_000 });
+      // Without the cache this would be 3000 per step and stop at the first: the cache is
+      // measured, not guessed, so the same budget allows twice the work.
+      expect(provider.requests).toHaveLength(3);
+      expect(events.find((e) => e.type === "limit")).toMatchObject({ reason: "tokens", steps: 2, tokens: 3_000 });
+    } finally {
+      provider.stop();
+    }
+  });
+
+  test("output weighs ten times the input, so a turn is not spent by its context alone", async () => {
+    const provider = fakeProvider((body) =>
+      isWrapUp(body) ? { text: "resumo" } : { tools: [{ name: "passo", args: {} }], usage: { input: 50_000, output: 200 } }
+    );
+    try {
+      // Each step costs 5000 + 200: 5200. At 1000 of input alone the old raw sum would have
+      // stopped the turn after one step, ten times sooner than the cost it really is.
+      const events = await runTurn(provider, async () => ({ result: `${Math.random()}`, isError: false }), { askAfterTokens: 10_000 });
+      expect(provider.requests).toHaveLength(3);
+      expect(events.find((e) => e.type === "limit")).toMatchObject({ reason: "tokens", steps: 2, tokens: 10_400 });
     } finally {
       provider.stop();
     }
@@ -1581,6 +1655,126 @@ describe("a response that spent the output limit only thinking", () => {
         provider.stop();
       }
     }
+  });
+});
+
+describe("a provider that refuses before answering", () => {
+  /** Answers `failures` requests with `status` and then serves a normal response. */
+  function flakyStatus(status: number, failures: number, extraHeaders = "") {
+    let requests = 0;
+    const listener = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        data(socket) {
+          const body = JSON.stringify({ error: { message: "temporarily unavailable" } });
+          if (++requests <= failures) {
+            socket.write(
+              `HTTP/1.1 ${status} Error\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n${extraHeaders}Connection: close\r\n\r\n${body}`
+            );
+          } else {
+            const ok = sseChunk({ content: "resposta" }) + sseChunk({}, "stop") + "data: [DONE]\n\n";
+            socket.write(
+              `HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: ${Buffer.byteLength(ok)}\r\nConnection: close\r\n\r\n${ok}`
+            );
+          }
+          socket.end();
+        },
+      },
+    });
+    return { url: `http://127.0.0.1:${listener.port}/v1`, requests: () => requests, stop: () => listener.stop(true) };
+  }
+
+  test("a rate limit is retried and the turn ends with an answer", async () => {
+    // 429 used to end the turn: nothing was written, so the only thing missing was asking again.
+    const provider = flakyStatus(429, 1, "Retry-After: 0\r\n");
+    try {
+      const events = await collect(provider.url, "none");
+      expect(provider.requests()).toBe(2);
+      expect(events.some((e) => e.type === "retry")).toBe(true);
+      expect(doneOf(events).content).toContain("resposta");
+    } finally {
+      provider.stop();
+    }
+  }, 20_000);
+
+  test("a provider failure is retried a bounded number of times", async () => {
+    const provider = flakyStatus(503, 10);
+    try {
+      const events = await collect(provider.url, "none");
+      // 1 original + TRANSIENT_RETRIES, then it gives up with the provider's error.
+      expect(provider.requests()).toBe(4);
+      expect(events.some((e) => e.type === "error")).toBe(true);
+    } finally {
+      provider.stop();
+    }
+  }, 30_000);
+
+  test("a too-long request is cut down and sent again instead of failing the turn", async () => {
+    // The budget is an estimate; the provider knows the real window. The first request is refused
+    // for size, the second is the same turn with a smaller history.
+    let requests = 0;
+    const bodies: string[] = [];
+    // The request body is large, so it arrives in several chunks: answering on the first one
+    // would close the socket before the client finished writing (and it would retry the write).
+    let buffer = "";
+    const listener = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        data(socket, chunk) {
+          buffer += Buffer.from(chunk).toString("utf8");
+          const headerEnd = buffer.indexOf("\r\n\r\n");
+          if (headerEnd < 0) return;
+          const length = Number(/content-length:\s*(\d+)/i.exec(buffer.slice(0, headerEnd))?.[1] ?? 0);
+          if (Buffer.byteLength(buffer.slice(headerEnd + 4)) < length) return;
+
+          const body = JSON.stringify({
+            error: { message: "This model's maximum context length is 8192 tokens", code: "context_length_exceeded" },
+          });
+          if (++requests === 1) {
+            socket.write(
+              `HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`
+            );
+          } else {
+            const ok = sseChunk({ content: "resposta depois da compactação" }) + sseChunk({}, "stop") + "data: [DONE]\n\n";
+            socket.write(
+              `HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: ${Buffer.byteLength(ok)}\r\nConnection: close\r\n\r\n${ok}`
+            );
+          }
+          socket.end();
+        },
+      },
+    });
+    const url = `http://127.0.0.1:${listener.port}/v1`;
+    const history: ChatMessage[] = [];
+    for (let i = 0; i < 200; i++) history.push({ role: i % 2 === 0 ? "user" : "assistant", content: `passo ${i} `.repeat(60) });
+    history.push({ role: "user", content: "responda" });
+    try {
+      const events: StreamEvent[] = [];
+      for await (const ev of streamChat({
+        config: { baseURL: url, apiKey: "k", model: "m", reasoning: "none", mcpServers: {} },
+        messages: history,
+        tools: [],
+        reasoning: "none",
+        executeTool: async () => ({ result: "", isError: false }),
+      })) {
+        if (ev.type === "retry") bodies.push(ev.message);
+        events.push(ev);
+      }
+      expect(requests).toBe(2);
+      expect(bodies.join()).toContain("contexto do modelo");
+      expect(doneOf(events).content).toContain("resposta depois da compactação");
+    } finally {
+      listener.stop(true);
+    }
+  }, 20_000);
+  test("a payload too large is not mistaken for a context overflow", () => {
+    // 413 with no word about context is the media case: it has its own recovery, and a retry
+    // with a smaller history would not help (the image would still be there).
+    expect(isContextOverflowTest({ status: 413, error: { message: "Request Entity Too Large" } })).toBe(false);
+    expect(isContextOverflowTest({ status: 400, error: { message: "This model's maximum context length is 8192 tokens", code: "context_length_exceeded" } })).toBe(true);
+    expect(isContextOverflowTest({ status: 400, error: { message: "prompt is too long: 210000 tokens > 200000 maximum" } })).toBe(true);
   });
 });
 

@@ -5,6 +5,8 @@ import {
   ERROR_STOP_AT,
   ERROR_WARN_AT,
   LoopGuard,
+  CACHE_HIT_WEIGHT,
+  PREFILL_WEIGHT,
   REPEAT_CORRECT_AT,
   REPEAT_STOP_AT,
   TurnBudget,
@@ -12,6 +14,7 @@ import {
   errorSignature,
   isEmptyResult,
   wrapUpPrompt,
+  weightedCost,
 } from "../src/turn-limits.js";
 import { askAfterMinutes, askAfterTokens, DEFAULT_ASK_AFTER_MINUTES, DEFAULT_ASK_AFTER_TOKENS, normalize } from "../src/config.js";
 import { continueQuestion } from "../src/session.js";
@@ -85,6 +88,48 @@ describe("turn budget", () => {
     const budget = new TurnBudget({ steps: 3, tokens: 0, minutes: 0 });
     budget.steps = 2;
     expect(budget.landingNotice()).toContain("restam 1 de 3 passos");
+  });
+
+  test("the token budget measures the cost of the turn, not the context re-sent", () => {
+    const budget = new TurnBudget({ steps: 0, tokens: 100_000, minutes: 0 });
+    // Sending a 90K context again costs 9000, not 90000: the same budget holds ~11 steps of a
+    // full context instead of stopping after one, and it does not move with the context size.
+    budget.addUsage(90_000, 500);
+    expect(budget.tokens).toBe(9_500);
+    expect(budget.exceeded()).toBeNull();
+    budget.addUsage(90_000, 500);
+    for (let i = 0; i < 8; i++) budget.addUsage(90_000, 500);
+    expect(budget.tokens).toBe(95_000);
+    expect(budget.exceeded()).toBeNull();
+    budget.addUsage(90_000, 500);
+    expect(budget.exceeded()).toMatchObject({ reason: "tokens", limit: 100_000 });
+  });
+
+  test("output is not discounted, and the weight is the documented one", () => {
+    expect(weightedCost(1_000_000, 0)).toBe(100_000);
+    expect(weightedCost(0, 1_000)).toBe(1_000);
+    expect(weightedCost(10_000, 0)).toBe(PREFILL_WEIGHT * 10_000);
+  });
+
+  test("a cached input token is cheaper than a fresh one, and can never exceed the input", () => {
+    // The prompt cache is what makes a long turn cheap: without this, every re-sent prefix is
+    // priced as new and the budget asks for more money than the provider charged.
+    expect(weightedCost(100_000, 0, 100_000)).toBe(CACHE_HIT_WEIGHT * 100_000);
+    expect(weightedCost(100_000, 0, 0)).toBe(PREFILL_WEIGHT * 100_000);
+    const half = weightedCost(100_000, 0, 50_000);
+    expect(half).toBe(50_000 * PREFILL_WEIGHT + 50_000 * CACHE_HIT_WEIGHT);
+    // A provider that reports more cached tokens than input cannot make the cost negative.
+    expect(weightedCost(1_000, 0, 999_999)).toBe(CACHE_HIT_WEIGHT * 1_000);
+  });
+
+  test("the user can turn the weighing off and get the raw sum the provider reports", () => {
+    const raw = new TurnBudget({ steps: 0, tokens: 0, minutes: 0 }, undefined, { prefill: 1, cacheHit: 1 });
+    raw.addUsage(90_000, 500, 80_000);
+    expect(raw.tokens).toBe(90_500);
+    const mine = new TurnBudget({ steps: 0, tokens: 0, minutes: 0 }, undefined, { prefill: 0, cacheHit: 0 });
+    mine.addUsage(90_000, 500, 80_000);
+    // Only the output counts: the user decided the input is free in their plan.
+    expect(mine.tokens).toBe(500);
   });
 
   test("the wrap-up asks for what was done, found and is left, without tools", () => {

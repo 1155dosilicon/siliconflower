@@ -1,5 +1,6 @@
 export type ReasoningLevel = "none" | "low" | "medium" | "high" | "max" | "ultra";
 export type Mode = "programação" | "sistema" | "plano";
+import type { TokenWeights } from "./turn-limits.js";
 
 /** A server started here and reached by stdio (`command`), or a remote one by HTTP (`url`). */
 export interface McpServerConfig {
@@ -22,8 +23,13 @@ export interface AppConfig {
   contextTokens?: number;
   /** Tool steps of one turn before asking the user whether to go on; 0 never asks. Default: 150. */
   askAfterSteps?: number;
-  /** Tokens of one turn (all requests summed) before asking; 0 never asks. Default: 8M. */
+  /** Cost the turn may reach before asking; 0 never asks. Default: 8M. Input is weighted. */
   askAfterTokens?: number;
+  /**
+   * How input and cached input weigh against `askAfterTokens`. `{ prefill: 1, cacheHit: 1 }`
+   * counts the raw sum the provider reports; the defaults make it a cost (see `turn-limits.ts`).
+   */
+  tokenWeights?: TokenWeights;
   /** Minutes of one turn before asking; 0 never asks. Default: 60. */
   askAfterMinutes?: number;
   mcpServers?: Record<string, McpServerConfig>;
@@ -84,7 +90,7 @@ export type StreamEvent =
   | { type: "text"; text: string }
   | { type: "tool_call"; id: string; name: string; args: string }
   | { type: "tool_result"; id: string; name: string; result: string; isError: boolean }
-  | { type: "usage"; totalTokens?: number; promptTokens?: number; completionTokens?: number }
+  | { type: "usage"; totalTokens?: number; promptTokens?: number; completionTokens?: number; cachedTokens?: number }
   | { type: "error"; message: string }
   /**
    * The step is being requested again (the connection dropped, or the response was only thinking):

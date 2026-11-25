@@ -477,6 +477,7 @@ async function addFiles(files) {
 }
 
 function formatTokens(n) {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
@@ -498,8 +499,15 @@ function renderChrome() {
   // The thinking box already says it, right above.
   $("status").textContent = state.status.includes("pensando") ? "" : state.status;
   $("status").classList.toggle("busy", state.streaming);
-  const tokens = Math.max(state.estimatedTokens, state.apiTokens);
-  $("stats").textContent = `${state.model} · ${state.toolCount} ferramentas · ${state.skillCount} skills · ${formatTokens(tokens)} tokens`;
+  // Three different numbers, never mixed: the context (one request), what the turn cost so
+  // far (every request summed) and the steps. The cost is what `askAfterTokens` measures.
+  const context = Math.max(state.estimatedTokens, state.apiTokens);
+  const parts = [`${state.model}`, `${state.toolCount} ferramentas`, `${state.skillCount} skills`];
+  parts.push(`${formatTokens(context)} de contexto`);
+  if (state.turnTokens) parts.push(`${formatTokens(state.turnTokens)} de custo no turno`);
+  if (state.cachedTokens) parts.push(`${formatTokens(state.cachedTokens)} do cache`);
+  if (state.turnSteps) parts.push(`${state.turnSteps} passos`);
+  $("stats").textContent = parts.join(" · ");
 
   const error = $("error");
   const message = localError ?? state.error;

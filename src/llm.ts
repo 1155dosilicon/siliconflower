@@ -3,7 +3,7 @@ import { log } from "./logger.js";
 import { askAfterMinutes, askAfterSteps, askAfterTokens, knownSecrets, redactKnownSecrets } from "./config.js";
 import { compressHistory, contextBudget, estimateTokens, processToolOutput } from "./context.js";
 import { LoopGuard, TurnBudget, describeLimit, limitHeader, wrapUpPrompt, type LimitHit } from "./turn-limits.js";
-import type { AppConfig, ChatMessage, MediaAttachment, McpTool, ReasoningLevel, StreamEvent, ToolResult } from "./types.js";
+import type { AppConfig, ChatMessage, MediaAttachment, McpTool, ReasoningLevel, StreamEvent, TodoItem, ToolResult } from "./types.js";
 import { DEFAULT_REASONING, isExtendedReasoning, isXiaomiMimoEndpoint } from "./reasoning.js";
 import { hasMediaData, mediaNote, pruneMedia, rejectMedia, userContent } from "./services/media.js";
 
@@ -14,6 +14,8 @@ export interface ChatOptions {
   reasoning: ReasoningLevel;
   executeTool: (name: string, args: Record<string, unknown>) => Promise<ToolResult>;
   signal?: AbortSignal;
+  /** Current plan (`todowrite`), carried into the compaction note so it survives a cut history. */
+  plan?: TodoItem[];
   /**
    * Asked when the turn reaches a limit (`askAfterSteps`, `askAfterTokens`, `askAfterMinutes`)
    * or looks stuck in a loop: true goes on. Without it (subagents, `run` without a terminal),
@@ -173,6 +175,22 @@ const FALLBACK_OUTPUT_TOKENS = 16384;
 // Keeps room for the conversation even when many MCP tools fill most of the context budget.
 const MIN_HISTORY_TOKENS = 20_000;
 
+/**
+ * The share of the input the provider served from its prompt cache. OpenAI reports it in
+ * `prompt_tokens_details.cached_tokens` (a hit inside `prompt_tokens`); DeepSeek in
+ * `prompt_cache_hit_tokens` (a count beside `prompt_tokens`). Providers that report neither
+ * get 0, and the whole input is priced as new.
+ */
+function cachedInputTokens(usage: {
+  prompt_tokens_details?: { cached_tokens?: number | null } | null;
+  prompt_cache_hit_tokens?: number | null;
+}): number {
+  const openai = usage.prompt_tokens_details?.cached_tokens;
+  if (typeof openai === "number" && openai > 0) return openai;
+  const deepseek = usage.prompt_cache_hit_tokens;
+  return typeof deepseek === "number" && deepseek > 0 ? deepseek : 0;
+}
+
 const GENERIC_RETRY_DELAY_MS = 1000;
 
 /**
@@ -227,6 +245,40 @@ function describeApiError(err: unknown): string {
   return `HTTP ${e?.status}: ${JSON.stringify(e?.error ?? e?.message ?? String(err)).slice(0, 500)}`;
 }
 
+/** Rate limit or a provider-side failure: the same request usually works again a moment later. */
+function isTransientFailure(err: unknown): boolean {
+  const status = (err as { status?: number })?.status;
+  return status === 408 || status === 429 || (typeof status === "number" && status >= 500);
+}
+
+/**
+ * The provider's own limit on the request size, not the model's: our budget (90K by default) is
+ * only an estimate, and a model with a smaller window than it says, or with different token
+ * accounting, refuses the request instead of answering it. Compacting harder is the only way out.
+ *
+ * A bare 413 is not enough: it is also what a provider says about a file that is too large, and
+ * that has its own recovery (the media is dropped from the request). The message has to be about
+ * the context; without one, the payload case wins.
+ */
+export function isContextOverflow(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  const e = err as { error?: { message?: string; code?: string } };
+  const text = `${e?.error?.message ?? ""} ${e?.error?.code ?? ""} ${msg}`;
+  return /context_length|context length|maximum context|context window|prompt is too long|too many tokens|reduce the length|input is too long|exceeds the (model'?s )?(maximum )?context/i.test(text);
+}
+
+/** How long the provider asked us to wait, bounded to what a turn can afford. */
+function retryAfterMs(err: unknown): number | undefined {
+  const headers = (err as { headers?: { get?: (name: string) => string | null } })?.headers;
+  const raw = headers?.get?.("retry-after") ?? undefined;
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, TRANSIENT_RETRY_MAX_DELAY_MS);
+  const date = Date.parse(raw);
+  if (Number.isFinite(date)) return Math.min(Math.max(date - Date.now(), 0), TRANSIENT_RETRY_MAX_DELAY_MS);
+  return undefined;
+}
+
 /** Null when the arguments are not a JSON object: usually a response cut off mid tool call. */
 function parseToolArgs(raw: string): Record<string, unknown> | null {
   if (!raw) return {};
@@ -249,6 +301,13 @@ function invalidArgsMessage(name: string, finishReason: string | null, outputLim
   return `Nada foi executado: os argumentos de ${name} não são um objeto JSON válido. Corrija e tente de novo.`;
 }
 
+/**
+ * The provider's limit on the request size counts against an estimate: the history is cut down to
+ * this fraction of itself and sent again, at most this many times.
+ */
+const CONTEXT_OVERFLOW_SHRINK = 0.6;
+const MAX_CONTEXT_OVERFLOW_RETRIES = 2;
+
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("Abortado", "AbortError");
 }
@@ -258,6 +317,10 @@ export const NOT_RUN_AFTER_CANCEL = "Não executada: o usuário cancelou o turno
 
 /** A connection that drops in the middle of a response: the step is requested again this many times. */
 const STREAM_DROP_RETRIES = 2;
+/** A rate limit or a provider failure: how many times the same request is sent again. */
+const TRANSIENT_RETRIES = 3;
+const TRANSIENT_RETRY_BASE_DELAY_MS = 1_000;
+const TRANSIENT_RETRY_MAX_DELAY_MS = 30_000;
 const STREAM_DROP_RETRY_DELAY_MS = 1000;
 const CONNECTION_DROP_CODES = new Set(["ECONNRESET", "ETIMEDOUT", "EPIPE", "ECONNABORTED", "UND_ERR_SOCKET", "ERR_STREAM_PREMATURE_CLOSE"]);
 
@@ -292,8 +355,10 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
-  const { config, messages, tools, reasoning, executeTool, signal, confirmContinue } = opts;
-  const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey });
+  const { config, messages, tools, reasoning, executeTool, signal, confirmContinue, plan } = opts;
+  // Retries are ours (`isTransientFailure`): the SDK's own would multiply them and ignore the
+  // `Retry-After` the provider sends.
+  const client = new OpenAI({ baseURL: config.baseURL, apiKey: config.apiKey, maxRetries: 0 });
   const secrets = await knownSecrets(config);
   const apiTools = buildOpenAITools(tools);
   const isXiaomiMimo = isXiaomiMimoEndpoint(config.baseURL);
@@ -310,18 +375,23 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   // far beyond the context budget.
   const history: ChatMessage[] = [...messages];
   // The system prompt and the tool schemas are sent in every request and use the same budget.
-  const historyBudget = Math.max(
+  // `let`: a provider that refuses the size makes the next request fit a smaller window.
+  let historyBudget = Math.max(
     MIN_HISTORY_TOKENS,
     contextBudget(config.contextTokens) - estimateTokens(config.system ?? "") - estimateTokens(JSON.stringify(apiTools))
   );
   const turn: ChatMessage[] = [];
   let finalContent = "";
   let finalThinking = "";
-  const budget = new TurnBudget({
-    steps: askAfterSteps(config.askAfterSteps),
-    tokens: askAfterTokens(config.askAfterTokens),
-    minutes: askAfterMinutes(config.askAfterMinutes),
-  });
+  const budget = new TurnBudget(
+    {
+      steps: askAfterSteps(config.askAfterSteps),
+      tokens: askAfterTokens(config.askAfterTokens),
+      minutes: askAfterMinutes(config.askAfterMinutes),
+    },
+    () => Date.now(),
+    config.tokenWeights
+  );
   const loops = new LoopGuard();
   /** Set by the loop guard during a step: the turn stops (or asks) before the next one. */
   let loopStop: string | undefined;
@@ -377,8 +447,18 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
         const chunks = withIdleTimeout(stream as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>, signal, () => controller.abort());
         for await (const chunk of chunks) {
           if (chunk.usage) {
-            budget.tokens += chunk.usage.total_tokens ?? 0;
-            yield { type: "usage", totalTokens: chunk.usage.total_tokens, promptTokens: chunk.usage.prompt_tokens, completionTokens: chunk.usage.completion_tokens };
+            budget.addUsage(
+              chunk.usage.prompt_tokens ?? 0,
+              chunk.usage.completion_tokens ?? Math.max(0, (chunk.usage.total_tokens ?? 0) - (chunk.usage.prompt_tokens ?? 0)),
+              cachedInputTokens(chunk.usage)
+            );
+            yield {
+              type: "usage",
+              totalTokens: chunk.usage.total_tokens,
+              promptTokens: chunk.usage.prompt_tokens,
+              completionTokens: chunk.usage.completion_tokens,
+              cachedTokens: cachedInputTokens(chunk.usage),
+            };
           }
           const delta = chunk.choices?.[0]?.delta as { content?: string | null; reasoning_content?: string; reasoning?: string } | undefined;
           const reasoningText = delta?.reasoning_content || delta?.reasoning;
@@ -448,7 +528,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       }
     }
     const buildRequest = () =>
-      buildOpenAIMessages(config, compressHistory(pruneMedia(history), historyBudget, { keepToolCallReasoning: isXiaomiMimo }));
+      buildOpenAIMessages(config, compressHistory(pruneMedia(history), historyBudget, { keepToolCallReasoning: isXiaomiMimo, plan }));
     let working = buildRequest();
     let content = "";
     let thinking = "";
@@ -509,6 +589,9 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       // Providers differ in which optional parameters they accept. Each rejected parameter
       // is adjusted at most once and remembered for the following steps.
       let retriedGeneric = false;
+      // Counted across the whole step: a retry loop that keeps failing must end somewhere.
+      let transientRetries = 0;
+      let overflowRetries = 0;
       for (let attempt = 0; !stream; attempt++) {
         try {
           stream = await withConnectTimeout(makeRequest(supportsEffort), signal, () => requestController?.abort());
@@ -519,6 +602,30 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
             retriedGeneric = true;
             void log("warn", `Provedor recusou o pedido sem explicar; repetindo uma vez: ${describeApiError(err)}`);
             await new Promise((resolve) => setTimeout(resolve, GENERIC_RETRY_DELAY_MS));
+            throwIfAborted(signal);
+          } else if (isContextOverflow(err) && overflowRetries < MAX_CONTEXT_OVERFLOW_RETRIES) {
+            // Our budget is an estimate: the provider knows the real window. Cutting the history
+            // and asking again beats failing the whole turn over a few thousand tokens.
+            overflowRetries++;
+            const next = Math.max(MIN_HISTORY_TOKENS, Math.floor(historyBudget * CONTEXT_OVERFLOW_SHRINK));
+            void log("warn", `Provedor recusou o tamanho do pedido; reduzindo o histórico de ${historyBudget} para ${next} tokens e repetindo: ${describeApiError(err)}`);
+            if (next >= historyBudget) throw err;
+            historyBudget = next;
+            working = buildRequest();
+            yield {
+              type: "retry",
+              message: `⚠️ o pedido passou do contexto do modelo; compactando o histórico e repetindo (${overflowRetries}/${MAX_CONTEXT_OVERFLOW_RETRIES})...`,
+            };
+          } else if (isTransientFailure(err) && transientRetries < TRANSIENT_RETRIES) {
+            // Rate limit or provider outage. Nothing was written yet, so the step is just resent.
+            transientRetries++;
+            const delay = retryAfterMs(err) ?? TRANSIENT_RETRY_BASE_DELAY_MS * 2 ** (transientRetries - 1);
+            void log("warn", `Provedor indisponível ou limitado; repetindo em ${Math.round(delay / 1000)}s (${transientRetries}/${TRANSIENT_RETRIES}): ${describeApiError(err)}`);
+            yield {
+              type: "retry",
+              message: `⏳ o provedor não respondeu (${(err as { status?: number })?.status ?? "?"}); tentando de novo em ${Math.round(delay / 1000)}s (${transientRetries}/${TRANSIENT_RETRIES})...`,
+            };
+            await wait(delay, signal);
             throwIfAborted(signal);
           } else if (outputLimit > FALLBACK_OUTPUT_TOKENS && isOutputLimitRejection(err)) {
             // Before the checks below: they would blame the media or the parameter name.
@@ -562,7 +669,9 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
         for await (const chunk of chunks) {
           if (chunk.usage) {
             gotUsage = true;
-            budget.tokens += chunk.usage.total_tokens ?? (chunk.usage.prompt_tokens ?? 0) + (chunk.usage.completion_tokens ?? 0);
+            const prompt = chunk.usage.prompt_tokens ?? 0;
+            const completion = chunk.usage.completion_tokens ?? Math.max(0, (chunk.usage.total_tokens ?? 0) - prompt);
+            budget.addUsage(prompt, completion, cachedInputTokens(chunk.usage));
             yield {
               type: "usage",
               totalTokens: chunk.usage.total_tokens,
@@ -630,7 +739,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       // A provider without usage in the stream still spends tokens: estimate them.
       if (!gotUsage) {
         const written = content.length + thinking.length + [...argBuffers.values()].reduce((n, b) => n + b.args.length, 0);
-        budget.tokens += estimateTokens(JSON.stringify(working)) + Math.ceil(written / 3.5);
+        budget.addUsage(estimateTokens(JSON.stringify(working)), Math.ceil(written / 3.5));
       }
 
       // Only thinking, cut at the output limit: there is no answer to continue, and "continue"

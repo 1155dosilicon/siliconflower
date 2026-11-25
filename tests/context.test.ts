@@ -16,6 +16,19 @@ describe("context & token management", () => {
     expect(tokens).toBeLessThan(text.length);
   });
 
+  test("estimateTokens never undercounts text that is not plain ASCII", () => {
+    // One ratio over `length` made a CJK or emoji file look 3.5x smaller than it is, and the
+    // request went over the provider's window with an estimate that said it fit.
+    const cjk = "漢字".repeat(500);
+    expect(estimateTokens(cjk)).toBeGreaterThanOrEqual(cjk.length);
+    const emoji = "🎉".repeat(200);
+    expect(estimateTokens(emoji)).toBeGreaterThanOrEqual(200);
+    // Accented Portuguese costs more than ASCII, and still less than one token per character.
+    const accents = "ação coração não é";
+    expect(estimateTokens(accents)).toBeLessThanOrEqual(accents.length);
+    expect(estimateTokens(accents)).toBeGreaterThan(estimateTokens("acao coracao nao e"));
+  });
+
   test("compressHistory preserves message order and enforces the token budget", () => {
     const messages: ChatMessage[] = [];
     for (let i = 0; i < 25; i++) {
@@ -104,5 +117,32 @@ describe("compressHistory over the budget", () => {
     expect(mimo[1]!.reasoning!.length).toBeLessThan(500);
     expect(mimo[3]!.reasoning).toBeUndefined();
     expect(compressHistory(messages, 50_000)[1]!.reasoning).toBeUndefined();
+  });
+
+  test("the open plan survives the cut history, so the turn does not restart the work", () => {
+    // Many small messages that cannot be shrunk any further: the only way under the budget is
+    // to drop the oldest turns, which is exactly when the note appears.
+    const messages: ChatMessage[] = [];
+    for (let i = 0; i < 40; i++) {
+      messages.push({ role: i % 2 === 0 ? "user" : "assistant", content: `passo ${i} `.padEnd(200, "x") });
+    }
+    const opts = {
+      plan: [
+        { id: "1", content: "Ler o session.ts", status: "completed" as const, priority: "high" as const },
+        { id: "2", content: "Trocar o despacho de ferramentas", status: "in_progress" as const, priority: "high" as const },
+        { id: "3", content: "Rodar typecheck e testes", status: "pending" as const, priority: "medium" as const },
+        { id: "4", content: "Cancelada: reescrever tudo", status: "cancelled" as const, priority: "low" as const },
+      ],
+    };
+    const out = compressHistory(messages, 400, opts);
+    const note = out[0]!.content;
+    expect(note).toContain("compactação");
+    // What is done is not repeated: it would only pull the model back to the beginning.
+    expect(note).not.toContain("Ler o session.ts");
+    expect(note).not.toContain("reescrever tudo");
+    expect(note).toContain("Trocar o despacho de ferramentas");
+    expect(note).toContain("Rodar typecheck e testes");
+    // Without a plan the note is the same as before.
+    expect(compressHistory(messages, 400)[0]!.content).not.toContain("Plano em andamento");
   });
 });

@@ -1,7 +1,7 @@
 import { readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ensureDir, getGlobalDataDir } from "./fs-util.js";
-import type { ChatMessage } from "./types.js";
+import type { ChatMessage, TodoItem } from "./types.js";
 import { log } from "./logger.js";
 import { isToolMediaMessage } from "./services/media.js";
 
@@ -43,6 +43,10 @@ export function formatTokenCount(count: number): string {
 
 /** Measured on the Portuguese prompts: about 3.4 with cl100k_base, 3.9 with o200k_base. */
 const CHARS_PER_TOKEN = 3.5;
+// Accented Latin letters (Portuguese included) cost more than plain ASCII but far less than CJK.
+const LATIN_CHARS_PER_TOKEN = 2;
+// Cyrillic, Greek, Arabic, Hebrew, CJK, emoji: these can cost a full token per character.
+const WIDE_CHAR_START = 0x250;
 
 /** Everything sent in one request should fit here: system prompt, tool schemas and history. */
 export const CONTEXT_TOKEN_BUDGET = 90_000;
@@ -59,10 +63,25 @@ export function contextBudget(value: unknown): number {
 
 /**
  * Estimates token count for text.
+ *
+ * A single ratio over `text.length` silently undercounts anything that is not ASCII: a file
+ * full of CJK or emoji costs about one token per character, not one per 3.5, so a 90K budget
+ * could turn into a request the provider refuses. Non-Latin text is counted heavier on
+ * purpose: an estimate below the real size overflows the window, one above only compacts early.
  */
 export function estimateTokens(text: string): number {
   if (!text) return 0;
-  return Math.ceil(text.length / CHARS_PER_TOKEN);
+  let ascii = 0;
+  let latin = 0;
+  let wide = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x80) ascii++;
+    else if (code < WIDE_CHAR_START) latin++;
+    // Surrogate halves of an emoji count as two, which errs on the safe side again.
+    else wide++;
+  }
+  return Math.ceil(ascii / CHARS_PER_TOKEN) + Math.ceil(latin / LATIN_CHARS_PER_TOKEN) + wide;
 }
 
 // Rough value per file: the real cost depends on resolution and duration, which are not read here.
@@ -139,6 +158,8 @@ function buildBoundedPreview(output: string, maxChars: number): { header: string
 
 const SHRINK_ABOVE_CHARS = 160;
 const SHRUNK_CHARS = 120;
+// The plan in the compaction note stays short: a note longer than the history it replaces is useless.
+const MAX_PLAN_LINES_IN_NOTE = 12;
 // Enough for the provider to accept the message; the full text only matters for display.
 const KEPT_REASONING_CHARS = 400;
 const MAX_SHRUNK_ITEMS = 20;
@@ -147,6 +168,8 @@ const MAX_SHRUNK_DEPTH = 3;
 export interface CompressOptions {
   /** Xiaomi MiMo requires reasoning_content on the assistant message that precedes tool results. */
   keepToolCallReasoning?: boolean;
+  /** Current plan (`todowrite`): it is the one thing the model cannot rebuild from the files. */
+  plan?: TodoItem[];
 }
 
 function shorten(text: string, max: number, note: string): string {
@@ -285,6 +308,30 @@ function fitUnseenResults(messages: ChatMessage[], indexes: number[], roomTokens
 }
 
 /**
+ * What was dropped from the start of the history, said to the model. It cannot tell that the
+ * conversation was cut, and "I do not have that" reads as "it was never asked" instead of
+ * "read it again" — which is what made old turns get redone step by step.
+ */
+function compactionNote(dropped: number, plan: TodoItem[] = []): ChatMessage {
+  const open = plan.filter((item) => item.status !== "completed" && item.status !== "cancelled");
+  // The plan can be long, but it is the cheapest summary of a turn there is: one line each.
+  const planText = open.length
+    ? `\nPlano em andamento (a lista de tarefas da sessão, mantida fora do histórico):\n${open
+        .slice(0, MAX_PLAN_LINES_IN_NOTE)
+        .map((item) => `- [${item.status === "in_progress" ? "em andamento" : "pendente"}] ${item.content.slice(0, 160)}`)
+        .join("\n")}${open.length > MAX_PLAN_LINES_IN_NOTE ? `\n- ... e mais ${open.length - MAX_PLAN_LINES_IN_NOTE}` : ""}\n`
+    : "";
+  return {
+    role: "user",
+    content:
+      `[compactação] O começo desta conversa (${dropped} mensagens) foi descartado para caber no contexto. ` +
+      "O que já foi feito continua valendo: não refaça o que está pronto. Se precisar de algo que foi " +
+      "descartado, use as ferramentas de novo (ler o arquivo, rodar o comando) em vez de supor." +
+      planText,
+  };
+}
+
+/**
  * Compresses chat history when the token budget is exceeded.
  * Keeps system/recent messages intact, compresses old tool outputs.
  */
@@ -367,20 +414,30 @@ export function compressHistory(messages: ChatMessage[], maxTokens = CONTEXT_TOK
   }
   if (total > maxTokens && request >= 0 && !requestShrunk) shrinkAt(request);
 
+  let dropped = 0;
   // If metadata and many small messages still exceed the budget, discard the oldest turns.
   // Discard whole turns at once: dropping only the leading "assistant" message of a
   // tool-call turn would leave an orphan "tool" message at the front, which breaks the
   // assistant(tool_calls) -> tool(result) pairing the OpenAI-compatible APIs require.
+  // Discarding costs a few tokens for the note that says so: count it from the first drop,
+  // but never drop anything to make room for a note that would not exist otherwise.
+  const noteSize = estimateMessagesTokens([compactionNote(messages.length, opts.plan)]);
   while (total > maxTokens && result.length > 1) {
     total -= estimateMessagesTokens([result.shift()!]);
+    dropped++;
     while (result.length > 1 && result[0]!.role === "tool") {
       total -= estimateMessagesTokens([result.shift()!]);
+      dropped++;
     }
+    total += dropped === 1 ? noteSize : 0;
   }
 
+  // Discarding is not silent: the model has to know what it lost to go and look again.
+  if (dropped > 0) result.unshift(compactionNote(dropped, opts.plan));
+
   // A single recent message can exceed the whole context budget; bound it as a last resort.
-  if (total > maxTokens && result.length === 1) {
-    const last = result[0];
+  if (total > maxTokens && result.length <= 2) {
+    const last = result[result.length - 1]!;
     last.reasoning = undefined;
     last.toolCalls = undefined;
     const charBudget = Math.max(0, Math.floor(maxTokens * CHARS_PER_TOKEN));

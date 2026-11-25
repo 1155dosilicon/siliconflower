@@ -3,6 +3,7 @@ import { chmod, readFile, realpath, rename, rm, stat, writeFile, access } from "
 import { ensureDir, getGlobalDataDir } from "./fs-util.js";
 import { isWindows } from "./platform.js";
 import { contextBudget } from "./context.js";
+import { DEFAULT_WEIGHTS, type TokenWeights } from "./turn-limits.js";
 import type { AppConfig, McpServerConfig, Mode } from "./types.js";
 import { REASONING_LEVELS } from "./types.js";
 
@@ -174,13 +175,28 @@ export const DEFAULT_ASK_AFTER_STEPS = 150;
 const MAX_ASK_AFTER_STEPS = 100_000;
 /**
  * Tokens of one turn (every request summed: each step sends the history again) before asking
- * (`askAfterTokens`). A loop of 140 steps once spent 5.6M.
+ * (`askAfterTokens`). A loop of 140 steps once spent 5.6M. What is counted is the cost of the
+ * turn, not the raw sum: input counts at `PREFILL_WEIGHT` (see `turn-limits.ts`), so the limit
+ * does not move with the size of the context.
  */
 export const DEFAULT_ASK_AFTER_TOKENS = 8_000_000;
 const MAX_ASK_AFTER_TOKENS = 1_000_000_000;
 /** Minutes of one turn before asking (`askAfterMinutes`); checked between steps. */
 export const DEFAULT_ASK_AFTER_MINUTES = 60;
 const MAX_ASK_AFTER_MINUTES = 24 * 60;
+
+/**
+ * How the tokens of a request weigh against `askAfterTokens` (`tokenWeights`), when the defaults
+ * of `turn-limits.ts` do not match what the provider charges. `1` and `1` count the raw sum.
+ */
+export function tokenWeights(value: unknown): TokenWeights {
+  const data = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const ratio = (raw: unknown, fallback: number) => {
+    const n = Number(raw);
+    return raw !== undefined && raw !== null && raw !== "" && Number.isFinite(n) ? Math.min(10, Math.max(0, n)) : fallback;
+  };
+  return { prefill: ratio(data.prefill, DEFAULT_WEIGHTS.prefill), cacheHit: ratio(data.cacheHit, DEFAULT_WEIGHTS.cacheHit) };
+}
 
 /** A whole number from 0 to `max`; the default when absent or not a number. */
 function boundedCount(value: unknown, fallback: number, max: number): number {
@@ -245,6 +261,7 @@ export function normalize(data: Partial<AppConfig>, opts: { applyEnv?: boolean }
     ...(data.askAfterMinutes !== undefined && Number.isFinite(Number(data.askAfterMinutes))
       ? { askAfterMinutes: askAfterMinutes(data.askAfterMinutes) }
       : {}),
+    ...(data.tokenWeights !== undefined ? { tokenWeights: tokenWeights(data.tokenWeights) } : {}),
     mcpServers: (data.mcpServers && typeof data.mcpServers === "object" && !Array.isArray(data.mcpServers)
       ? data.mcpServers
       : {}) as Record<string, McpServerConfig>,
