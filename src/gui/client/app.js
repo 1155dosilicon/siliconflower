@@ -1,4 +1,4 @@
-import { highlightTokens, parseMarkdown } from "/markdown.js";
+import { diffMarkdownBlocks, highlightTokens, parseMarkdown } from "/markdown.js";
 
 const $ = (id) => document.getElementById(id);
 const MAX_RECONNECT_ATTEMPTS = 20;
@@ -9,15 +9,17 @@ const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 // The formats of services/media.ts: checked here so a wrong file never costs the typed message.
 const ATTACHMENT_TYPES = /\.(jpe?g|png|gif|webp|bmp|mp3|wav|flac|m4a|ogg|mp4|mov|avi|wmv)$/i;
-const STICK_TO_BOTTOM_PX = 80;
+const STICK_TO_BOTTOM_PX = 48;
 const REASONING_NAMES = { off: "desligado", on: "ligado", low: "baixo", med: "médio", high: "alto", max: "máximo", ultra: "ultra" };
 
 let socket = null;
 let reconnectAttempts = 0;
 let state = null;
 let activities = [];
+let pendingTools = [];
 let renderedMessages = 0;
 let renderScheduled = false;
+let stickToBottom = true;
 let forceScroll = false;
 let questionShown = null;
 let workingFolder = "";
@@ -86,55 +88,120 @@ function copyButton(getText) {
   return button;
 }
 
+function fillCode(code, text, lang) {
+  code.replaceChildren();
+  for (const token of highlightTokens(text, lang)) {
+    code.append(token.type ? el("span", `tok-${token.type}`, token.text) : document.createTextNode(token.text));
+  }
+}
+
+function renderBlock(block) {
+  switch (block.type) {
+    case "paragraph": {
+      const p = el("p");
+      renderInline(block.children, p);
+      return p;
+    }
+    case "heading": {
+      const h = el(`h${Math.min(block.level + 1, 6)}`);
+      renderInline(block.children, h);
+      return h;
+    }
+    case "rule":
+      return el("hr");
+    case "quote": {
+      const quote = el("blockquote");
+      renderBlocks(block.children, quote);
+      return quote;
+    }
+    case "list": {
+      const list = el(block.ordered ? "ol" : "ul");
+      for (const item of block.items) renderBlocks(item, list.appendChild(el("li")));
+      return list;
+    }
+    case "codeblock": {
+      const wrap = el("div", "code-block");
+      wrap._codeText = block.text;
+      const bar = wrap.appendChild(el("div", "code-bar"));
+      bar.append(el("span", "", block.lang || "texto"), copyButton(() => wrap._codeText));
+      const code = wrap.appendChild(el("pre")).appendChild(el("code"));
+      fillCode(code, block.text, block.lang);
+      return wrap;
+    }
+    case "table": {
+      const wrap = el("div", "table-wrap");
+      const table = wrap.appendChild(el("table"));
+      const head = table.appendChild(el("thead")).appendChild(el("tr"));
+      for (const cell of block.header) renderInline(cell, head.appendChild(el("th")));
+      const body = table.appendChild(el("tbody"));
+      for (const row of block.rows) {
+        const tr = body.appendChild(el("tr"));
+        for (const cell of row) renderInline(cell, tr.appendChild(el("td")));
+      }
+      return wrap;
+    }
+  }
+  return null;
+}
+
 function renderBlocks(blocks, parent) {
   for (const block of blocks) {
-    switch (block.type) {
-      case "paragraph":
-        renderInline(block.children, parent.appendChild(el("p")));
-        break;
-      case "heading":
-        renderInline(block.children, parent.appendChild(el(`h${Math.min(block.level + 1, 6)}`)));
-        break;
-      case "rule":
-        parent.append(el("hr"));
-        break;
-      case "quote":
-        renderBlocks(block.children, parent.appendChild(el("blockquote")));
-        break;
-      case "list": {
-        const list = parent.appendChild(el(block.ordered ? "ol" : "ul"));
-        for (const item of block.items) renderBlocks(item, list.appendChild(el("li")));
-        break;
-      }
-      case "codeblock": {
-        const wrap = parent.appendChild(el("div", "code-block"));
-        const bar = wrap.appendChild(el("div", "code-bar"));
-        bar.append(el("span", "", block.lang || "texto"), copyButton(() => block.text));
-        const code = wrap.appendChild(el("pre")).appendChild(el("code"));
-        for (const token of highlightTokens(block.text, block.lang)) {
-          code.append(token.type ? el("span", `tok-${token.type}`, token.text) : document.createTextNode(token.text));
-        }
-        break;
-      }
-      case "table": {
-        const wrap = parent.appendChild(el("div", "table-wrap"));
-        const table = wrap.appendChild(el("table"));
-        const head = table.appendChild(el("thead")).appendChild(el("tr"));
-        for (const cell of block.header) renderInline(cell, head.appendChild(el("th")));
-        const body = table.appendChild(el("tbody"));
-        for (const row of block.rows) {
-          const tr = body.appendChild(el("tr"));
-          for (const cell of row) renderInline(cell, tr.appendChild(el("td")));
-        }
-        break;
-      }
-    }
+    const node = renderBlock(block);
+    if (node) parent.append(node);
   }
 }
 
 function markdownInto(node, text) {
   node.replaceChildren();
   renderBlocks(parseMarkdown(text), node);
+}
+
+const liveBlocks = new WeakMap();
+
+/** Updates a streaming markdown container block-by-block so finished blocks stay mounted. */
+function patchMarkdown(node, text) {
+  const blocks = parseMarkdown(text);
+  const prev = liveBlocks.get(node) ?? [];
+  const next = [];
+
+  for (const op of diffMarkdownBlocks(prev, blocks)) {
+    if (op.kind === "truncate") {
+      for (let i = prev.length - 1; i >= op.length; i--) prev[i].el.remove();
+      continue;
+    }
+    const old = prev[op.index];
+    if (op.kind === "keep") {
+      next.push(old);
+      continue;
+    }
+    // Streaming plain paragraph: mutate the single Text node in place to avoid reflow and keep selection.
+    if (op.kind === "update-text" && old.el.childNodes.length === 1 && old.el.firstChild.nodeType === Node.TEXT_NODE) {
+      const textNode = old.el.firstChild;
+      if (op.text.startsWith(textNode.data)) textNode.appendData(op.text.slice(textNode.data.length));
+      else textNode.data = op.text;
+      old.key = op.key;
+      next.push(old);
+      continue;
+    }
+    // Streaming code block: keep the wrapper, Copy button and horizontal scroll position intact.
+    if (op.kind === "update-code") {
+      old.el._codeText = op.text;
+      const pre = old.el.querySelector("pre");
+      const scrollLeft = pre.scrollLeft;
+      fillCode(pre.firstElementChild, op.text, op.lang);
+      pre.scrollLeft = scrollLeft;
+      old.key = op.key;
+      next.push(old);
+      continue;
+    }
+    const fresh = renderBlock(op.block);
+    if (!fresh) continue;
+    if (old) node.replaceChild(fresh, old.el);
+    else node.appendChild(fresh);
+    next.push({ key: op.key, type: op.type, lang: op.lang, el: fresh });
+  }
+
+  liveBlocks.set(node, next);
 }
 
 /* ----------------------------------- Timeline ----------------------------------- */
@@ -236,20 +303,44 @@ function rebuildTimeline() {
   renderedMessages = state.messages.length;
 }
 
-function appendNewMessages() {
+function appendNewMessages(upTo = state.messages.length) {
   const timeline = $("timeline");
-  for (; renderedMessages < state.messages.length; renderedMessages++) {
+  const limit = Math.min(upTo, state.messages.length);
+  for (; renderedMessages < limit; renderedMessages++) {
     timeline.append(messageNode(state.messages[renderedMessages]));
   }
 }
 
+function flushPendingTools() {
+  if (!pendingTools.length) return;
+  const batch = pendingTools;
+  pendingTools = [];
+  for (const activity of batch) {
+    const existing = toolCards.get(activity.key);
+    if (existing) {
+      updateToolCard(existing, activity);
+      continue;
+    }
+    appendNewMessages(activity.afterMessage);
+    $("timeline").append(toolCard(activity));
+  }
+}
+
+function thinkingLabel(status) {
+  if (status.startsWith("🔨")) {
+    const tool = status.replace(/^🔨\s*/, "").trim();
+    return tool ? `Executando ${tool}` : "Executando ferramenta...";
+  }
+  return "Pensando...";
+}
+
 function renderLive() {
   const live = $("live");
-  // The turn goes on after its first text. Only a pending question (waiting for the user) or a
-  // running tool (its card and the status bar say it) replace the box.
-  const thinking = state.streaming && !state.question && !state.status.startsWith("🔨");
+  // Keep the activity box mounted for the whole streaming turn (except while waiting on a
+  // question): adding and removing it on every tool call made the bottom of the page jump.
+  const active = state.streaming && !state.question;
   const text = state.streaming ? state.liveText : "";
-  if (!thinking && !text) {
+  if (!active && !text) {
     live.replaceChildren();
     return;
   }
@@ -259,21 +350,27 @@ function renderLive() {
     const node = textNode ?? wrapper.insertBefore(el("div", "markdown"), wrapper.firstChild);
     if (node.dataset.source !== text) {
       node.dataset.source = text;
-      markdownInto(node, text);
+      patchMarkdown(node, text);
     }
   } else {
     textNode?.remove();
   }
   // Rebuilding the box at every update would restart its animation.
-  const box = wrapper.querySelector(".thinking");
-  if (thinking && !box) wrapper.append(thinkingBox());
-  else if (!thinking) box?.remove();
+  let box = wrapper.querySelector(".thinking");
+  if (active) {
+    if (!box) box = wrapper.appendChild(thinkingBox());
+    const label = thinkingLabel(state.status);
+    const labelNode = box.querySelector(".thinking-label");
+    if (labelNode.textContent !== label) labelNode.textContent = label;
+  } else {
+    box?.remove();
+  }
 }
 
 function thinkingBox() {
   const box = el("div", "thinking");
   box.setAttribute("role", "status");
-  box.append(el("span", "thinking-dot"), el("span", "", "Pensando..."));
+  box.append(el("span", "thinking-dot"), el("span", "thinking-label", "Pensando..."));
   return box;
 }
 
@@ -289,6 +386,7 @@ function renderQuestion() {
   $("question-input").value = "";
   if (!question) return;
   // The agent is stopped waiting for this: show it even if the user had scrolled up.
+  stickToBottom = true;
   forceScroll = true;
   markdownInto($("question-text"), question.question);
   const options = $("question-options");
@@ -302,12 +400,17 @@ function renderQuestion() {
   $("question-input").focus();
 }
 
+let todosDrawn = null;
+
 function renderTodos() {
+  const todos = state.todos ?? [];
+  if (todosDrawn === todos) return;
+  todosDrawn = todos;
   const list = $("todo-list");
-  $("todos").hidden = state.todos.length === 0;
+  $("todos").hidden = todos.length === 0;
   list.replaceChildren();
   const symbols = { completed: "✓", in_progress: "▶", cancelled: "✕", pending: "○" };
-  for (const todo of state.todos) {
+  for (const todo of todos) {
     const item = list.appendChild(el("li", `todo ${todo.status}`));
     item.append(el("span", "todo-mark", symbols[todo.status] ?? "○"), el("span", "", todo.content));
   }
@@ -497,7 +600,9 @@ function renderChrome() {
   reasoning.disabled = state.streaming;
 
   // The thinking box already says it, right above.
-  $("status").textContent = state.status.includes("pensando") ? "" : state.status;
+  const statusText = state.status.includes("pensando") ? "" : state.status;
+  $("status").textContent = statusText;
+  $("status").title = statusText;
   $("status").classList.toggle("busy", state.streaming);
   // Three different numbers, never mixed: the context (one request), what the turn cost so
   // far (every request summed) and the steps. The cost is what `askAfterTokens` measures.
@@ -507,7 +612,9 @@ function renderChrome() {
   if (state.turnTokens) parts.push(`${formatTokens(state.turnTokens)} de custo no turno`);
   if (state.cachedTokens) parts.push(`${formatTokens(state.cachedTokens)} do cache`);
   if (state.turnSteps) parts.push(`${state.turnSteps} passos`);
-  $("stats").textContent = parts.join(" · ");
+  const statsText = parts.join(" · ");
+  $("stats").textContent = statsText;
+  $("stats").title = statsText;
 
   const error = $("error");
   const message = localError ?? state.error;
@@ -546,8 +653,9 @@ function updateJumpButton() {
 function render() {
   renderScheduled = false;
   if (!state) return;
-  const stick = isNearBottom() || forceScroll;
+  const stick = stickToBottom || forceScroll;
   forceScroll = false;
+  flushPendingTools();
   appendNewMessages();
   renderLive();
   renderQuestion();
@@ -669,6 +777,10 @@ function fillSelect(select, options) {
 function handleHello(message) {
   state = message.state;
   activities = message.activities;
+  pendingTools = [];
+  todosDrawn = null;
+  sidebarDrawn = null;
+  tasksDrawn = null;
   questionShown = null;
   const { meta } = message;
   fillSelect($("mode"), meta.modes.map((value) => ({ value, label: modeLabel(value) })));
@@ -681,6 +793,7 @@ function handleHello(message) {
   rebuildTimeline();
   setConnection("conectado", "ok");
   setComposerEnabled(true);
+  stickToBottom = true;
   forceScroll = true;
   render();
   $("input").focus();
@@ -690,14 +803,7 @@ function handleTool(activity) {
   const index = activities.findIndex((a) => a.key === activity.key);
   if (index === -1) activities.push(activity);
   else activities[index] = activity;
-
-  const existing = toolCards.get(activity.key);
-  if (existing) {
-    updateToolCard(existing, activity);
-    return;
-  }
-  appendNewMessages();
-  $("timeline").append(toolCard(activity));
+  pendingTools.push(activity);
 }
 
 function connect() {
@@ -761,6 +867,7 @@ function submitComposer() {
     localError = null;
     input.value = "";
     fitInput();
+    stickToBottom = true;
     forceScroll = true;
     return;
   }
@@ -771,11 +878,19 @@ function submitComposer() {
   renderAttachments();
   input.value = "";
   fitInput();
+  stickToBottom = true;
   forceScroll = true;
 }
 
-$("scroller").addEventListener("scroll", updateJumpButton, { passive: true });
-$("jump").addEventListener("click", scrollToEnd);
+$("scroller").addEventListener("scroll", () => {
+  stickToBottom = isNearBottom();
+  updateJumpButton();
+}, { passive: true });
+$("jump").addEventListener("click", () => {
+  stickToBottom = true;
+  scrollToEnd();
+  updateJumpButton();
+});
 new ResizeObserver(updateJumpButton).observe($("timeline"));
 
 $("composer-form").addEventListener("submit", (event) => {

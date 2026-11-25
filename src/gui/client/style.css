@@ -108,8 +108,10 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
 
 /* Layout */
 .layout { flex: 1; display: flex; min-height: 0; }
-.scroller { flex: 1; overflow-y: auto; min-width: 0; padding: 24px 20px; }
+.scroller-wrap { flex: 1; position: relative; min-width: 0; display: flex; }
+.scroller { flex: 1; overflow-y: auto; scrollbar-gutter: stable; min-width: 0; padding: 24px 20px; }
 .column { max-width: 820px; margin: 0 auto; }
+#live { overflow-anchor: none; }
 
 .empty { text-align: center; color: var(--muted); padding: 12vh 0; }
 .empty h1 { color: var(--text); font-size: 26px; margin: 0 0 8px; }
@@ -128,10 +130,11 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
 }
 
 .jump {
-  position: sticky;
-  bottom: 0;
-  display: block;
-  margin: 0 auto;
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 2;
   background: var(--accent);
   border-color: var(--accent);
   color: var(--accent-text);
@@ -139,6 +142,7 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
   font-weight: 600;
   border-radius: 999px;
   padding: 4px 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .28);
 }
 
 .markdown { overflow-wrap: anywhere; }
@@ -168,9 +172,10 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
 .markdown th { background: var(--surface-2); }
 
 /* Thinking */
-.thinking { display: inline-flex; align-items: center; gap: 10px; padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--muted); font-size: 14px; }
+.thinking { display: inline-flex; align-items: center; gap: 10px; max-width: 100%; padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--muted); font-size: 14px; }
 .markdown + .thinking { margin-top: 10px; }
-.thinking-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1s ease-in-out infinite alternate; }
+.thinking-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1s ease-in-out infinite alternate; }
+.thinking-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Tools */
 .tool { margin-bottom: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-size: 13px; }
@@ -223,7 +228,8 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
   background: var(--bg);
   overflow-y: auto;
 }
-.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 8px; font-size: 13px; color: var(--muted); }
+.controls { display: flex; flex-wrap: nowrap; align-items: center; gap: 14px; margin-top: 8px; font-size: 13px; color: var(--muted); min-width: 0; }
+.controls label { flex: none; white-space: nowrap; }
 .controls select:not(#mode) { padding: 1px 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
 /* Mode picker: the native select sits invisible over a styled chip, so the keyboard, screen readers
    and the system dropdown keep working. */
@@ -252,8 +258,9 @@ button.danger { background: var(--danger); border-color: var(--danger); color: #
 }
 @keyframes ultra-flow { to { background-position: 100% 0; } }
 @media (prefers-reduced-motion: reduce) { .mode-chip[data-mode="programação"] .mode-label { animation: none; } }
+.status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status.busy { color: var(--accent); }
-.stats { margin-left: auto; overflow-wrap: anywhere; }
+.stats { margin-top: 4px; min-height: 1.5em; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hint { margin-top: 4px; font-size: 12px; color: var(--muted); }
 
 /* Conversation search, rename and background tasks */
