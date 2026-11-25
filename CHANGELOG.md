@@ -6,6 +6,8 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-25
+
 ### Adicionado
 - Suporte de primeira classe ao DeepSeek em `api.deepseek.com`: cada mensagem `assistant` volta com `reasoning_content` (vazio quando o pensamento foi descartado), que é como o raciocínio anterior continua no contexto deles num pedido com `tools`; `none` desliga o pensamento com `thinking.type: "disabled"`, já que lá ele vem ligado por padrão em `high`; todos os níveis de raciocínio são enviados, sem o rebaixamento para `high` que outros provedores pedem; e o limite de saída sobe de 32768 para 393216 tokens, o teto do modelo (`src/reasoning.ts`, `src/llm.ts`, `src/context.ts`).
 - O padrão de `contextTokens` acompanha o modelo: 800 mil para DeepSeek (janela de 1M), 90 mil para os outros. Compactar a cada passo mudava o começo do pedido e derrubava o cache do provedor, que responde a maior parte da entrada (`src/context.ts`).
