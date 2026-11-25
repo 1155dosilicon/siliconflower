@@ -6,6 +6,9 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Alterado
+- A tag `vX.Y.Z` agora publica a release direto, marcada como "Latest", em vez de deixar um rascunho para revisar à mão (`release.yml`): um rascunho esquecido levava a publicar uma segunda release na mesma tag, e a página da tag passava a mostrar a que estava sem os pacotes.
+
 ## [0.17.0] - 2026-11-25
 
 ### Corrigido
