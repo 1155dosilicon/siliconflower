@@ -4,7 +4,7 @@ import { ensureDir, getGlobalDataDir } from "./fs-util.js";
 import type { ChatMessage, TodoItem } from "./types.js";
 import { log } from "./logger.js";
 import { isToolMediaMessage } from "./services/media.js";
-import { isDeepSeekModel } from "./reasoning.js";
+import { isDeepSeekWideWindow } from "./reasoning.js";
 
 function outputDir(): string {
   return join(getGlobalDataDir(), "outputs");
@@ -54,10 +54,12 @@ export const CONTEXT_TOKEN_BUDGET = 90_000;
 export const MIN_CONTEXT_TOKENS = 8_000;
 export const MAX_CONTEXT_TOKENS = 2_000_000;
 /**
- * Default when the model is a DeepSeek V4 one: its window is 1M and the output cap is 256K, so
+ * Default when the model is a DeepSeek V4 one: its window is 1M and the output cap is 384K, so
  * the history may take 800K. A 90K request would make the history compact itself constantly, and
  * every compaction changes the prompt prefix: DeepSeek's disk cache only hits a request that
- * reuses a prefix whole (api-docs.deepseek.com/guides/kv_cache).
+ * reuses a prefix whole (api-docs.deepseek.com/guides/kv_cache). An older DeepSeek model (a
+ * gateway's `deepseek-chat`/`deepseek-r1`) keeps the general default: its window is much smaller,
+ * and the 800K would only be discovered as a refused request.
  */
 export const DEEPSEEK_CONTEXT_TOKEN_BUDGET = 800_000;
 
@@ -66,7 +68,7 @@ export function contextBudget(value: unknown, model = ""): number {
   const n = Number(value);
   return value !== undefined && value !== null && Number.isFinite(n)
     ? Math.min(MAX_CONTEXT_TOKENS, Math.max(MIN_CONTEXT_TOKENS, Math.floor(n)))
-    : isDeepSeekModel(model)
+    : isDeepSeekWideWindow(model)
       ? DEEPSEEK_CONTEXT_TOKEN_BUDGET
       : CONTEXT_TOKEN_BUDGET;
 }

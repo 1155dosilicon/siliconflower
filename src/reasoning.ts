@@ -45,6 +45,17 @@ export function isDeepSeekModel(model: string): boolean {
   return /deepseek/i.test(model);
 }
 
+/**
+ * The DeepSeek models with the 1M window: the V4 family, which is what `deepseek-flash` and
+ * `deepseek-v4-pro` are on the API and `deepseek-ai/DeepSeek-V4-Pro` is on a gateway. The name is
+ * all there is on a gateway, and an older `deepseek-chat`/`deepseek-r1` hosted there has a much
+ * smaller window: assuming 1M for it would make the first long request be refused and the turn end
+ * in an error instead of compacting.
+ */
+export function isDeepSeekWideWindow(model: string): boolean {
+  return isDeepSeekModel(model) && /v4|flash/i.test(model);
+}
+
 export function providerFamily(baseURL: string, model = ""): ProviderFamily {
   if (isXiaomiMimoEndpoint(baseURL)) return "mimo";
   if (isDeepSeekEndpoint(baseURL)) return "deepseek";

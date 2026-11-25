@@ -1712,61 +1712,81 @@ describe("a provider that refuses before answering", () => {
 
   test("a too-long request is cut down and sent again instead of failing the turn", async () => {
     // The budget is an estimate; the provider knows the real window. The first request is refused
-    // for size, the second is the same turn with a smaller history.
+    // for size, the second is the same turn with a smaller history. Bun.serve is used instead of a
+    // raw socket: the body of this request arrives in several chunks, and answering before reading
+    // all of it closes the connection under the client (that made this test flaky).
     let requests = 0;
-    const bodies: string[] = [];
-    // The request body is large, so it arrives in several chunks: answering on the first one
-    // would close the socket before the client finished writing (and it would retry the write).
-    let buffer = "";
-    const listener = Bun.listen({
+    const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      socket: {
-        data(socket, chunk) {
-          buffer += Buffer.from(chunk).toString("utf8");
-          const headerEnd = buffer.indexOf("\r\n\r\n");
-          if (headerEnd < 0) return;
-          const length = Number(/content-length:\s*(\d+)/i.exec(buffer.slice(0, headerEnd))?.[1] ?? 0);
-          if (Buffer.byteLength(buffer.slice(headerEnd + 4)) < length) return;
-
-          const body = JSON.stringify({
-            error: { message: "This model's maximum context length is 8192 tokens", code: "context_length_exceeded" },
-          });
-          if (++requests === 1) {
-            socket.write(
-              `HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`
-            );
-          } else {
-            const ok = sseChunk({ content: "resposta depois da compactação" }) + sseChunk({}, "stop") + "data: [DONE]\n\n";
-            socket.write(
-              `HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: ${Buffer.byteLength(ok)}\r\nConnection: close\r\n\r\n${ok}`
-            );
-          }
-          socket.end();
-        },
+      async fetch(req) {
+        // The body has to be fully read before answering: it arrives in several chunks, and an
+        // early answer closes the connection under the client that is still writing it.
+        await req.text();
+        requests++;
+        if (requests === 1) {
+          return new Response(
+            JSON.stringify({ error: { message: "This model's maximum context length is 8192 tokens", code: "context_length_exceeded" } }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response(sseChunk({ content: "resposta depois da compactação" }) + sseChunk({}, "stop") + "data: [DONE]\n\n", {
+          headers: { "Content-Type": "text/event-stream" },
+        });
       },
     });
-    const url = `http://127.0.0.1:${listener.port}/v1`;
     const history: ChatMessage[] = [];
     for (let i = 0; i < 200; i++) history.push({ role: i % 2 === 0 ? "user" : "assistant", content: `passo ${i} `.repeat(60) });
     history.push({ role: "user", content: "responda" });
     try {
       const events: StreamEvent[] = [];
+      const retries: string[] = [];
       for await (const ev of streamChat({
-        config: { baseURL: url, apiKey: "k", model: "m", reasoning: "none", mcpServers: {} },
+        config: { baseURL: `http://127.0.0.1:${server.port}/v1`, apiKey: "k", model: "m", reasoning: "none", mcpServers: {} },
         messages: history,
         tools: [],
         reasoning: "none",
         executeTool: async () => ({ result: "", isError: false }),
       })) {
-        if (ev.type === "retry") bodies.push(ev.message);
+        if (ev.type === "retry") retries.push(ev.message);
         events.push(ev);
       }
       expect(requests).toBe(2);
-      expect(bodies.join()).toContain("contexto do modelo");
+      expect(retries.join()).toContain("contexto do modelo");
       expect(doneOf(events).content).toContain("resposta depois da compactação");
     } finally {
-      listener.stop(true);
+      server.stop(true);
+    }
+  }, 20_000);
+
+  test("the history is cut again when two cuts were not enough", async () => {
+    // The recovery used to stop after two cuts (800K -> 288K); a provider with a 128K window kept
+    // refusing and the turn ended in an error instead of fitting.
+    let requests = 0;
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        await req.json();
+        requests++;
+        if (requests <= 3) {
+          return new Response(
+            JSON.stringify({ error: { message: "This model's maximum context length is 8192 tokens", code: "context_length_exceeded" } }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        return new Response(sseChunk({ content: "coube" }) + sseChunk({}, "stop") + "data: [DONE]\n\n", {
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      },
+    });
+    try {
+      const events = await collect(`http://127.0.0.1:${server.port}/v1`, "none");
+      expect(requests).toBe(4);
+      expect(events.filter((e) => e.type === "retry")).toHaveLength(3);
+      expect(doneOf(events).content).toContain("coube");
+    } finally {
+      server.stop(true);
     }
   }, 20_000);
   test("a payload too large is not mistaken for a context overflow", () => {
@@ -2111,6 +2131,13 @@ describe("DeepSeek support", () => {
   test("the window and the output limit follow a DeepSeek model", () => {
     expect(contextBudget(undefined, "deepseek-v4.1-flash")).toBe(800_000);
     expect(contextBudget(undefined, "gpt-5.5")).toBe(90_000);
+    // The 800K is for the 1M-window models (the V4 family and its `flash` name).
+    expect(contextBudget(undefined, "deepseek-flash")).toBe(800_000);
+    expect(contextBudget(undefined, "deepseek-ai/DeepSeek-V4-Pro")).toBe(800_000);
+    // An older DeepSeek hosted by a gateway has a much smaller window: it keeps the general default.
+    expect(contextBudget(undefined, "deepseek-chat")).toBe(90_000);
+    expect(contextBudget(undefined, "deepseek-ai/DeepSeek-V3")).toBe(90_000);
+    expect(contextBudget(undefined, "deepseek-r1")).toBe(90_000);
     // An explicit value in config.json always wins.
     expect(contextBudget(120_000, "deepseek-chat")).toBe(120_000);
     expect(outputBudget("https://api.deepseek.com/v1")).toBe(393_216);

@@ -359,11 +359,12 @@ function invalidArgsMessage(name: string, finishReason: string | null, outputLim
 }
 
 /**
- * The provider's limit on the request size counts against an estimate: the history is cut down to
- * this fraction of itself and sent again, at most this many times.
+ * The provider's limit on the request size counts against an estimate: the history is cut in half
+ * and sent again, at most this many times. Three halvings take 800K down to 100K, which is under
+ * the smallest window a DeepSeek gateway model may have: a reachable size, not a failed turn.
  */
-const CONTEXT_OVERFLOW_SHRINK = 0.6;
-const MAX_CONTEXT_OVERFLOW_RETRIES = 2;
+const CONTEXT_OVERFLOW_SHRINK = 0.5;
+const MAX_CONTEXT_OVERFLOW_RETRIES = 3;
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("Abortado", "AbortError");
