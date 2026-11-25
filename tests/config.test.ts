@@ -25,6 +25,17 @@ describe("config", () => {
     expect(isValid(invalid)).toBe(false);
   });
 
+  test("tokenWeights are read from config.json, bounded, and 1/1 means the raw sum", () => {
+    const base = { apiKey: "k", baseURL: "https://api.test.com", model: "m", reasoning: "low" as const };
+    expect(normalize(base).tokenWeights).toBeUndefined();
+    // What the user wrote is what is used: the default is not a decision forced on them.
+    expect(normalize({ ...base, tokenWeights: { prefill: 1, cacheHit: 1 } }).tokenWeights).toEqual({ prefill: 1, cacheHit: 1 });
+    expect(normalize({ ...base, tokenWeights: { prefill: 0 } }).tokenWeights).toEqual({ prefill: 0, cacheHit: 0.025 });
+    // Nonsense falls back to the default instead of turning the budget off.
+    expect(normalize({ ...base, tokenWeights: { prefill: -5, cacheHit: "x" } }).tokenWeights).toEqual({ prefill: 0, cacheHit: 0.025 });
+    expect(normalize({ ...base, tokenWeights: { prefill: 1e9 } }).tokenWeights!.prefill).toBe(10);
+  });
+
   test("normalize preserves hooks and handles mode aliases", () => {
     const norm1 = normalize({
       apiKey: "test-key",

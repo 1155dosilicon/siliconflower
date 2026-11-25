@@ -4,7 +4,7 @@ import { builtinToolsAsMcp, isBuiltin, runBuiltin } from "./tools.js";
 import { loadSkills, readSkillContent, SKILL_TOOL, type Skill } from "./skills.js";
 import { buildSystemPrompt, nextMode, type Mode } from "./modes.js";
 import { buildMemorySystemPrompt } from "./services/memory.js";
-import { onTodosChange, setTodos } from "./todo.js";
+import { getTodos, onTodosChange, setTodos } from "./todo.js";
 import { basename, join } from "node:path";
 import { writeFile } from "node:fs/promises";
 import {
@@ -77,7 +77,14 @@ export interface SessionState {
   project: ProjectInfo | null;
   skillCount: number;
   toolCount: number;
+  /** `total_tokens` of the last request: how full the context is. */
   apiTokens: number;
+  /** Every request of the running turn summed: what it cost so far (`usage`, not `apiTokens`). */
+  turnTokens: number;
+  /** Share of the input of the turn the provider served from its prompt cache. */
+  cachedTokens: number;
+  /** Tool steps of the running turn. */
+  turnSteps: number;
   /** System prompt + API history + live text. Front ends may add what is being typed. */
   estimatedTokens: number;
   /** The open conversation; null until its first turn ends. Only with a store. */
@@ -105,7 +112,7 @@ export function continueQuestion(hit: LimitHit): string {
     case "steps":
       return `O agente já deu ${hit.steps} passos nesta resposta sem terminar. Continuar?`;
     case "tokens":
-      return `O agente já usou ${formatTokenCount(hit.tokens)} tokens nesta resposta sem terminar (${hit.steps} passos). Continuar?`;
+      return `O agente já consumiu ${formatTokenCount(hit.tokens)} tokens de custo nesta resposta sem terminar (${hit.steps} passos; a cada passo o contexto inteiro é reenviado). Continuar?`;
     case "time":
       return `O agente já trabalha há ${Math.round(hit.elapsedMs / 60_000)} min nesta resposta sem terminar (${hit.steps} passos). Continuar?`;
     case "loop":
@@ -179,6 +186,9 @@ export class AgentSession {
       skillCount: 0,
       toolCount: builtinToolsAsMcp().length + 1,
       apiTokens: 0,
+      turnTokens: 0,
+      cachedTokens: 0,
+      turnSteps: 0,
       estimatedTokens: 0,
       conversationId: null,
       conversations: [],
@@ -304,6 +314,9 @@ export class AgentSession {
       messages: body.messages,
       todos: body.todos,
       apiTokens: 0,
+      turnTokens: 0,
+      cachedTokens: 0,
+      turnSteps: 0,
       error: null,
       liveText: "",
       status: "pronto",
@@ -570,6 +583,9 @@ export class AgentSession {
       streaming: true,
       liveText: "",
       status: "pensando...",
+      turnTokens: 0,
+      cachedTokens: 0,
+      turnSteps: 0,
     });
 
     // Pass the full API history (including tool calls/results from earlier turns) so the
@@ -611,6 +627,8 @@ export class AgentSession {
         tools: this.allTools(),
         reasoning: this.state.reasoning,
         signal: controller.signal,
+        // Read at turn start: the plan is what survives a compaction, so it must be current.
+        plan: getTodos(),
         executeTool: (name, args) => this.executeTool(name, args),
         confirmContinue: !this.interactive ? undefined : async (hit) => {
           const answer = await this.askUser(
@@ -649,6 +667,7 @@ export class AgentSession {
             steps.push(...ev.messages);
             stepText = "";
             stepThinking = "";
+            this.patch({ turnSteps: steps.filter((m) => m.role === "assistant").length });
             break;
           case "tool_call":
             this.patch({ status: `🔨 ${ev.name}...` });
@@ -657,7 +676,12 @@ export class AgentSession {
             this.patch({ status: "processando..." });
             break;
           case "usage":
-            if (ev.totalTokens) this.patch({ apiTokens: ev.totalTokens });
+            // `apiTokens` is the last request (the context size); `turnTokens` sums the turn.
+            this.patch({
+              ...(ev.totalTokens ? { apiTokens: ev.totalTokens } : {}),
+              turnTokens: this.state.turnTokens + (ev.totalTokens ?? (ev.promptTokens ?? 0) + (ev.completionTokens ?? 0)),
+              cachedTokens: this.state.cachedTokens + (ev.cachedTokens ?? 0),
+            });
             break;
           case "error":
             hadError = true;

@@ -32,8 +32,42 @@ export interface TurnLimits {
 /** Share of a budget left when the model is told to wrap up (only when nobody can be asked). */
 const LANDING_SHARE = 0.1;
 
+/**
+ * What an input token counts against `askAfterTokens`: every step sends the whole history
+ * again, so the prompt alone would make the budget a disguised step limit (8M / a 90K context
+ * is ~89 steps, and the same 8M is ~400 steps with a small one). Input is also much cheaper
+ * than output (a DeepSeek cache hit costs ~1/50 of a generated token), so it is counted at a
+ * tenth: the budget measures what the turn costs, whatever the context happens to be.
+ */
+export const PREFILL_WEIGHT = 0.1;
+
+/**
+ * Share of `PREFILL_WEIGHT` that a cached input token counts. A prompt cache hit costs a
+ * fraction of an uncached one (DeepSeek: ~1/4; OpenAI: ~1/10), so without this a break-heavy
+ * turn is priced as if the provider had charged every byte again.
+ */
+export const CACHE_HIT_WEIGHT = 0.025;
+
+/** What one request of a turn costs against `askAfterTokens`. */
+export function weightedCost(inputTokens: number, outputTokens: number, cachedInputTokens = 0, weights: TokenWeights = DEFAULT_WEIGHTS): number {
+  const input = Math.max(0, inputTokens);
+  const cached = Math.min(Math.max(0, cachedInputTokens), input);
+  return (input - cached) * weights.prefill + cached * weights.cacheHit + Math.max(0, outputTokens);
+}
+
+/** How each token weighs against `askAfterTokens`; the user sets these in config.json. */
+export interface TokenWeights {
+  /** What an input token counts (0.1 = a tenth of an output token). */
+  prefill: number;
+  /** What a cached input token counts. */
+  cacheHit: number;
+}
+
+export const DEFAULT_WEIGHTS: TokenWeights = { prefill: PREFILL_WEIGHT, cacheHit: CACHE_HIT_WEIGHT };
+
 export class TurnBudget {
   steps = 0;
+  /** Cost of the turn: every request's output plus the weighted share of its input. */
   tokens = 0;
   private readonly started: number;
   /** Where each budget asks next: it moves on by a full allowance when the user goes on. */
@@ -42,7 +76,9 @@ export class TurnBudget {
 
   constructor(
     private readonly limits: TurnLimits,
-    private readonly now: () => number = () => Date.now()
+    private readonly now: () => number = () => Date.now(),
+    /** 1/1 makes `tokens` the raw sum the provider reports. */
+    private readonly weights: TokenWeights = DEFAULT_WEIGHTS
   ) {
     this.started = now();
     this.next = { steps: limits.steps, tokens: limits.tokens, ms: limits.minutes * 60_000 };
@@ -50,6 +86,15 @@ export class TurnBudget {
 
   elapsedMs(): number {
     return this.now() - this.started;
+  }
+
+  /**
+   * One request of the turn, from the provider's `usage` or from an estimate. Without the
+   * breakdown, everything counts as output: overcounting is the safer side of a cost budget.
+   * `cachedInputTokens` is the share of the input the provider served from its prompt cache.
+   */
+  addUsage(inputTokens: number, outputTokens: number, cachedInputTokens = 0): void {
+    this.tokens += weightedCost(inputTokens, outputTokens, cachedInputTokens, this.weights);
   }
 
   usage(): TurnUsage {
@@ -86,7 +131,7 @@ export class TurnBudget {
     }
     if (!this.landed.tokens && near(this.tokens, this.limits.tokens)) {
       this.landed.tokens = true;
-      parts.push(`restam ~${formatTokenCount(this.limits.tokens - this.tokens)} de ${formatTokenCount(this.limits.tokens)} tokens`);
+      parts.push(`restam ~${formatTokenCount(this.limits.tokens - this.tokens)} de ${formatTokenCount(this.limits.tokens)} tokens de custo`);
     }
     const limitMs = this.limits.minutes * 60_000;
     if (!this.landed.time && near(this.elapsedMs(), limitMs)) {
@@ -104,7 +149,7 @@ export function describeLimit(hit: LimitHit): string {
     case "steps":
       return `${hit.steps} ${hit.steps === 1 ? "passo" : "passos"} de ferramentas (limite de ${hit.limit})`;
     case "tokens":
-      return `${formatTokenCount(hit.tokens)} tokens (limite de ${formatTokenCount(hit.limit)})`;
+      return `${formatTokenCount(hit.tokens)} tokens de custo (limite de ${formatTokenCount(hit.limit)})`;
     case "time":
       return `${Math.round(hit.elapsedMs / 60_000)} min de trabalho (limite de ${hit.limit} min)`;
     case "loop":
