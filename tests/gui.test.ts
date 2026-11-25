@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { startGuiServer, type GuiServer, type GuiServerOptions } from "../src/gui/server.js";
 import type { DoctorOptions, DoctorReport } from "../src/doctor.js";
-import { parseInline, parseMarkdown, safeHref } from "../src/gui/client/markdown.js";
+import { diffMarkdownBlocks, parseInline, parseMarkdown, safeHref } from "../src/gui/client/markdown.js";
 import { AgentSession } from "../src/session.js";
 import type { ChatOptions } from "../src/llm.js";
 import type { AppConfig, StreamEvent } from "../src/types.js";
@@ -414,5 +414,56 @@ describe("GUI markdown", () => {
     expect(() => parseMarkdown(">".repeat(2000) + " x")).not.toThrow();
     expect(() => parseInline("[".repeat(2000) + "](").length).not.toThrow();
     expect(() => parseInline("**a ".repeat(2000))).not.toThrow();
+  });
+
+  test("incremental streaming diff keeps finished blocks and updates growing blocks in place", () => {
+    const step = (prev: any[], md: string) => {
+      const ops = diffMarkdownBlocks(prev, parseMarkdown(md));
+      const next = ops
+        .filter((op: any) => op.kind !== "truncate")
+        .map((op: any) => ({ key: op.key, type: op.type, lang: op.lang }));
+      return { ops, next };
+    };
+
+    const s1 = step([], "Olá");
+    expect(s1.ops.map((o: any) => o.kind)).toEqual(["append"]);
+
+    const s2 = step(s1.next, "Olá mundo");
+    expect(s2.ops.map((o: any) => o.kind)).toEqual(["update-text"]);
+
+    const s3 = step(s2.next, "Olá mundo\n\n```ts\nconst a = 1;");
+    expect(s3.ops.map((o: any) => o.kind)).toEqual(["keep", "append"]);
+
+    const s4 = step(s3.next, "Olá mundo\n\n```ts\nconst a = 1;\nconst b = 2;\n```");
+    expect(s4.ops.map((o: any) => o.kind)).toEqual(["keep", "update-code"]);
+
+    // A retry can shorten the streaming text: extra trailing blocks must be removed.
+    const s5 = step(s4.next, "Olá mundo");
+    expect(s5.ops.map((o: any) => o.kind)).toEqual(["keep", "truncate"]);
+    expect((s5.ops[1] as any).length).toBe(1);
+  });
+});
+
+describe("GUI client stability", () => {
+  test("client assets parse cleanly and keep anti-flicker layout invariants", async () => {
+    const { server, base } = setup();
+    const cookie = await login(server);
+    const [html, css, js] = await Promise.all(
+      ["/", "/style.css", "/app.js"].map(async (path) => {
+        const res = await fetch(base + path, { headers: { Cookie: cookie } });
+        expect(res.status).toBe(200);
+        return res.text();
+      })
+    );
+
+    // #jump sits outside #scroller so showing/hiding it never shifts scrollHeight.
+    expect(html.indexOf("</main>")).toBeLessThan(html.indexOf('id="jump"'));
+    // Footer controls stay single-line and #stats has its own dedicated row.
+    expect(css).toContain("flex-wrap: nowrap");
+    expect(css).toContain("scrollbar-gutter: stable");
+    expect(css).toContain("#live { overflow-anchor: none; }");
+    // app.js must remain syntactically valid ES module code.
+    const transpiler = new Bun.Transpiler({ loader: "js" });
+    expect(() => transpiler.transformSync(js)).not.toThrow();
   });
 });

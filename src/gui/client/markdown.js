@@ -226,6 +226,39 @@ export function parseMarkdown(text) {
   return parseBlocks(text.replace(/\r\n?/g, "\n").split("\n"), 0);
 }
 
+/**
+ * Plans minimal DOM operations to turn `prev` (`{ key, type, lang }[]`) into `next`
+ * (parsed markdown blocks): finished blocks stay mounted, a growing plain paragraph or
+ * code block updates in place, and extra trailing blocks are removed.
+ */
+export function diffMarkdownBlocks(prev, next) {
+  const ops = [];
+  for (let i = 0; i < next.length; i++) {
+    const block = next[i];
+    const key = JSON.stringify(block);
+    const lang = block.type === "codeblock" ? block.lang : undefined;
+    const old = prev[i];
+    if (old && old.key === key) {
+      ops.push({ kind: "keep", index: i, key, type: block.type, lang });
+    } else if (
+      old && old.type === "paragraph" && block.type === "paragraph" &&
+      block.children.length === 1 && block.children[0].type === "text"
+    ) {
+      ops.push({ kind: "update-text", index: i, key, type: block.type, lang, text: block.children[0].text, block });
+    } else if (old && old.type === "codeblock" && block.type === "codeblock" && old.lang === lang) {
+      ops.push({ kind: "update-code", index: i, key, type: block.type, lang, text: block.text, block });
+    } else if (old) {
+      ops.push({ kind: "replace", index: i, key, type: block.type, lang, block });
+    } else {
+      ops.push({ kind: "append", index: i, key, type: block.type, lang, block });
+    }
+  }
+  if (prev.length > next.length) {
+    ops.push({ kind: "truncate", length: next.length });
+  }
+  return ops;
+}
+
 /* ------------------------------ Code highlighting ------------------------------ */
 
 const HASH_COMMENT_LANGS = new Set(["py", "python", "sh", "bash", "zsh", "shell", "fish", "yaml", "yml", "toml", "ruby", "rb", "r", "perl", "pl", "dockerfile", "makefile", "ini", "conf", "powershell", "ps1", "nix", "elixir", "ex"]);
