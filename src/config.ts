@@ -250,7 +250,7 @@ export function normalize(data: Partial<AppConfig>, opts: { applyEnv?: boolean }
     mode,
     system: text(data.system).trim() || undefined,
     ...(data.contextTokens !== undefined && Number.isFinite(Number(data.contextTokens))
-      ? { contextTokens: contextBudget(data.contextTokens) }
+      ? { contextTokens: contextBudget(data.contextTokens, model) }
       : {}),
     ...(data.askAfterSteps !== undefined && Number.isFinite(Number(data.askAfterSteps))
       ? { askAfterSteps: askAfterSteps(data.askAfterSteps) }

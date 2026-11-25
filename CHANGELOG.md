@@ -6,6 +6,14 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+### Adicionado
+- Suporte de primeira classe ao DeepSeek em `api.deepseek.com`: cada mensagem `assistant` volta com `reasoning_content` (vazio quando o pensamento foi descartado), que é como o raciocínio anterior continua no contexto deles num pedido com `tools`; `none` desliga o pensamento com `thinking.type: "disabled"`, já que lá ele vem ligado por padrão em `high`; todos os níveis de raciocínio são enviados, sem o rebaixamento para `high` que outros provedores pedem; e o limite de saída sobe de 32768 para 262144 tokens, o teto do modelo (`src/reasoning.ts`, `src/llm.ts`, `src/context.ts`).
+- O padrão de `contextTokens` acompanha o modelo: 800 mil para DeepSeek (janela de 1M), 90 mil para os outros. Compactar a cada passo mudava o começo do pedido e derrubava o cache do provedor, que responde a maior parte da entrada (`src/context.ts`).
+- Num gateway que hospeda DeepSeek (SiliconFlow, modo compatível da Aliyun...), o modelo é reconhecido pelo nome, e um pedido recusado por causa de `thinking` é repetido sem esse campo em vez de terminar o turno (`src/llm.ts`).
+
+### Corrigido
+- O parâmetro que liberava áudio e vídeo no pedido era o mesmo que guardava o raciocínio das mensagens: agora são dois, então um provedor novo que precise do raciocínio de volta não ganha suporte a mídia por acidente (`src/llm.ts`).
+
 ### Alterado
 - A tag `vX.Y.Z` agora publica a release direto, marcada como "Latest", em vez de deixar um rascunho para revisar à mão (`release.yml`): um rascunho esquecido levava a publicar uma segunda release na mesma tag, e a página da tag passava a mostrar a que estava sem os pacotes.
 

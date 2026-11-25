@@ -4,7 +4,7 @@ import { askAfterMinutes, askAfterSteps, askAfterTokens, knownSecrets, redactKno
 import { compressHistory, contextBudget, estimateTokens, processToolOutput } from "./context.js";
 import { LoopGuard, TurnBudget, describeLimit, limitHeader, wrapUpPrompt, type LimitHit } from "./turn-limits.js";
 import type { AppConfig, ChatMessage, MediaAttachment, McpTool, ReasoningLevel, StreamEvent, TodoItem, ToolResult } from "./types.js";
-import { DEFAULT_REASONING, isExtendedReasoning, isXiaomiMimoEndpoint } from "./reasoning.js";
+import { DEFAULT_REASONING, hasNativeThinking, isDeepSeekEndpoint, isExtendedReasoning, isXiaomiMimoEndpoint } from "./reasoning.js";
 import { hasMediaData, mediaNote, pruneMedia, rejectMedia, userContent } from "./services/media.js";
 
 export interface ChatOptions {
@@ -62,7 +62,15 @@ export function buildOpenAIMessages(
   config: AppConfig,
   messages: ChatMessage[]
 ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] {
-  const preserveReasoningContent = isXiaomiMimoEndpoint(config.baseURL);
+  // MiMo and DeepSeek both need the reasoning of an earlier turn sent back. DeepSeek sends it
+  // on every assistant message: with `tools` in the request, that is what keeps the reasoning
+  // in its context (see reasoning.ts).
+  const isDeepSeek = isDeepSeekEndpoint(config.baseURL);
+  const preserveReasoningContent = isXiaomiMimoEndpoint(config.baseURL) || isDeepSeek;
+  // A message whose thinking we dropped (an old conversation, a step that only thought) still
+  // carries the field, empty.
+  const reasoningField = (reasoning: string | undefined) =>
+    isDeepSeek ? { reasoning_content: reasoning ?? "" } : reasoning !== undefined ? { reasoning_content: reasoning } : {};
   const out: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
   if (config.system) out.push({ role: "system", content: config.system });
   // compressHistory may drop the assistant(tool_calls) message that a tool result answers;
@@ -74,7 +82,8 @@ export function buildOpenAIMessages(
     if (m.role === "user") {
       out.push({
         role: "user",
-        content: m.media ? userContent(m, preserveReasoningContent) : m.content,
+        // Audio and video are MiMo's; images go to every provider.
+        content: m.media ? userContent(m, isXiaomiMimoEndpoint(config.baseURL)) : m.content,
       } as OpenAI.Chat.Completions.ChatCompletionUserMessageParam);
     } else if (m.role === "assistant") {
       if (m.toolCalls && m.toolCalls.length > 0) {
@@ -82,13 +91,13 @@ export function buildOpenAIMessages(
           role: "assistant",
           content: m.content || "",
           tool_calls: m.toolCalls,
-          ...(preserveReasoningContent && m.reasoning !== undefined ? { reasoning_content: m.reasoning } : {}),
+          ...(preserveReasoningContent ? reasoningField(m.reasoning) : {}),
         } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam);
       } else {
         out.push({
           role: "assistant",
           content: m.content,
-          ...(preserveReasoningContent && m.reasoning !== undefined ? { reasoning_content: m.reasoning } : {}),
+          ...(preserveReasoningContent ? reasoningField(m.reasoning) : {}),
         } as OpenAI.Chat.Completions.ChatCompletionAssistantMessageParam);
       }
     } else if (m.role === "tool") {
@@ -172,6 +181,23 @@ export function isOfficialOpenAIEndpoint(baseURL: string): boolean {
 const MAX_OUTPUT_TOKENS = 32768;
 // Models and providers with a smaller cap reject the value above instead of clamping it.
 const FALLBACK_OUTPUT_TOKENS = 16384;
+/** DeepSeek V4 takes 256K of output; asking for less only splits large files in pieces. */
+const DEEPSEEK_MAX_OUTPUT_TOKENS = 262_144;
+/**
+ * The `thinking` parameter of the providers that think by default: `none` has to be said out
+ * loud, and a step that spent the whole limit thinking is resent with it disabled.
+ */
+export function thinkingParam(reasoning: ReasoningLevel, lowered = false): { thinking: { type: "enabled" | "disabled" } } {
+  return { thinking: { type: reasoning === "none" || lowered ? "disabled" : "enabled" } };
+}
+
+/**
+ * The output limit for this provider: 262144 tokens on DeepSeek's own API (V4 takes 256K, and
+ * holding it to 32K only makes a large file arrive in pieces), 32768 everywhere else.
+ */
+export function outputBudget(baseURL: string): number {
+  return isDeepSeekEndpoint(baseURL) ? DEEPSEEK_MAX_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS;
+}
 // Keeps room for the conversation even when many MCP tools fill most of the context budget.
 const MIN_HISTORY_TOKENS = 20_000;
 
@@ -362,9 +388,14 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   const secrets = await knownSecrets(config);
   const apiTools = buildOpenAITools(tools);
   const isXiaomiMimo = isXiaomiMimoEndpoint(config.baseURL);
+  // DeepSeek's own API: thinking is on by default there, so "off" needs `thinking.disabled`.
+  const isDeepSeek = isDeepSeekEndpoint(config.baseURL);
+  // Both keep the reasoning of a tool-call turn: their API requires it back. DeepSeek needs it on
+  // every assistant message, MiMo on the one before the tool results.
+  const keepAssistantReasoning = isDeepSeek;
   let effort = !isXiaomiMimo && reasoning !== "none" ? reasoning : undefined;
   let supportsEffort = true;
-  let outputLimit = MAX_OUTPUT_TOKENS;
+  let outputLimit = outputBudget(config.baseURL);
   let tokenParam: "max_tokens" | "max_completion_tokens" = isOfficialOpenAIEndpoint(config.baseURL)
     ? "max_completion_tokens"
     : "max_tokens";
@@ -378,7 +409,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
   // `let`: a provider that refuses the size makes the next request fit a smaller window.
   let historyBudget = Math.max(
     MIN_HISTORY_TOKENS,
-    contextBudget(config.contextTokens) - estimateTokens(config.system ?? "") - estimateTokens(JSON.stringify(apiTools))
+    contextBudget(config.contextTokens, config.model) - estimateTokens(config.system ?? "") - estimateTokens(JSON.stringify(apiTools))
   );
   const turn: ChatMessage[] = [];
   let finalContent = "";
@@ -414,7 +445,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
     const header = limitHeader(hit);
     yield* appendText(`${header}\n\n`);
     const request = buildOpenAIMessages(config, [
-      ...compressHistory(pruneMedia(history), historyBudget, { keepToolCallReasoning: isXiaomiMimo }),
+      ...compressHistory(pruneMedia(history), historyBudget, { keepToolCallReasoning: isXiaomiMimo, keepAssistantReasoning: isDeepSeek }),
       { role: "user", content: wrapUpPrompt(hit) },
     ]);
     let summary = "";
@@ -436,6 +467,8 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
               [tokenParam]: outputLimit,
               stream_options: { include_usage: true },
               ...(supportsEffort && effort ? { reasoning_effort: "low" } : {}),
+              // DeepSeek: with `tools` sent, thinking cannot be left implicit.
+              ...(isDeepSeek ? { thinking: { type: "disabled" } } : {}),
               ...(isXiaomiMimo ? { thinking: { type: "disabled" } } : {}),
               ...(withTools ? { tools: apiTools, tool_choice: "none" } : {}),
             } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
@@ -528,7 +561,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
       }
     }
     const buildRequest = () =>
-      buildOpenAIMessages(config, compressHistory(pruneMedia(history), historyBudget, { keepToolCallReasoning: isXiaomiMimo, plan }));
+      buildOpenAIMessages(config, compressHistory(pruneMedia(history), historyBudget, { keepToolCallReasoning: isXiaomiMimo, keepAssistantReasoning: isDeepSeek, plan }));
     let working = buildRequest();
     let content = "";
     let thinking = "";
@@ -546,8 +579,12 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
     let drops = 0;
     // The step spent the whole output limit thinking: it is requested again with less thinking.
     let lowered = false;
-    const canLowerReasoning = () => (isXiaomiMimo ? reasoning !== "none" : Boolean(supportsEffort && effort && effort !== "low"));
-
+    // A gateway that hosts DeepSeek may reject `thinking`: it is dropped, not the whole request.
+    let sendThinking = hasNativeThinking(config.baseURL, config.model);
+    const thinkingField = () =>
+      sendThinking ? thinkingParam(reasoning, lowered) : {};
+    const canLowerReasoning = () =>
+      reasoning !== "none" && (isXiaomiMimo || sendThinking || Boolean(supportsEffort && effort && effort !== "low"));
     let requestController: AbortController | undefined;
     let detachRequestAbort = () => {};
     const makeRequest = (withEffort: boolean) => {
@@ -566,7 +603,7 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
           [tokenParam]: outputLimit,
           stream_options: { include_usage: true },
           ...(withEffort && sentEffort ? { reasoning_effort: sentEffort } : {}),
-          ...(isXiaomiMimo ? { thinking: { type: reasoning === "none" || lowered ? "disabled" : "enabled" } } : {}),
+          ...thinkingField(),
           ...(apiTools.length ? { tools: apiTools, tool_choice: "auto" } : {}),
         } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
         { signal: requestController.signal }
@@ -636,6 +673,11 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
             void log("warn", `Provedor recusou um pedido com mídia; repetindo sem ela: ${describeApiError(err)}`);
             rejectMedia(history);
             working = buildRequest();
+          } else if (sendThinking && /thinking/.test(msg) && !isTransientFailure(err) && /unsupported|unknown|unrecognized|not supported|invalid|extra/i.test(msg)) {
+            // A gateway that does not implement DeepSeek's `thinking`: thinking stays on unless
+            // the model lets `reasoning_effort` turn it off.
+            sendThinking = false;
+            void log("warn", `Provedor não aceita thinking; repetindo sem ele: ${describeApiError(err)}`);
           } else if (attempt < 3 && supportsEffort && effort && isExtendedReasoning(effort) && /reasoning/i.test(msg)) {
             // Most providers stop at "high": keep thinking on instead of dropping the parameter.
             void log("warn", `Provedor rejeitou reasoning_effort=${effort}; repetindo com ${DEFAULT_REASONING}`);
@@ -805,8 +847,9 @@ async function* streamOpenAI(opts: ChatOptions): AsyncGenerator<StreamEvent> {
         // Broken JSON in the history can make a provider refuse every later request.
         function: { name: c.name, arguments: parseToolArgs(c.args) ? c.args : "{}" },
       })),
-      // MiMo requires reasoning_content on the assistant message preceding tool results.
-      ...(isXiaomiMimo ? { reasoning: thinking } : {}),
+      // MiMo and DeepSeek require reasoning_content on the assistant message preceding tool
+      // results: their API refuses the next request without it.
+      ...(keepAssistantReasoning ? { reasoning: thinking } : {}),
     };
     const stepMessages: ChatMessage[] = [];
     const record = (message: ChatMessage) => {

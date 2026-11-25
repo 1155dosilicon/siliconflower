@@ -2036,3 +2036,116 @@ describe("siliconflower run killed from outside", () => {
     }
   }, 30_000);
 });
+
+import { compressHistory, contextBudget } from "../src/context.js";
+import { isDeepSeekEndpoint, isDeepSeekModel, providerFamily, reasoningOptions } from "../src/reasoning.js";
+import { outputBudget, thinkingParam } from "../src/llm.js";
+
+/*
+ * DeepSeek's own API has rules no other provider has: a request with `tools` must carry the
+ * `reasoning_content` of every assistant message, thinking is on by default, and the window is
+ * 1M. Getting any of them wrong ends the turn in a 400 or in a cache miss on every step.
+ */
+describe("DeepSeek support", () => {
+  const config = (baseURL: string, model = "deepseek-chat"): AppConfig => ({ baseURL, apiKey: "k", model, reasoning: "high", mcpServers: {} });
+
+  test("the provider family is told apart by endpoint and by model", () => {
+    expect(isDeepSeekEndpoint("https://api.deepseek.com/v1")).toBe(true);
+    expect(isDeepSeekEndpoint("https://api.deepseek.ai")).toBe(true);
+    expect(isDeepSeekEndpoint("https://api.deepseek.com.evil.test/v1")).toBe(false);
+    expect(isDeepSeekModel("deepseek-v4.1-flash")).toBe(true);
+    expect(providerFamily("https://api.deepseek.com/v1", "deepseek-chat")).toBe("deepseek");
+    // A gateway that hosts DeepSeek: the model is recognized, the endpoint is not.
+    expect(providerFamily("https://api.siliconflow.com/v1", "deepseek-ai/DeepSeek-V4-Pro")).toBe("deepseek-model");
+    expect(providerFamily("https://xiaomimimo.com/v1", "mimo-7b")).toBe("mimo");
+    expect(providerFamily("https://api.openai.com/v1", "gpt-5.5")).toBe("generic");
+  });
+
+  test("every assistant message keeps its reasoning, tool call or not", () => {
+    const history: ChatMessage[] = [
+      { role: "user", content: "leia o arquivo" },
+      { role: "assistant", content: "", reasoning: "pensei muito", toolCalls: [{ id: "c1", type: "function", function: { name: "read_file", arguments: "{}" } }] },
+      { role: "tool", content: "conteudo", toolCallId: "c1" },
+      { role: "assistant", content: "pronto", reasoning: "resumo final" },
+      { role: "user", content: "obrigado" },
+    ];
+    const kept = compressHistory(history, 10, { keepAssistantReasoning: true });
+    expect(kept.filter((m) => m.role === "assistant").every((m) => Boolean(m.reasoning))).toBe(true);    // Without the flag nothing is kept, which is what every other provider expects.
+    const dropped = compressHistory(history, 10, {});
+    expect(dropped.some((m) => m.reasoning !== undefined)).toBe(false);
+  });
+
+  test("DeepSeek gets reasoning_content on every assistant message, even when empty", () => {
+    const messages = buildOpenAIMessages(config("https://api.deepseek.com/v1"), [
+      { role: "user", content: "oi" },
+      { role: "assistant", content: "olá" },
+    ]);
+    const assistant = messages.find((m) => m.role === "assistant") as { reasoning_content?: string };
+    expect(assistant.reasoning_content).toBe("");
+    // Any other provider: no field at all, since some reject unknown ones.
+    const other = buildOpenAIMessages(config("https://api.siliconflow.com/v1"), [
+      { role: "user", content: "oi" },
+      { role: "assistant", content: "olá" },
+    ]);
+    expect("reasoning_content" in (other.find((m) => m.role === "assistant") as object)).toBe(false);
+  });
+
+  test("thinking is said out loud: off is off, and a dropped step disables it", () => {
+    expect(thinkingParam("high")).toEqual({ thinking: { type: "enabled" } });
+    expect(thinkingParam("none")).toEqual({ thinking: { type: "disabled" } });
+    expect(thinkingParam("high", true)).toEqual({ thinking: { type: "disabled" } });
+  });
+
+  test("the window and the output limit follow a DeepSeek model", () => {
+    expect(contextBudget(undefined, "deepseek-v4.1-flash")).toBe(800_000);
+    expect(contextBudget(undefined, "gpt-5.5")).toBe(90_000);
+    // An explicit value in config.json always wins.
+    expect(contextBudget(120_000, "deepseek-chat")).toBe(120_000);
+    expect(outputBudget("https://api.deepseek.com/v1")).toBe(262_144);
+    expect(outputBudget("https://api.siliconflow.com/v1")).toBe(32_768);
+  });
+
+  test("reasoning levels: DeepSeek takes them all, MiMo only on/off", () => {
+    expect(reasoningOptions("https://api.deepseek.com/v1")).toContain("max");
+    expect(reasoningOptions("https://xiaomimimo.com/v1")).toEqual(["none", "high"]);
+  });
+
+  test("a gateway that rejects thinking is retried without it, not failed", async () => {
+    const seen: { thinking?: unknown }[] = [];
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(req) {
+        const body = (await req.json()) as { thinking?: unknown };
+        seen.push(body);
+        if (body.thinking) {
+          return new Response(JSON.stringify({ error: { message: "Unsupported parameter: thinking" } }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return new Response(sseChunk({ content: "ok" }, "stop") + "data: [DONE]\n\n", {
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      },
+    });
+    try {
+      const events: StreamEvent[] = [];
+      for await (const ev of streamChat({
+        config: { baseURL: `http://127.0.0.1:${server.port}/v1`, apiKey: "k", model: "deepseek-v4.1-flash", reasoning: "high", mcpServers: {} },
+        messages: [{ role: "user", content: "oi" }],
+        tools: [],
+        reasoning: "high",
+        executeTool: async () => ({ result: "", isError: false }),
+      })) {
+        events.push(ev);
+      }
+      expect(seen.length).toEqual(2);
+      expect(seen[0]?.thinking).toBeDefined();
+      expect(seen[1]?.thinking).toBeUndefined();
+      expect(doneOf(events).content).toBe("ok");
+    } finally {
+      server.stop(true);
+    }
+  });
+});

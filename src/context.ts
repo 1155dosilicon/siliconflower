@@ -4,6 +4,7 @@ import { ensureDir, getGlobalDataDir } from "./fs-util.js";
 import type { ChatMessage, TodoItem } from "./types.js";
 import { log } from "./logger.js";
 import { isToolMediaMessage } from "./services/media.js";
+import { isDeepSeekModel } from "./reasoning.js";
 
 function outputDir(): string {
   return join(getGlobalDataDir(), "outputs");
@@ -52,15 +53,23 @@ const WIDE_CHAR_START = 0x250;
 export const CONTEXT_TOKEN_BUDGET = 90_000;
 export const MIN_CONTEXT_TOKENS = 8_000;
 export const MAX_CONTEXT_TOKENS = 2_000_000;
+/**
+ * Default when the model is a DeepSeek V4 one: its window is 1M and the output cap is 256K, so
+ * the history may take 800K. A 90K request would make the history compact itself constantly, and
+ * every compaction changes the prompt prefix: DeepSeek's disk cache only hits a request that
+ * reuses a prefix whole (api-docs.deepseek.com/guides/kv_cache).
+ */
+export const DEEPSEEK_CONTEXT_TOKEN_BUDGET = 800_000;
 
 /** `contextTokens` of config.json, bounded; the default when absent or not a number. */
-export function contextBudget(value: unknown): number {
+export function contextBudget(value: unknown, model = ""): number {
   const n = Number(value);
   return value !== undefined && value !== null && Number.isFinite(n)
     ? Math.min(MAX_CONTEXT_TOKENS, Math.max(MIN_CONTEXT_TOKENS, Math.floor(n)))
-    : CONTEXT_TOKEN_BUDGET;
+    : isDeepSeekModel(model)
+      ? DEEPSEEK_CONTEXT_TOKEN_BUDGET
+      : CONTEXT_TOKEN_BUDGET;
 }
-
 /**
  * Estimates token count for text.
  *
@@ -166,8 +175,10 @@ const MAX_SHRUNK_ITEMS = 20;
 const MAX_SHRUNK_DEPTH = 3;
 
 export interface CompressOptions {
-  /** Xiaomi MiMo requires reasoning_content on the assistant message that precedes tool results. */
+  /** MiMo: the assistant message that precedes tool results keeps its reasoning. */
   keepToolCallReasoning?: boolean;
+  /** DeepSeek: every assistant message keeps its reasoning, tool call or not. */
+  keepAssistantReasoning?: boolean;
   /** Current plan (`todowrite`): it is the one thing the model cannot rebuild from the files. */
   plan?: TodoItem[];
 }
@@ -342,6 +353,8 @@ export function compressHistory(messages: ChatMessage[], maxTokens = CONTEXT_TOK
     return messages;
   }
   const keepsReasoning = (message: ChatMessage) => Boolean(opts.keepToolCallReasoning && message.toolCalls?.length);
+  // DeepSeek accepts a new request only if every assistant message still carries its reasoning.
+  const keepsEveryReasoning = (message: ChatMessage) => Boolean(opts.keepAssistantReasoning && message.role === "assistant");
 
   // Preserve message ordering/protocol while progressively reducing oversized content.
   const KEEP_RECENT = 20;
@@ -363,7 +376,7 @@ export function compressHistory(messages: ChatMessage[], maxTokens = CONTEXT_TOK
       return {
         ...msg,
         content: msg.content.slice(0, 1000) + `\n... [Resposta antiga reduzida]`,
-        reasoning: keepsReasoning(msg) ? msg.reasoning : undefined,
+        reasoning: keepsReasoning(msg) || keepsEveryReasoning(msg) ? msg.reasoning : undefined,
       };
     }
     return msg;
@@ -375,7 +388,7 @@ export function compressHistory(messages: ChatMessage[], maxTokens = CONTEXT_TOK
   // Remove reasoning first; it is useful for display but not required for protocol continuity
   // (except on MiMo tool calls, where it stays, shortened).
   for (const message of result) {
-    message.reasoning = keepsReasoning(message) && message.reasoning !== undefined
+    message.reasoning = (keepsEveryReasoning(message) || keepsReasoning(message)) && message.reasoning !== undefined
       ? shorten(message.reasoning, KEPT_REASONING_CHARS, "... [reduzido]")
       : undefined;
   }

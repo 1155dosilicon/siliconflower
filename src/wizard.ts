@@ -122,6 +122,8 @@ export async function runSetup(existing: AppConfig | null): Promise<AppConfig> {
     system: system?.trim() || undefined,
     mcpServers,
     hooks: existing?.hooks,
+    // Left out when the file has none: the default follows the model (see context.ts).
+    contextTokens: existing?.contextTokens,
   };
 
   await saveConfig(config);
