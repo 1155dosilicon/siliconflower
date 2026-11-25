@@ -6,6 +6,8 @@ Todas as mudanças relevantes ficam registradas aqui. O formato segue o
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-11-25
+
 ### Corrigido
 - A interface da conversa não pisca nem pula mais durante o streaming: a resposta em andamento atualiza o Markdown bloco a bloco em vez de reconstruir o DOM inteiro a cada frame, o indicador de atividade permanece montado entre chamadas de ferramentas, os controles e estatísticas do rodapé ficam em linhas fixas sem quebrar de altura, a inserção de cards de ferramentas e o botão "Ir para o fim" não competem mais com o auto-scroll, e o painel de tarefas só redesenha quando a lista muda (`src/gui/client/`).
 
