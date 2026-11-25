@@ -1,5 +1,6 @@
-# Pushing a tag vX.Y.Z builds the agent and the desktop app on each system and attaches
-# them to a draft release. Review the draft and publish it by hand.
+# Pushing a tag vX.Y.Z builds the agent and the desktop app on each system and publishes
+# the release with them. Publishing straight away keeps one release per tag: a draft left
+# behind invites someone to publish a second, empty release on the same tag.
 name: Release
 
 on:
@@ -81,6 +82,7 @@ jobs:
         with:
           # Without a name the release is titled with the tag ("v0.16.0").
           name: Siliconflower ${{ steps.version.outputs.version }}
-          draft: true
+          draft: false
+          make_latest: true
           body_path: release-notes.md
           files: upload/*
